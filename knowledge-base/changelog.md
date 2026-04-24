@@ -1,5 +1,40 @@
 # Changelog
 
+## 2026-04-24 — Code Review Fixes: Error Handling + Schema Sync + DRY Cleanup
+**What**: Added error handling to ALL DB write operations, centralized `esc()` into helpers.js, synced SQL schema with live database
+**Why**: Code review found silent failures on DB errors, duplicate code in 10 files, and schema file was missing 8+ columns & 1 table
+**Files Changed**: ALL 12 page files, `helpers.js`, `supabase-schema.sql`
+
+### Error Handling
+- Created `dbOp()` wrapper in helpers.js — catches errors, shows toast notification, logs to console
+- Wrapped every `db.insert()`, `db.update()`, `db.delete()` call across all pages
+- Save buttons re-enable on failure so users can retry
+
+### DRY Cleanup
+- Removed 10 duplicate `esc()` / `escapeHtml()` function definitions
+- Now exported from `helpers.js` as `esc` and `escapeHtml` (alias)
+
+### Schema Sync (supabase-schema.sql)
+- Added `parties.amc_active`, `parties.amc_day`, `parties.amc_rate`, `parties.custom_category_rates`
+- Added `sales.payment_method`, `sales.amount_received`, `sales.expected_payment_date`
+- Added `payment_followups` table (12 columns)
+- Added seller read access RLS for `parties`, `sales`, `payment_followups`
+- Added seller insert policy for `payment_followups`
+
+---
+
+## 2026-04-24 — Category-Based Pricing (Replaces Per-Product Pricing)
+**What**: Pricing is now set per-category, not per-product. Set "Diffuser Oil = ₹1500" and ALL oil fragrances auto-use ₹1500.
+**Why**: Clients change fragrances monthly but the rate stays the same for the category
+**Files Changed**: `parties.js`, `sales.js`
+
+### How It Works
+- Party modal: checkboxes for each category with rate input
+- Sales modal: looks up product's `category_id` against party's `custom_category_rates` JSONB
+- `custom_category_rates` format: `{"4": 1500, "3": 350}` (category_id → price)
+
+---
+
 ## 2026-04-24 — Per-Party Custom Product Pricing
 **What**: Each party can have custom AMC rate + custom product prices. Admin picks which products a party uses and sets individual rates.
 **Why**: Different clients get different rates — not all parties use all products
