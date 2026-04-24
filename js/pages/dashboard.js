@@ -91,6 +91,16 @@ export async function renderDashboard(body, header) {
     <div style="margin-top:20px;">
       <div class="card">
         <div class="card-header">
+          <h3><i class="fas fa-money-bill-wave" style="color:var(--red);margin-right:8px;"></i>Payment Reminders</h3>
+          <button class="btn btn-sm btn-secondary" onclick="window.navigateTo('collections')">View All</button>
+        </div>
+        <div class="card-body" id="payment-reminders"></div>
+      </div>
+    </div>
+
+    <div style="margin-top:20px;">
+      <div class="card">
+        <div class="card-header">
           <h3><i class="fas fa-history" style="color:var(--blue);margin-right:8px;"></i>Recent Activity</h3>
         </div>
         <div class="card-body" id="recent-activity"></div>
@@ -142,6 +152,42 @@ export async function renderDashboard(body, header) {
 
   // Recent activity
   const recentEl = document.getElementById('recent-activity');
+
+  // Payment reminders
+  const payRemEl = document.getElementById('payment-reminders');
+  const pendingSales = sales.filter(s => s.payment_status === 'pending' || s.payment_status === 'partial');
+  const overdueSales = pendingSales.filter(s => s.expected_payment_date && daysUntil(s.expected_payment_date) < 0);
+  const dueSoonSales = pendingSales.filter(s => s.expected_payment_date && daysUntil(s.expected_payment_date) >= 0 && daysUntil(s.expected_payment_date) <= 7);
+  const noDateSales = pendingSales.filter(s => !s.expected_payment_date);
+  const urgentPayments = [...overdueSales, ...dueSoonSales, ...noDateSales].slice(0, 6);
+  const { data: allParties } = await db.getAll('parties');
+  const partyNameMap = Object.fromEntries(allParties.map(p => [p.id, p.name]));
+
+  if (urgentPayments.length === 0) {
+    payRemEl.innerHTML = '<div class="empty-state" style="padding:20px;"><i class="fas fa-check-circle" style="font-size:1.5rem;color:var(--green);"></i><p style="color:var(--text-secondary);margin-top:8px;">All payments collected!</p></div>';
+  } else {
+    const { data: allProducts } = await db.getAll('products');
+    payRemEl.innerHTML = '<div class="alert-list">' + urgentPayments.map(s => {
+      const pName = partyNameMap[s.party_id] || 'Walk-in';
+      const balance = (s.total_amount || 0) - (s.amount_received || 0);
+      const isOverdue = s.expected_payment_date && daysUntil(s.expected_payment_date) < 0;
+      const isDueSoon = s.expected_payment_date && daysUntil(s.expected_payment_date) >= 0 && daysUntil(s.expected_payment_date) <= 3;
+      const cls = isOverdue ? 'danger' : isDueSoon ? 'warning' : '';
+      const dateLabel = s.expected_payment_date
+        ? (isOverdue ? `⚠ ${Math.abs(daysUntil(s.expected_payment_date))} days overdue` : `Due: ${s.expected_payment_date}`)
+        : 'No due date set';
+      return `<div class="alert-item ${cls}">
+        <i class="fas ${isOverdue ? 'fa-exclamation-circle' : 'fa-clock'}"></i>
+        <div style="flex:1;">
+          <strong>${escapeHtml(pName)}</strong>
+          <div style="font-size:0.75rem;opacity:0.8;">${dateLabel} · Balance: <strong style="color:var(--red);">${formatCurrency(balance)}</strong></div>
+        </div>
+        <button class="btn btn-sm btn-secondary" onclick="window.navigateTo('collections')">Collect</button>
+      </div>`;
+    }).join('') + '</div>';
+  }
+
+  // Recent activity - continued
   const { data: txns } = await db.getAll('inventory_transactions', { orderBy: ['created_at', 'desc'] });
   const recent = txns.slice(0, 8);
   if (recent.length === 0) {

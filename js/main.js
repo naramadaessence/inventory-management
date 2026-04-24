@@ -4,6 +4,7 @@ import { renderDashboard } from './pages/dashboard.js';
 import { renderProducts } from './pages/products.js';
 import { renderDailyOps } from './pages/daily-operations.js';
 import { renderSales } from './pages/sales.js';
+import { renderCollections } from './pages/collections.js';
 import { renderParties } from './pages/parties.js';
 import { renderRentals } from './pages/rentals.js';
 import { renderDamageLoss } from './pages/damage-loss.js';
@@ -26,6 +27,7 @@ const adminNav = [
   { id: 'inventory-log', icon: 'fa-list-check', label: 'Inventory Log' },
   { section: 'Business' },
   { id: 'sales', icon: 'fa-indian-rupee-sign', label: 'Sales' },
+  { id: 'collections', icon: 'fa-money-bill-wave', label: 'Collections' },
   { id: 'parties', icon: 'fa-users', label: 'Parties' },
   { id: 'rentals', icon: 'fa-handshake', label: 'Rentals' },
   { section: 'Tracking' },
@@ -148,6 +150,7 @@ function navigateTo(page) {
     'products': () => renderProducts(body, header),
     'daily-ops': () => renderDailyOps(body, header),
     'sales': () => renderSales(body, header),
+    'collections': () => renderCollections(body, header),
     'parties': () => renderParties(body, header),
     'rentals': () => renderRentals(body, header),
     'damage-loss': () => renderDamageLoss(body, header),

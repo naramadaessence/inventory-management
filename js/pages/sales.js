@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatDateTime, formatDate, showToast, createModal } from '../utils/helpers.js';
+import { formatCurrency, formatDateTime, formatDate, showToast, createModal, daysUntil } from '../utils/helpers.js';
 
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
 
@@ -22,13 +22,17 @@ export async function renderSales(body, header) {
   const partyMap = Object.fromEntries(parties.map(p => [p.id, p]));
   const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
 
+  const totalRevenue = sales.reduce((s, r) => s + (r.total_amount || 0), 0);
+  const totalReceived = sales.reduce((s, r) => s + (r.amount_received || 0), 0);
+  const totalPending = totalRevenue - totalReceived;
+
   body.innerHTML = `
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-icon green"><i class="fas fa-indian-rupee-sign"></i></div>
         <div class="stat-info">
           <div class="stat-label">Total Revenue</div>
-          <div class="stat-value">${formatCurrency(sales.reduce((s, r) => s + (r.total_amount || 0), 0))}</div>
+          <div class="stat-value">${formatCurrency(totalRevenue)}</div>
         </div>
       </div>
       <div class="stat-card">
@@ -38,20 +42,31 @@ export async function renderSales(body, header) {
           <div class="stat-value">${sales.length}</div>
         </div>
       </div>
+      <div class="stat-card">
+        <div class="stat-icon amber"><i class="fas fa-clock"></i></div>
+        <div class="stat-info">
+          <div class="stat-label">Pending Amount</div>
+          <div class="stat-value">${formatCurrency(totalPending)}</div>
+        </div>
+      </div>
     </div>
     ${sales.length === 0 ? '<div class="empty-state"><i class="fas fa-receipt"></i><h3>No sales recorded</h3><p>Click "Record Sale" to add your first sale.</p></div>' : `
     <div class="table-wrapper"><table class="data-table">
-      <thead><tr><th>Date</th><th>Party</th><th>Product</th><th>Qty</th><th>Amount</th><th>Payment</th></tr></thead>
+      <thead><tr><th>Date</th><th>Party</th><th>Product</th><th>Qty</th><th>Amount</th><th>Received</th><th>Payment</th><th>Due Date</th></tr></thead>
       <tbody>${sales.map(s => {
         const party = partyMap[s.party_id];
         const prod = prodMap[s.product_id];
+        const balance = (s.total_amount || 0) - (s.amount_received || 0);
+        const isOverdue = s.expected_payment_date && s.payment_status !== 'paid' && daysUntil(s.expected_payment_date) < 0;
         return `<tr>
           <td>${formatDate(s.sale_date || s.created_at)}</td>
           <td><strong>${esc(party?.name || 'Walk-in')}</strong></td>
           <td>${esc(prod?.name || 'Unknown')}</td>
           <td>${s.quantity}${prod?.type === 'liquid' ? 'g' : ' pcs'}</td>
           <td style="font-weight:600;color:var(--green);">${formatCurrency(s.total_amount)}</td>
+          <td>${s.amount_received ? formatCurrency(s.amount_received) : '—'}</td>
           <td><span class="badge-status ${s.payment_status === 'paid' ? 'green' : s.payment_status === 'partial' ? 'amber' : 'red'}">${esc(s.payment_status || 'pending')}</span></td>
+          <td style="${isOverdue ? 'color:var(--red);font-weight:600;' : ''}">${s.expected_payment_date ? formatDate(s.expected_payment_date) : '—'}${isOverdue ? ' ⚠' : ''}</td>
         </tr>`;
       }).join('')}</tbody>
     </table></div>`}
@@ -98,13 +113,35 @@ function openSaleModal(parties, products, body, header) {
         <input class="form-input" type="text" id="sale-total" value="₹0" readonly style="font-weight:700;color:var(--green);" />
       </div>
     </div>
-    <div class="form-group">
-      <label class="form-label">Payment Status</label>
-      <select class="form-select" id="sale-payment">
-        <option value="paid">Paid</option>
-        <option value="partial">Partial</option>
-        <option value="pending">Pending</option>
-      </select>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Payment Status</label>
+        <select class="form-select" id="sale-payment">
+          <option value="paid">Paid</option>
+          <option value="partial">Partial</option>
+          <option value="pending">Pending</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Payment Method</label>
+        <select class="form-select" id="sale-method">
+          <option value="">— Select —</option>
+          <option value="cash">Cash</option>
+          <option value="upi">UPI / Online</option>
+          <option value="bank_transfer">Bank Transfer</option>
+          <option value="cheque">Cheque</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row" id="pending-fields" style="display:none;">
+      <div class="form-group">
+        <label class="form-label">Amount Received (₹)</label>
+        <input class="form-input" type="number" id="sale-received" value="0" min="0" step="0.01" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Expected Payment Date</label>
+        <input class="form-input" type="date" id="sale-expected-date" />
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">Notes</label>
@@ -120,6 +157,12 @@ function openSaleModal(parties, products, body, header) {
     const price = parseFloat(document.getElementById('sale-price').value) || 0;
     document.getElementById('sale-total').value = formatCurrency(qty * price);
   }
+
+  // Show/hide pending fields based on payment status
+  document.getElementById('sale-payment').addEventListener('change', (e) => {
+    const pendingFields = document.getElementById('pending-fields');
+    pendingFields.style.display = (e.target.value === 'pending' || e.target.value === 'partial') ? 'flex' : 'none';
+  });
 
   document.getElementById('sale-product').addEventListener('change', (e) => {
     const opt = e.target.selectedOptions[0];
@@ -137,6 +180,10 @@ function openSaleModal(parties, products, body, header) {
     const qty = parseFloat(document.getElementById('sale-qty').value);
     const price = parseFloat(document.getElementById('sale-price').value);
     const partyId = document.getElementById('sale-party').value ? parseInt(document.getElementById('sale-party').value) : null;
+    const paymentStatus = document.getElementById('sale-payment').value;
+    const paymentMethod = document.getElementById('sale-method').value || null;
+    const amountReceived = paymentStatus === 'paid' ? qty * price : parseFloat(document.getElementById('sale-received').value) || 0;
+    const expectedDate = document.getElementById('sale-expected-date')?.value || null;
 
     if (!productId || isNaN(qty) || qty <= 0 || isNaN(price) || price < 0) {
       showToast('Please fill in all required fields with valid values', 'error');
@@ -152,7 +199,10 @@ function openSaleModal(parties, products, body, header) {
       quantity: qty,
       unit_price: price,
       total_amount: qty * price,
-      payment_status: document.getElementById('sale-payment').value,
+      payment_status: paymentStatus,
+      payment_method: paymentMethod,
+      amount_received: amountReceived,
+      expected_payment_date: expectedDate,
       sale_date: document.getElementById('sale-date').value,
       notes: document.getElementById('sale-notes').value.trim(),
       recorded_by: auth.currentUser.id
