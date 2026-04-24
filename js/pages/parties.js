@@ -116,24 +116,14 @@ function openPartyModal(party, body, header, products) {
           <i class="fas fa-tags" style="color:var(--blue);"></i>
           <strong style="font-size:0.9rem;">Custom Product Rates</strong>
         </div>
-        <span style="font-size:0.75rem;color:var(--text-muted);">Leave blank = default price</span>
       </div>
-      <div style="max-height:200px;overflow-y:auto;" id="product-rates-list">
-        ${products.filter(p => p.is_active).map(p => {
-          const customRate = customRates[String(p.id)];
-          const hasCustom = customRate !== undefined && customRate !== null;
-          return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);">
-            <div style="flex:1;font-size:0.8rem;">
-              <strong>${esc(p.name)}</strong>
-              <div style="font-size:0.7rem;color:var(--text-muted);">Default: ₹${Number(p.unit_price).toLocaleString('en-IN')}${p.type === 'liquid' ? '/g' : '/unit'}</div>
-            </div>
-            <input class="form-input product-rate-input" data-pid="${p.id}" type="number" min="0" step="0.01"
-              value="${hasCustom ? customRate : ''}"
-              placeholder="₹${Number(p.unit_price).toLocaleString('en-IN')}"
-              style="width:110px;padding:6px 8px;font-size:0.8rem;${hasCustom ? 'border-color:var(--primary);background:var(--primary-soft);' : ''}" />
-          </div>`;
-        }).join('')}
+      <div style="display:flex;gap:8px;margin-bottom:10px;">
+        <select class="form-select" id="add-product-select" style="flex:1;font-size:0.8rem;">
+          <option value="">— Add a product —</option>
+        </select>
+        <button type="button" class="btn btn-sm btn-primary" id="add-product-btn" style="white-space:nowrap;"><i class="fas fa-plus"></i> Add</button>
       </div>
+      <div id="product-rates-list"></div>
     </div>
 
     <div class="form-group">
@@ -143,6 +133,58 @@ function openPartyModal(party, body, header, products) {
   `;
   const footer = `<button class="btn btn-secondary" id="party-cancel">Cancel</button><button class="btn btn-primary" id="party-save"><i class="fas fa-save"></i> ${isEdit ? 'Update' : 'Create'}</button>`;
   const { close } = createModal(isEdit ? 'Edit Party' : 'Add Party', content, { footer });
+
+  // ── Dynamic product rate picker ──
+  const addedProducts = new Set();
+  const activeProducts = products.filter(p => p.is_active);
+  const prodMapLocal = Object.fromEntries(activeProducts.map(p => [String(p.id), p]));
+
+  function refreshProductDropdown() {
+    const sel = document.getElementById('add-product-select');
+    const available = activeProducts.filter(p => !addedProducts.has(String(p.id)));
+    sel.innerHTML = `<option value="">— Add a product (${available.length} available) —</option>` +
+      available.map(p => `<option value="${p.id}">${esc(p.name)} (Default: ₹${Number(p.unit_price).toLocaleString('en-IN')})</option>`).join('');
+  }
+
+  function renderRateRow(pid, rate) {
+    const p = prodMapLocal[String(pid)];
+    if (!p) return '';
+    return `<div class="rate-row" data-pid="${pid}" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
+      <div style="flex:1;font-size:0.8rem;">
+        <strong>${esc(p.name)}</strong>
+        <div style="font-size:0.7rem;color:var(--text-muted);">Default: ₹${Number(p.unit_price).toLocaleString('en-IN')}${p.type === 'liquid' ? '/g' : '/unit'}</div>
+      </div>
+      <input class="form-input product-rate-input" data-pid="${pid}" type="number" min="0" step="0.01"
+        value="${rate !== null && rate !== undefined ? rate : p.unit_price}"
+        style="width:100px;padding:6px 8px;font-size:0.8rem;border-color:var(--primary);background:var(--primary-soft);" />
+      <button type="button" class="btn btn-sm btn-ghost remove-rate-btn" data-pid="${pid}" style="color:var(--red);padding:4px 8px;" title="Remove"><i class="fas fa-times"></i></button>
+    </div>`;
+  }
+
+  function addProductRate(pid, rate) {
+    addedProducts.add(String(pid));
+    const list = document.getElementById('product-rates-list');
+    list.insertAdjacentHTML('beforeend', renderRateRow(pid, rate));
+    list.querySelector(`.remove-rate-btn[data-pid="${pid}"]`).addEventListener('click', () => {
+      list.querySelector(`.rate-row[data-pid="${pid}"]`).remove();
+      addedProducts.delete(String(pid));
+      refreshProductDropdown();
+    });
+    refreshProductDropdown();
+  }
+
+  // Pre-populate existing custom rates
+  Object.entries(customRates).forEach(([pid, rate]) => {
+    if (prodMapLocal[pid]) addProductRate(pid, rate);
+  });
+  refreshProductDropdown();
+
+  document.getElementById('add-product-btn').addEventListener('click', () => {
+    const sel = document.getElementById('add-product-select');
+    const pid = sel.value;
+    if (!pid) { showToast('Select a product first', 'error'); return; }
+    addProductRate(pid, null);
+  });
 
   document.getElementById('party-cancel').onclick = close;
   document.getElementById('party-save').onclick = async () => {
