@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-04-24 — Issue → Return → Admin Approval System
+**What**: Complete rewrite of Daily Operations into a 4-step approval workflow
+**Why**: Stock should only be deducted/restored with admin confirmation. Sellers need to track their own field stock.
+**Files Changed**: `daily-operations.js`, `dashboard.js`, `main.js`, `supabase-schema.sql`
+
+### Flow
+1. **Seller requests stock** → status = `pending_issue` → stock NOT deducted
+2. **Admin approves issue** → stock deducted → status = `checked_out`
+3. **Seller submits return** (with weights) → status = `pending_approval` → stock NOT restored
+4. **Admin approves return** → stock restored → status = `checked_in`
+
+### Key Changes
+- Sellers can now access Daily Operations page (see own sessions, request stock, submit returns)
+- Admin-created issues are auto-approved (immediate stock deduction)
+- New `pending_issue` and `pending_approval` statuses in `checkout_sessions`
+- New `approved_by` UUID and `approved_at` TIMESTAMPTZ audit columns
+- Dashboard shows "Pending Approvals" card with counts + Review buttons
+- Flagging available at both issue and return stages
+
+### DB Migration (run in Supabase SQL Editor)
+```sql
+ALTER TABLE checkout_sessions DROP CONSTRAINT IF EXISTS checkout_sessions_status_check;
+ALTER TABLE checkout_sessions ADD CONSTRAINT checkout_sessions_status_check 
+  CHECK (status IN ('pending_issue', 'checked_out', 'pending_approval', 'checked_in', 'flagged'));
+ALTER TABLE checkout_sessions ADD COLUMN IF NOT EXISTS approved_by UUID REFERENCES profiles(id);
+ALTER TABLE checkout_sessions ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
+```
+
+---
+
 ## 2026-04-24 — Code Review Fixes: Error Handling + Schema Sync + DRY Cleanup
 **What**: Added error handling to ALL DB write operations, centralized `esc()` into helpers.js, synced SQL schema with live database
 **Why**: Code review found silent failures on DB errors, duplicate code in 10 files, and schema file was missing 8+ columns & 1 table
