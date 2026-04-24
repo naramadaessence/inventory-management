@@ -1,7 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatStock, formatDateTime, showToast, createModal } from '../utils/helpers.js';
-
-function esc(str) { if (!str) return ''; const d = document.createElement('div'); d.textContent = String(str); return d.innerHTML; }
+import { formatStock, formatDateTime, showToast, createModal, esc, dbOp } from '../utils/helpers.js';
 
 export async function renderDailyOps(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
@@ -203,29 +201,28 @@ async function openCheckoutModal(body) {
     }
 
     // Create session
-    const session = await db.insert('checkout_sessions', {
+    const session = await dbOp(db.insert('checkout_sessions', {
       seller_id: sellerId,
       checkout_time: new Date().toISOString(),
       checkin_time: null,
       status: 'checked_out',
       notes: ''
-    });
+    }), 'Failed to create checkout session');
+    if (!session) return;
 
     // Create items and deduct stock atomically
     for (const item of checkoutItems) {
-      await db.insert('checkout_items', {
+      await dbOp(db.insert('checkout_items', {
         session_id: session.data.id,
         product_id: item.product_id,
         checkout_quantity: item.quantity,
         checkin_quantity: null,
         is_flagged: false,
         flag_reason: null
-      });
-      // Deduct stock
+      }), 'Failed to add checkout item');
       const newStock = item.product.current_stock - item.quantity;
-      await db.update('products', item.product_id, { current_stock: Math.max(0, newStock) });
-      // Log transaction
-      await db.insert('inventory_transactions', {
+      await dbOp(db.update('products', item.product_id, { current_stock: Math.max(0, newStock) }), 'Failed to update stock');
+      await dbOp(db.insert('inventory_transactions', {
         product_id: item.product_id,
         type: 'checkout',
         quantity: -item.quantity,
@@ -233,7 +230,7 @@ async function openCheckoutModal(body) {
         reference_id: session.data.id,
         performed_by: auth.currentUser.id,
         notes: `Checkout to seller`
-      });
+      }), 'Failed to log transaction');
     }
 
     showToast('Checkout created successfully', 'success');
@@ -301,16 +298,14 @@ async function openCheckinModal(sessionId, body) {
 
     // Process each item
     for (const rd of returnData) {
-      await db.update('checkout_items', rd.itemId, {
+      await dbOp(db.update('checkout_items', rd.itemId, {
         checkin_quantity: rd.returnQty,
         is_flagged: rd.flagged,
         flag_reason: rd.flagged ? `Consumed ${rd.consumed} exceeds threshold ${rd.prod.max_daily_consumption}` : null
-      });
-      // Add returned stock back
+      }), 'Failed to update checkout item');
       const newStock = (rd.prod.current_stock || 0) + rd.returnQty;
-      await db.update('products', rd.prod.id, { current_stock: newStock });
-      // Log transaction
-      await db.insert('inventory_transactions', {
+      await dbOp(db.update('products', rd.prod.id, { current_stock: newStock }), 'Failed to update stock');
+      await dbOp(db.insert('inventory_transactions', {
         product_id: rd.prod.id,
         type: 'checkin',
         quantity: rd.returnQty,
@@ -318,15 +313,15 @@ async function openCheckinModal(sessionId, body) {
         reference_id: sessionId,
         performed_by: auth.currentUser.id,
         notes: rd.flagged ? `FLAGGED: consumed ${rd.consumed}` : `Normal return`
-      });
+      }), 'Failed to log transaction');
     }
 
     // Update session status
-    await db.update('checkout_sessions', sessionId, {
+    await dbOp(db.update('checkout_sessions', sessionId, {
       checkin_time: new Date().toISOString(),
       status: anyFlagged ? 'flagged' : 'checked_in',
       notes: document.getElementById('ci-notes').value.trim()
-    });
+    }), 'Failed to update session');
 
     showToast(anyFlagged ? 'Checked in with flags — review consumption' : 'Checked in successfully', anyFlagged ? 'warning' : 'success');
     close();

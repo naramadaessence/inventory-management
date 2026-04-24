@@ -1,7 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatDateTime, formatStock, showToast } from '../utils/helpers.js';
-
-function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+import { formatDateTime, formatStock, showToast, esc } from '../utils/helpers.js';
 
 export async function renderInventoryLog(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }

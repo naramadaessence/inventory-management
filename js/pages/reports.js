@@ -1,8 +1,6 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatStock, formatDate, getDateRange, showToast } from '../utils/helpers.js';
+import { formatCurrency, formatStock, formatDate, getDateRange, showToast, esc } from '../utils/helpers.js';
 import Chart from 'chart.js/auto';
-
-function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
 
 let chartInstances = [];
 function destroyCharts() { chartInstances.forEach(c => c.destroy()); chartInstances = []; }

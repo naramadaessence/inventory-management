@@ -1,7 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatDateTime, formatDate, showToast, createModal, daysUntil } from '../utils/helpers.js';
-
-function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+import { formatCurrency, formatDateTime, formatDate, showToast, createModal, daysUntil, esc, dbOp } from '../utils/helpers.js';
 
 export async function renderSales(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
@@ -225,7 +223,7 @@ function openSaleModal(parties, products, body, header) {
     const prod = products.find(p => p.id === productId);
     if (qty > prod.current_stock) { showToast('Insufficient stock', 'error'); return; }
 
-    await db.insert('sales', {
+    const saleResult = await dbOp(db.insert('sales', {
       party_id: partyId,
       product_id: productId,
       quantity: qty,
@@ -238,17 +236,18 @@ function openSaleModal(parties, products, body, header) {
       sale_date: document.getElementById('sale-date').value,
       notes: document.getElementById('sale-notes').value.trim(),
       recorded_by: auth.currentUser.id
-    });
+    }), 'Failed to record sale');
+    if (!saleResult) return;
 
-    await db.update('products', productId, { current_stock: prod.current_stock - qty });
-    await db.insert('inventory_transactions', {
+    await dbOp(db.update('products', productId, { current_stock: prod.current_stock - qty }), 'Failed to update stock');
+    await dbOp(db.insert('inventory_transactions', {
       product_id: productId,
       type: 'sale',
       quantity: -qty,
       reference_type: 'sale',
       performed_by: auth.currentUser.id,
       notes: `Sale to ${partyId ? 'party' : 'walk-in'}`
-    });
+    }), 'Failed to log transaction');
 
     showToast('Sale recorded', 'success');
     close();

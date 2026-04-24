@@ -1,7 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatDate, formatDateTime, showToast, createModal, daysUntil } from '../utils/helpers.js';
-
-function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+import { formatCurrency, formatDate, formatDateTime, showToast, createModal, daysUntil, esc, dbOp } from '../utils/helpers.js';
 
 export async function renderCollections(body, header) {
   const isAdmin = auth.isAdmin();
@@ -365,7 +363,7 @@ export async function renderCollections(body, header) {
       saveBtn.disabled = true;
       saveBtn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div>';
 
-      await db.insert('payment_followups', {
+      const visitResult = await dbOp(db.insert('payment_followups', {
         sale_id: saleId ? parseInt(saleId) : null,
         party_id: parseInt(partyId),
         visited_by: userId,
@@ -375,7 +373,8 @@ export async function renderCollections(body, header) {
         amount_collected: amount,
         expected_payment_date: dueDate,
         notes
-      });
+      }), 'Failed to log visit');
+      if (!visitResult) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save"></i> Save Visit'; return; }
 
       if (saleId) {
         const sale = sales.find(s => s.id == saleId);
@@ -383,12 +382,12 @@ export async function renderCollections(body, header) {
           const newReceived = (sale.amount_received || 0) + amount;
           const newStatus = status === 'paid' || newReceived >= sale.total_amount ? 'paid'
             : (status === 'partial' || newReceived > 0) ? 'partial' : 'pending';
-          await db.update('sales', sale.id, {
+          await dbOp(db.update('sales', sale.id, {
             payment_status: newStatus,
             payment_method: method || sale.payment_method,
             amount_received: newReceived,
             expected_payment_date: dueDate || sale.expected_payment_date
-          });
+          }), 'Failed to update sale status');
         }
       }
 
@@ -475,21 +474,22 @@ export async function renderCollections(body, header) {
       saveBtn.disabled = true;
       saveBtn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div>';
 
-      await db.insert('payment_followups', {
+      const fuResult = await dbOp(db.insert('payment_followups', {
         sale_id: sale.id, party_id: sale.party_id, visited_by: userId,
         visit_date: new Date().toISOString(), status_update: status,
         payment_method: method || null, amount_collected: amount,
         expected_payment_date: expectedDate, notes
-      });
+      }), 'Failed to log followup');
+      if (!fuResult) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save"></i> Save'; return; }
 
       const newReceived = (sale.amount_received || 0) + amount;
       const newStatus = status === 'paid' || newReceived >= sale.total_amount ? 'paid'
         : (status === 'partial' || newReceived > 0) ? 'partial' : 'pending';
 
-      await db.update('sales', sale.id, {
+      await dbOp(db.update('sales', sale.id, {
         payment_status: newStatus, payment_method: method || sale.payment_method,
         amount_received: newReceived, expected_payment_date: expectedDate || sale.expected_payment_date
-      });
+      }), 'Failed to update sale');
 
       showToast(amount > 0 ? `${formatCurrency(amount)} collected!` : 'Payment status updated', 'success');
       close();

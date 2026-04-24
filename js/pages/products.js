@@ -1,7 +1,5 @@
 import { db, auth, supabase } from '../supabase.js';
-import { formatCurrency, formatStock, formatDate, showToast, createModal, debounce } from '../utils/helpers.js';
-
-function escapeHtml(str) { if (!str) return ''; const d = document.createElement('div'); d.textContent = String(str); return d.innerHTML; }
+import { formatCurrency, formatStock, formatDate, showToast, createModal, debounce, escapeHtml, dbOp } from '../utils/helpers.js';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 

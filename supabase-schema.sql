@@ -47,6 +47,10 @@ CREATE TABLE parties (
   phone TEXT,
   address TEXT,
   notes TEXT,
+  amc_active BOOLEAN DEFAULT false,
+  amc_day INTEGER CHECK (amc_day >= 1 AND amc_day <= 28),
+  amc_rate NUMERIC DEFAULT 0,
+  custom_category_rates JSONB,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -82,6 +86,9 @@ CREATE TABLE sales (
   unit_price DECIMAL(10,2) NOT NULL,
   total_amount DECIMAL(12,2) NOT NULL,
   payment_status TEXT DEFAULT 'pending' CHECK (payment_status IN ('paid', 'partial', 'pending')),
+  payment_method TEXT CHECK (payment_method IN ('cash', 'upi', 'bank_transfer', 'cheque')),
+  amount_received DECIMAL(12,2) DEFAULT 0,
+  expected_payment_date DATE,
   sale_date DATE NOT NULL DEFAULT CURRENT_DATE,
   notes TEXT,
   recorded_by UUID REFERENCES profiles(id),
@@ -139,6 +146,21 @@ CREATE TABLE stock_intakes (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 12. PAYMENT FOLLOWUPS (seller visit logs for collections)
+CREATE TABLE payment_followups (
+  id SERIAL PRIMARY KEY,
+  sale_id INTEGER REFERENCES sales(id),
+  party_id INTEGER REFERENCES parties(id),
+  visited_by UUID REFERENCES profiles(id),
+  visit_date TIMESTAMPTZ DEFAULT now(),
+  status_update TEXT,
+  payment_method TEXT,
+  amount_collected DECIMAL(12,2) DEFAULT 0,
+  expected_payment_date DATE,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- ============================================
 -- ROW LEVEL SECURITY (RLS)
 -- ============================================
@@ -173,8 +195,9 @@ CREATE POLICY "Admins manage categories" ON categories FOR ALL USING (is_admin()
 CREATE POLICY "Anyone reads products" ON products FOR SELECT USING (true);
 CREATE POLICY "Admins manage products" ON products FOR ALL USING (is_admin());
 
--- PARTIES: admins only
+-- PARTIES: admins full access, sellers can read
 CREATE POLICY "Admins manage parties" ON parties FOR ALL USING (is_admin());
+CREATE POLICY "Sellers read parties" ON parties FOR SELECT USING (true);
 
 -- CHECKOUT: sellers see own, admins see all
 CREATE POLICY "View own or admin sessions" ON checkout_sessions FOR SELECT USING (seller_id = auth.uid() OR is_admin());
@@ -184,12 +207,21 @@ CREATE POLICY "View own or admin items" ON checkout_items FOR SELECT USING (
 );
 CREATE POLICY "Admins manage items" ON checkout_items FOR ALL USING (is_admin());
 
--- SALES, RENTALS, DAMAGE, TRANSACTIONS, INTAKES: admins only
+-- SALES: admins full access, sellers can read
 CREATE POLICY "Admins manage sales" ON sales FOR ALL USING (is_admin());
+CREATE POLICY "Sellers read sales" ON sales FOR SELECT USING (true);
+
+-- RENTALS, DAMAGE, TRANSACTIONS, INTAKES: admins only
 CREATE POLICY "Admins manage rentals" ON rentals FOR ALL USING (is_admin());
 CREATE POLICY "Admins manage damage" ON damage_reports FOR ALL USING (is_admin());
 CREATE POLICY "Admins manage transactions" ON inventory_transactions FOR ALL USING (is_admin());
 CREATE POLICY "Admins manage intakes" ON stock_intakes FOR ALL USING (is_admin());
+
+-- PAYMENT FOLLOWUPS: admins full access, sellers can read and insert
+ALTER TABLE payment_followups ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Admins manage followups" ON payment_followups FOR ALL USING (is_admin());
+CREATE POLICY "Sellers read followups" ON payment_followups FOR SELECT USING (true);
+CREATE POLICY "Sellers insert followups" ON payment_followups FOR INSERT WITH CHECK (auth.uid() = visited_by);
 
 -- ============================================
 -- AUTO-CREATE PROFILE ON SIGNUP

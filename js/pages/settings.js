@@ -1,7 +1,5 @@
 import { db, auth, supabase } from '../supabase.js';
-import { showToast, createModal } from '../utils/helpers.js';
-
-function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+import { showToast, createModal, esc, dbOp } from '../utils/helpers.js';
 
 export async function renderSettings(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }

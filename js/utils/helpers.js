@@ -2,6 +2,33 @@
 // UTILITY HELPERS
 // ============================================
 
+export function esc(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = String(s);
+  return d.innerHTML;
+}
+
+// Alias for backward compatibility
+export const escapeHtml = esc;
+
+// Safe DB operation wrapper — shows toast on error, returns data or null
+export async function dbOp(promise, errorMsg = 'Operation failed') {
+  try {
+    const result = await promise;
+    if (result?.error) {
+      console.error(errorMsg, result.error);
+      showToast(errorMsg + ': ' + (result.error.message || 'Unknown error'), 'error');
+      return null;
+    }
+    return result;
+  } catch (err) {
+    console.error(errorMsg, err);
+    showToast(errorMsg + ': ' + (err.message || 'Network error'), 'error');
+    return null;
+  }
+}
+
 export function formatCurrency(amount) {
   return '₹' + Number(amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 }

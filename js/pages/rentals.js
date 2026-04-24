@@ -1,7 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatDate, formatDateTime, formatCurrency, showToast, createModal } from '../utils/helpers.js';
-
-function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+import { formatDate, formatDateTime, formatCurrency, showToast, createModal, esc, dbOp } from '../utils/helpers.js';
 
 export async function renderRentals(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
@@ -61,10 +59,10 @@ export async function renderRentals(body, header) {
     el.addEventListener('click', async () => {
       const rental = rentals.find(r => r.id == el.dataset.id);
       if (confirm('Mark this rental as returned?')) {
-        await db.update('rentals', rental.id, { status: 'returned', actual_return_date: new Date().toISOString() });
+        await dbOp(db.update('rentals', rental.id, { status: 'returned', actual_return_date: new Date().toISOString() }), 'Failed to update rental');
         const prod = prodMap[rental.product_id];
-        if (prod) await db.update('products', prod.id, { current_stock: (prod.current_stock || 0) + (rental.quantity || 1) });
-        await db.insert('inventory_transactions', { product_id: rental.product_id, type: 'rental_return', quantity: rental.quantity || 1, reference_type: 'rental', reference_id: rental.id, performed_by: auth.currentUser.id, notes: 'Rental returned' });
+        if (prod) await dbOp(db.update('products', prod.id, { current_stock: (prod.current_stock || 0) + (rental.quantity || 1) }), 'Failed to update stock');
+        await dbOp(db.insert('inventory_transactions', { product_id: rental.product_id, type: 'rental_return', quantity: rental.quantity || 1, reference_type: 'rental', reference_id: rental.id, performed_by: auth.currentUser.id, notes: 'Rental returned' }), 'Failed to log transaction');
         showToast('Rental marked as returned', 'success');
         renderRentals(body, header);
       }
@@ -122,7 +120,7 @@ function openRentalModal(parties, products, body, header) {
 
     if (qty > prod.current_stock) { showToast('Insufficient stock', 'error'); return; }
 
-    await db.insert('rentals', {
+    const rentalResult = await dbOp(db.insert('rentals', {
       product_id: productId, party_id: partyId, quantity: qty,
       rental_date: document.getElementById('rent-date').value,
       expected_return_date: document.getElementById('rent-return').value || null,
@@ -130,9 +128,10 @@ function openRentalModal(parties, products, body, header) {
       rent_amount: parseFloat(document.getElementById('rent-amount').value) || 0,
       status: 'active',
       notes: document.getElementById('rent-notes').value.trim()
-    });
-    await db.update('products', productId, { current_stock: prod.current_stock - qty });
-    await db.insert('inventory_transactions', { product_id: productId, type: 'rental_out', quantity: -qty, reference_type: 'rental', performed_by: auth.currentUser.id, notes: 'Rental out' });
+    }), 'Failed to create rental');
+    if (!rentalResult) return;
+    await dbOp(db.update('products', productId, { current_stock: prod.current_stock - qty }), 'Failed to update stock');
+    await dbOp(db.insert('inventory_transactions', { product_id: productId, type: 'rental_out', quantity: -qty, reference_type: 'rental', performed_by: auth.currentUser.id, notes: 'Rental out' }), 'Failed to log transaction');
 
     showToast('Rental created', 'success');
     close();

@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatStock, formatDateTime, daysUntil, showToast } from '../utils/helpers.js';
+import { formatCurrency, formatStock, formatDateTime, daysUntil, showToast, escapeHtml } from '../utils/helpers.js';
 
 export async function renderDashboard(body, header) {
   const isAdmin = auth.isAdmin();
@@ -294,11 +294,4 @@ async function renderSellerView(body) {
       </div>
     </div>
   `;
-}
-
-function escapeHtml(str) {
-  if (!str) return '';
-  const div = document.createElement('div');
-  div.textContent = String(str);
-  return div.innerHTML;
 }

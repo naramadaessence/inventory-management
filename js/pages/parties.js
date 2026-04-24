@@ -1,7 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatDate, formatCurrency, showToast, createModal } from '../utils/helpers.js';
-
-function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+import { formatDate, formatCurrency, showToast, createModal, esc, dbOp } from '../utils/helpers.js';
 
 function getOrdinal(n) {
   const s = ['th', 'st', 'nd', 'rd'];
@@ -198,8 +196,11 @@ function openPartyModal(party, body, header, products, categories) {
       amc_rate: amcRate,
       custom_category_rates: Object.keys(customCategoryRates).length > 0 ? customCategoryRates : null
     };
-    if (isEdit) { await db.update('parties', party.id, record); showToast('Party updated', 'success'); }
-    else { await db.insert('parties', record); showToast('Party added', 'success'); }
+    const result = isEdit
+      ? await dbOp(db.update('parties', party.id, record), 'Failed to update party')
+      : await dbOp(db.insert('parties', record), 'Failed to add party');
+    if (!result) return;
+    showToast(isEdit ? 'Party updated' : 'Party added', 'success');
     close();
     renderParties(body, header);
   };

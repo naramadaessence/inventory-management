@@ -1,7 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatDate, formatStock, showToast, createModal } from '../utils/helpers.js';
-
-function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+import { formatDate, formatStock, showToast, createModal, esc, dbOp } from '../utils/helpers.js';
 
 export async function renderDamageLoss(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
@@ -80,16 +78,17 @@ export async function renderDamageLoss(body, header) {
       if (isNaN(qty) || qty <= 0) { showToast('Valid quantity required', 'error'); return; }
 
       const prod = products.find(p => p.id === productId);
-      await db.insert('damage_reports', {
+      const dmgResult = await dbOp(db.insert('damage_reports', {
         product_id: productId,
         damage_type: document.getElementById('dmg-type').value,
         quantity: qty,
         reason,
         report_date: document.getElementById('dmg-date').value,
         reported_by: auth.currentUser.id
-      });
-      await db.update('products', productId, { current_stock: Math.max(0, (prod.current_stock || 0) - qty) });
-      await db.insert('inventory_transactions', { product_id: productId, type: 'damage', quantity: -qty, reference_type: 'damage_report', performed_by: auth.currentUser.id, notes: `${document.getElementById('dmg-type').value}: ${reason}` });
+      }), 'Failed to file report');
+      if (!dmgResult) return;
+      await dbOp(db.update('products', productId, { current_stock: Math.max(0, (prod.current_stock || 0) - qty) }), 'Failed to update stock');
+      await dbOp(db.insert('inventory_transactions', { product_id: productId, type: 'damage', quantity: -qty, reference_type: 'damage_report', performed_by: auth.currentUser.id, notes: `${document.getElementById('dmg-type').value}: ${reason}` }), 'Failed to log transaction');
 
       showToast('Damage report filed', 'warning');
       close();
