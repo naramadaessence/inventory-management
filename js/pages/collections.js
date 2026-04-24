@@ -13,7 +13,7 @@ export async function renderCollections(body, header) {
       <h1>Collections</h1>
       <div class="page-header-subtitle">${isAdmin ? 'All pending payments & follow-ups' : 'Log & track your payment visits'}</div>
     </div>
-    <button class="btn btn-primary" id="btn-log-visit"><i class="fas fa-plus"></i> Log Visit</button>
+    ${isAdmin ? '' : '<button class="btn btn-primary" id="btn-log-visit"><i class="fas fa-plus"></i> Log Visit</button>'}
   `;
   document.getElementById('mobile-toggle')?.addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
 
@@ -170,7 +170,7 @@ export async function renderCollections(body, header) {
     });
   }
 
-  document.getElementById('btn-log-visit').addEventListener('click', () => openLogVisitModal());
+  if (!isAdmin) document.getElementById('btn-log-visit')?.addEventListener('click', () => openLogVisitModal());
 
   function getFilteredSales() {
     if (!isAdmin || sellerFilter === 'all') return pendingSales;
