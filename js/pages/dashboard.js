@@ -1,0 +1,202 @@
+import { db, auth } from '../supabase.js';
+import { formatCurrency, formatStock, formatDateTime, daysUntil, showToast } from '../utils/helpers.js';
+
+export async function renderDashboard(body, header) {
+  const isAdmin = auth.isAdmin();
+
+  header.innerHTML = `
+    <div>
+      <button class="mobile-toggle" id="mobile-toggle"><i class="fas fa-bars"></i></button>
+      <h1>${isAdmin ? 'Dashboard' : 'My Checkouts'}</h1>
+      <div class="page-header-subtitle">${isAdmin ? 'Warehouse overview & alerts' : 'Your checkout history'}</div>
+    </div>
+    <div style="font-size:0.85rem;color:var(--text-muted);">${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
+  `;
+  document.getElementById('mobile-toggle')?.addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
+
+  if (!isAdmin) {
+    await renderSellerView(body);
+    return;
+  }
+
+  const { data: products } = await db.getAll('products');
+  const { data: sessions } = await db.getAll('checkout_sessions');
+  const { data: sales } = await db.getAll('sales');
+  const { data: rentals } = await db.getAll('rentals');
+  const { data: damages } = await db.getAll('damage_reports');
+
+  const activeCheckouts = sessions.filter(s => s.status === 'checked_out').length;
+  const flaggedSessions = sessions.filter(s => s.status === 'flagged').length;
+  const lowStockProducts = products.filter(p => p.is_active && p.current_stock <= p.min_stock_threshold);
+  const expiringProducts = products.filter(p => p.is_active && p.expiry_date && daysUntil(p.expiry_date) <= 60 && daysUntil(p.expiry_date) > 0);
+  const expiredProducts = products.filter(p => p.is_active && p.expiry_date && daysUntil(p.expiry_date) <= 0);
+  const totalStockValue = products.reduce((sum, p) => sum + (p.current_stock * p.unit_price), 0);
+  const activeRentals = rentals.filter(r => r.status === 'active').length;
+  const totalSalesValue = sales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
+  const alertCount = lowStockProducts.length + flaggedSessions + expiredProducts.length;
+
+  body.innerHTML = `
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-icon amber"><i class="fas fa-warehouse"></i></div>
+        <div class="stat-info">
+          <div class="stat-label">Total Stock Value</div>
+          <div class="stat-value">${formatCurrency(totalStockValue)}</div>
+          <div class="stat-change">${products.filter(p=>p.is_active).length} active products</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon blue"><i class="fas fa-right-left"></i></div>
+        <div class="stat-info">
+          <div class="stat-label">Active Checkouts</div>
+          <div class="stat-value">${activeCheckouts}</div>
+          <div class="stat-change ${flaggedSessions ? 'down' : ''}">${flaggedSessions ? flaggedSessions + ' flagged' : 'No flags'}</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon green"><i class="fas fa-indian-rupee-sign"></i></div>
+        <div class="stat-info">
+          <div class="stat-label">Total Sales</div>
+          <div class="stat-value">${formatCurrency(totalSalesValue)}</div>
+          <div class="stat-change">${sales.length} transactions</div>
+        </div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon ${alertCount > 0 ? 'red' : 'green'}"><i class="fas ${alertCount > 0 ? 'fa-bell' : 'fa-check-circle'}"></i></div>
+        <div class="stat-info">
+          <div class="stat-label">Alerts</div>
+          <div class="stat-value">${alertCount}</div>
+          <div class="stat-change ${alertCount > 0 ? 'down' : 'up'}">${alertCount > 0 ? 'Needs attention' : 'All clear'}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-header">
+          <h3><i class="fas fa-exclamation-triangle" style="color:var(--red);margin-right:8px;"></i>Low Stock Alerts</h3>
+          <span class="badge-status ${lowStockProducts.length ? 'red' : 'green'}">${lowStockProducts.length} items</span>
+        </div>
+        <div class="card-body" id="low-stock-list"></div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <h3><i class="fas fa-clock" style="color:var(--accent);margin-right:8px;"></i>Expiring Soon</h3>
+          <span class="badge-status ${expiringProducts.length ? 'amber' : 'green'}">${expiringProducts.length + expiredProducts.length} items</span>
+        </div>
+        <div class="card-body" id="expiry-list"></div>
+      </div>
+    </div>
+
+    <div style="margin-top:20px;">
+      <div class="card">
+        <div class="card-header">
+          <h3><i class="fas fa-history" style="color:var(--blue);margin-right:8px;"></i>Recent Activity</h3>
+        </div>
+        <div class="card-body" id="recent-activity"></div>
+      </div>
+    </div>
+  `;
+
+  // Low stock list
+  const lowStockEl = document.getElementById('low-stock-list');
+  if (lowStockProducts.length === 0) {
+    lowStockEl.innerHTML = '<div class="empty-state" style="padding:20px;"><i class="fas fa-check-circle" style="font-size:1.5rem;color:var(--green);"></i><p style="color:var(--text-secondary);margin-top:8px;">All products are well-stocked</p></div>';
+  } else {
+    lowStockEl.innerHTML = '<div class="alert-list">' + lowStockProducts.map(p => {
+      const pName = escapeHtml(p.name);
+      const stockStr = formatStock(p.current_stock, p.type);
+      const threshStr = formatStock(p.min_stock_threshold, p.type);
+      const pct = Math.round((p.current_stock / p.min_stock_threshold) * 100);
+      return `<div class="alert-item danger">
+        <i class="fas fa-arrow-down"></i>
+        <div style="flex:1;">
+          <strong>${pName}</strong>
+          <div style="font-size:0.75rem;opacity:0.8;">Stock: ${stockStr} (min: ${threshStr}) — ${pct}% of threshold</div>
+        </div>
+        <button class="btn btn-sm btn-secondary" onclick="window.navigateTo('products')">View</button>
+      </div>`;
+    }).join('') + '</div>';
+  }
+
+  // Expiry list
+  const expiryEl = document.getElementById('expiry-list');
+  const allExpiry = [...expiredProducts.map(p => ({...p, _expired: true})), ...expiringProducts];
+  if (allExpiry.length === 0) {
+    expiryEl.innerHTML = '<div class="empty-state" style="padding:20px;"><i class="fas fa-check-circle" style="font-size:1.5rem;color:var(--green);"></i><p style="color:var(--text-secondary);margin-top:8px;">No products expiring soon</p></div>';
+  } else {
+    expiryEl.innerHTML = '<div class="alert-list">' + allExpiry.map(p => {
+      const days = daysUntil(p.expiry_date);
+      const pName = escapeHtml(p.name);
+      const cls = p._expired ? 'danger' : 'warning';
+      const label = p._expired ? 'EXPIRED' : `${days} days left`;
+      return `<div class="alert-item ${cls}">
+        <i class="fas ${p._expired ? 'fa-times-circle' : 'fa-clock'}"></i>
+        <div style="flex:1;">
+          <strong>${pName}</strong>
+          <div style="font-size:0.75rem;opacity:0.8;">${label} — Expires: ${p.expiry_date}</div>
+        </div>
+      </div>`;
+    }).join('') + '</div>';
+  }
+
+  // Recent activity
+  const recentEl = document.getElementById('recent-activity');
+  const { data: txns } = await db.getAll('inventory_transactions', { orderBy: ['created_at', 'desc'] });
+  const recent = txns.slice(0, 8);
+  if (recent.length === 0) {
+    recentEl.innerHTML = '<div class="empty-state" style="padding:20px;"><i class="fas fa-inbox" style="font-size:1.5rem;"></i><p style="color:var(--text-secondary);margin-top:8px;">No activity yet. Start a checkout or record a sale.</p></div>';
+  } else {
+    const { data: allProducts } = await db.getAll('products');
+    const { data: allProfiles } = await db.getAll('profiles');
+    recentEl.innerHTML = recent.map(t => {
+      const prod = allProducts.find(p => p.id === t.product_id);
+      const user = allProfiles.find(u => u.id === t.performed_by);
+      const icons = { stock_in: 'fa-arrow-down text-green', stock_out: 'fa-arrow-up text-red', checkout: 'fa-sign-out-alt text-blue', checkin: 'fa-sign-in-alt text-green', damage: 'fa-exclamation-triangle text-red', sale: 'fa-indian-rupee-sign text-green', rental_out: 'fa-handshake text-purple', adjustment: 'fa-sliders text-amber' };
+      const iconClass = icons[t.type] || 'fa-circle text-muted';
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">
+        <i class="fas ${iconClass.split(' ')[0]}" style="width:24px;text-align:center;color:var(--${iconClass.split(' ')[1]?.replace('text-','') || 'text-muted'});"></i>
+        <div style="flex:1;">
+          <strong style="font-size:0.85rem;">${escapeHtml(t.type.replace(/_/g, ' '))}</strong>
+          <span style="color:var(--text-secondary);"> — ${escapeHtml(prod?.name || 'Unknown')}</span>
+          <div style="font-size:0.75rem;color:var(--text-muted);">${escapeHtml(user?.full_name || 'System')} · ${formatDateTime(t.created_at)}</div>
+        </div>
+        <span style="font-weight:600;color:${t.quantity >= 0 ? 'var(--green)' : 'var(--red)'};">${t.quantity >= 0 ? '+' : ''}${t.quantity}</span>
+      </div>`;
+    }).join('');
+  }
+}
+
+async function renderSellerView(body) {
+  const userId = auth.currentUser.id;
+  const { data: sessions } = await db.getAll('checkout_sessions');
+  const mySessions = sessions.filter(s => s.seller_id === userId).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+
+  body.innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        <h3>My Checkout History</h3>
+      </div>
+      <div class="card-body">
+        ${mySessions.length === 0 ? '<div class="empty-state"><i class="fas fa-inbox"></i><h3>No checkouts yet</h3><p>Your daily checkouts will appear here.</p></div>' : `
+          <div class="table-wrapper"><table class="data-table">
+            <thead><tr><th>Date</th><th>Checkout</th><th>Checkin</th><th>Status</th></tr></thead>
+            <tbody>${mySessions.map(s => `<tr>
+              <td>${formatDateTime(s.checkout_time)}</td>
+              <td>${formatDateTime(s.checkout_time)}</td>
+              <td>${s.checkin_time ? formatDateTime(s.checkin_time) : '—'}</td>
+              <td><span class="badge-status ${s.status === 'checked_in' ? 'green' : s.status === 'flagged' ? 'red' : 'amber'}">${escapeHtml(s.status.replace(/_/g, ' '))}</span></td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+        `}
+      </div>
+    </div>
+  `;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  const div = document.createElement('div');
+  div.textContent = String(str);
+  return div.innerHTML;
+}
