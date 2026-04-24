@@ -25,28 +25,33 @@ export async function renderParties(body, header) {
   const { data: parties } = await db.getAll('parties', { orderBy: ['created_at', 'desc'] });
   const { data: sales } = await db.getAll('sales');
   const { data: products } = await db.getAll('products');
+  const { data: categories } = await db.getAll('categories');
+  const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
 
   body.innerHTML = parties.length === 0 ? '<div class="empty-state"><i class="fas fa-users"></i><h3>No parties yet</h3><p>Add your first customer or client.</p></div>' : `
     <div class="table-wrapper"><table class="data-table">
-      <thead><tr><th>Name</th><th>Phone</th><th>Address</th><th>AMC Rate</th><th>AMC Refill</th><th>Custom Pricing</th><th>Total Sales</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Name</th><th>Phone</th><th>Address</th><th>AMC Rate</th><th>AMC Refill</th><th>Category Pricing</th><th>Total Sales</th><th>Actions</th></tr></thead>
       <tbody>${parties.map(p => {
         const partySales = sales.filter(s => s.party_id === p.id);
         const totalRev = partySales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
         const today = new Date().getDate();
         const isToday = p.amc_active && p.amc_day === today;
-        const customRates = p.custom_product_rates || {};
-        const rateCount = Object.keys(customRates).length;
+        const catRates = p.custom_category_rates || {};
+        const rateEntries = Object.entries(catRates);
         return `<tr style="${isToday ? 'background:var(--primary-soft);' : ''}">
           <td><strong>${esc(p.name)}</strong>${p.notes ? `<br><small style="color:var(--text-muted);">${esc(p.notes)}</small>` : ''}</td>
           <td>${esc(p.phone || '—')}</td>
-          <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;">${esc(p.address || '—')}</td>
+          <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;">${esc(p.address || '—')}</td>
           <td style="font-weight:700;color:var(--primary);">${p.amc_rate ? '₹' + Number(p.amc_rate).toLocaleString('en-IN') + '/mo' : '<span style="color:var(--text-muted);">—</span>'}</td>
           <td>${p.amc_active
             ? `<span class="badge-status ${isToday ? 'green' : 'blue'}">${isToday ? '📍 TODAY' : getOrdinal(p.amc_day) + ' of month'}</span>`
             : '<span style="color:var(--text-muted);">—</span>'
           }</td>
-          <td>${rateCount > 0
-            ? `<span class="badge-status blue">${rateCount} product${rateCount > 1 ? 's' : ''}</span>`
+          <td>${rateEntries.length > 0
+            ? rateEntries.map(([cid, rate]) => {
+                const cat = catMap[parseInt(cid)];
+                return `<div style="font-size:0.75rem;"><strong>${esc(cat?.name || '?')}</strong>: ₹${Number(rate).toLocaleString('en-IN')}</div>`;
+              }).join('')
             : '<span style="color:var(--text-muted);">Default</span>'
           }</td>
           <td style="font-weight:600;">₹${totalRev.toLocaleString('en-IN')} (${partySales.length})</td>
@@ -56,15 +61,15 @@ export async function renderParties(body, header) {
     </table></div>
   `;
 
-  document.getElementById('btn-add-party').addEventListener('click', () => openPartyModal(null, body, header, products));
+  document.getElementById('btn-add-party').addEventListener('click', () => openPartyModal(null, body, header, products, categories));
   body.querySelectorAll('.edit-party-btn').forEach(el => {
-    el.addEventListener('click', () => openPartyModal(parties.find(p => p.id == el.dataset.id), body, header, products));
+    el.addEventListener('click', () => openPartyModal(parties.find(p => p.id == el.dataset.id), body, header, products, categories));
   });
 }
 
-function openPartyModal(party, body, header, products) {
+function openPartyModal(party, body, header, products, categories) {
   const isEdit = !!party;
-  const customRates = party?.custom_product_rates || {};
+  const catRates = party?.custom_category_rates || {};
 
   const content = `
     <div class="form-group">
@@ -111,19 +116,28 @@ function openPartyModal(party, body, header, products) {
     </div>
 
     <div style="background:var(--bg-secondary);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <i class="fas fa-tags" style="color:var(--blue);"></i>
-          <strong style="font-size:0.9rem;">Custom Product Rates</strong>
-        </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        <i class="fas fa-tags" style="color:var(--blue);"></i>
+        <strong style="font-size:0.9rem;">Category-wise Fixed Rates</strong>
       </div>
-      <div style="display:flex;gap:8px;margin-bottom:10px;">
-        <select class="form-select" id="add-product-select" style="flex:1;font-size:0.8rem;">
-          <option value="">— Add a product —</option>
-        </select>
-        <button type="button" class="btn btn-sm btn-primary" id="add-product-btn" style="white-space:nowrap;"><i class="fas fa-plus"></i> Add</button>
-      </div>
-      <div id="product-rates-list"></div>
+      <p style="font-size:0.75rem;color:var(--text-muted);margin:0 0 12px;">Set a fixed price per category. Any product in that category will auto-use this rate for this party.</p>
+      ${categories.map(c => {
+        const hasRate = catRates[String(c.id)] !== undefined && catRates[String(c.id)] !== null;
+        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+          <label style="display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;">
+            <input type="checkbox" class="cat-toggle" data-cid="${c.id}" ${hasRate ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--primary);" />
+            <div>
+              <strong style="font-size:0.85rem;">${esc(c.name)}</strong>
+              <div style="font-size:0.7rem;color:var(--text-muted);">${c.type === 'liquid' ? 'Oils (per gram)' : 'Units (per piece)'}</div>
+            </div>
+          </label>
+          <input class="form-input cat-rate-input" data-cid="${c.id}" type="number" min="0" step="1"
+            value="${hasRate ? catRates[String(c.id)] : ''}"
+            placeholder="₹ rate"
+            style="width:110px;padding:6px 8px;font-size:0.8rem;${hasRate ? 'border-color:var(--primary);background:var(--primary-soft);' : 'opacity:0.4;'}"
+            ${hasRate ? '' : 'disabled'} />
+        </div>`;
+      }).join('')}
     </div>
 
     <div class="form-group">
@@ -134,56 +148,24 @@ function openPartyModal(party, body, header, products) {
   const footer = `<button class="btn btn-secondary" id="party-cancel">Cancel</button><button class="btn btn-primary" id="party-save"><i class="fas fa-save"></i> ${isEdit ? 'Update' : 'Create'}</button>`;
   const { close } = createModal(isEdit ? 'Edit Party' : 'Add Party', content, { footer });
 
-  // ── Dynamic product rate picker ──
-  const addedProducts = new Set();
-  const activeProducts = products.filter(p => p.is_active);
-  const prodMapLocal = Object.fromEntries(activeProducts.map(p => [String(p.id), p]));
-
-  function refreshProductDropdown() {
-    const sel = document.getElementById('add-product-select');
-    const available = activeProducts.filter(p => !addedProducts.has(String(p.id)));
-    sel.innerHTML = `<option value="">— Add a product (${available.length} available) —</option>` +
-      available.map(p => `<option value="${p.id}">${esc(p.name)} (Default: ₹${Number(p.unit_price).toLocaleString('en-IN')})</option>`).join('');
-  }
-
-  function renderRateRow(pid, rate) {
-    const p = prodMapLocal[String(pid)];
-    if (!p) return '';
-    return `<div class="rate-row" data-pid="${pid}" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">
-      <div style="flex:1;font-size:0.8rem;">
-        <strong>${esc(p.name)}</strong>
-        <div style="font-size:0.7rem;color:var(--text-muted);">Default: ₹${Number(p.unit_price).toLocaleString('en-IN')}${p.type === 'liquid' ? '/g' : '/unit'}</div>
-      </div>
-      <input class="form-input product-rate-input" data-pid="${pid}" type="number" min="0" step="0.01"
-        value="${rate !== null && rate !== undefined ? rate : p.unit_price}"
-        style="width:100px;padding:6px 8px;font-size:0.8rem;border-color:var(--primary);background:var(--primary-soft);" />
-      <button type="button" class="btn btn-sm btn-ghost remove-rate-btn" data-pid="${pid}" style="color:var(--red);padding:4px 8px;" title="Remove"><i class="fas fa-times"></i></button>
-    </div>`;
-  }
-
-  function addProductRate(pid, rate) {
-    addedProducts.add(String(pid));
-    const list = document.getElementById('product-rates-list');
-    list.insertAdjacentHTML('beforeend', renderRateRow(pid, rate));
-    list.querySelector(`.remove-rate-btn[data-pid="${pid}"]`).addEventListener('click', () => {
-      list.querySelector(`.rate-row[data-pid="${pid}"]`).remove();
-      addedProducts.delete(String(pid));
-      refreshProductDropdown();
+  // Toggle category rate inputs
+  document.querySelectorAll('.cat-toggle').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const input = document.querySelector(`.cat-rate-input[data-cid="${cb.dataset.cid}"]`);
+      if (cb.checked) {
+        input.disabled = false;
+        input.style.opacity = '1';
+        input.style.borderColor = 'var(--primary)';
+        input.style.background = 'var(--primary-soft)';
+        input.focus();
+      } else {
+        input.disabled = true;
+        input.value = '';
+        input.style.opacity = '0.4';
+        input.style.borderColor = '';
+        input.style.background = '';
+      }
     });
-    refreshProductDropdown();
-  }
-
-  // Pre-populate existing custom rates
-  Object.entries(customRates).forEach(([pid, rate]) => {
-    if (prodMapLocal[pid]) addProductRate(pid, rate);
-  });
-  refreshProductDropdown();
-
-  document.getElementById('add-product-btn').addEventListener('click', () => {
-    const sel = document.getElementById('add-product-select');
-    const pid = sel.value;
-    if (!pid) { showToast('Select a product first', 'error'); return; }
-    addProductRate(pid, null);
   });
 
   document.getElementById('party-cancel').onclick = close;
@@ -194,12 +176,15 @@ function openPartyModal(party, body, header, products) {
     const amcDay = parseInt(document.getElementById('party-amc-day').value);
     const amcRate = parseFloat(document.getElementById('party-amc-rate').value) || null;
 
-    // Collect custom product rates
-    const customProductRates = {};
-    document.querySelectorAll('.product-rate-input').forEach(input => {
-      const val = parseFloat(input.value);
-      if (!isNaN(val) && val >= 0) {
-        customProductRates[input.dataset.pid] = val;
+    // Collect category rates (only checked ones with values)
+    const customCategoryRates = {};
+    document.querySelectorAll('.cat-rate-input').forEach(input => {
+      const cb = document.querySelector(`.cat-toggle[data-cid="${input.dataset.cid}"]`);
+      if (cb?.checked) {
+        const val = parseFloat(input.value);
+        if (!isNaN(val) && val >= 0) {
+          customCategoryRates[input.dataset.cid] = val;
+        }
       }
     });
 
@@ -211,7 +196,7 @@ function openPartyModal(party, body, header, products) {
       amc_active: amcActive,
       amc_day: amcActive ? amcDay : null,
       amc_rate: amcRate,
-      custom_product_rates: Object.keys(customProductRates).length > 0 ? customProductRates : null
+      custom_category_rates: Object.keys(customCategoryRates).length > 0 ? customCategoryRates : null
     };
     if (isEdit) { await db.update('parties', party.id, record); showToast('Party updated', 'success'); }
     else { await db.insert('parties', record); showToast('Party added', 'success'); }

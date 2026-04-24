@@ -83,7 +83,7 @@ function openSaleModal(parties, products, body, header) {
         <label class="form-label">Party / Customer *</label>
         <select class="form-select" id="sale-party">
           <option value="">Walk-in customer</option>
-          ${parties.map(p => `<option value="${p.id}" data-rates='${JSON.stringify(p.custom_product_rates || {})}'>${esc(p.name)}</option>`).join('')}
+          ${parties.map(p => `<option value="${p.id}" data-catrates='${JSON.stringify(p.custom_category_rates || {})}'>${esc(p.name)}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
@@ -95,7 +95,7 @@ function openSaleModal(parties, products, body, header) {
       <div class="form-group">
         <label class="form-label">Product *</label>
         <select class="form-select" id="sale-product">
-          ${activeProducts.map(p => `<option value="${p.id}" data-price="${p.unit_price}" data-type="${p.type}">${esc(p.name)} (₹${p.unit_price}${p.type === 'liquid' ? '/g' : '/pc'})</option>`).join('')}
+          ${activeProducts.map(p => `<option value="${p.id}" data-price="${p.unit_price}" data-type="${p.type}" data-catid="${p.category_id}">${esc(p.name)} (₹${p.unit_price}${p.type === 'liquid' ? '/g' : '/pc'})</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
@@ -158,14 +158,15 @@ function openSaleModal(parties, products, body, header) {
     document.getElementById('sale-total').value = formatCurrency(qty * price);
   }
 
-  // Get custom price for selected party + product
+  // Get custom price for selected party + product (by category)
   function getCustomPrice() {
     const partyOpt = document.getElementById('sale-party').selectedOptions[0];
-    const productId = document.getElementById('sale-product').value;
-    if (partyOpt?.dataset?.rates) {
+    const prodOpt = document.getElementById('sale-product').selectedOptions[0];
+    const catId = prodOpt?.dataset?.catid;
+    if (partyOpt?.dataset?.catrates && catId) {
       try {
-        const rates = JSON.parse(partyOpt.dataset.rates);
-        if (rates[productId] !== undefined) return rates[productId];
+        const rates = JSON.parse(partyOpt.dataset.catrates);
+        if (rates[catId] !== undefined) return rates[catId];
       } catch(e) {}
     }
     return null;
