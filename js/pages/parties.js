@@ -1,7 +1,13 @@
 import { db, auth } from '../supabase.js';
-import { formatDate, showToast, createModal } from '../utils/helpers.js';
+import { formatDate, formatCurrency, showToast, createModal } from '../utils/helpers.js';
 
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
+
+function getOrdinal(n) {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
 
 export async function renderParties(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
@@ -21,16 +27,21 @@ export async function renderParties(body, header) {
 
   body.innerHTML = parties.length === 0 ? '<div class="empty-state"><i class="fas fa-users"></i><h3>No parties yet</h3><p>Add your first customer or client.</p></div>' : `
     <div class="table-wrapper"><table class="data-table">
-      <thead><tr><th>Name</th><th>Phone</th><th>Address</th><th>Total Sales</th><th>Added</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Name</th><th>Phone</th><th>Address</th><th>AMC Refill</th><th>Total Sales</th><th>Actions</th></tr></thead>
       <tbody>${parties.map(p => {
         const partySales = sales.filter(s => s.party_id === p.id);
         const totalRev = partySales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
-        return `<tr>
+        const today = new Date().getDate();
+        const isToday = p.amc_active && p.amc_day === today;
+        return `<tr style="${isToday ? 'background:var(--primary-soft);' : ''}">
           <td><strong>${esc(p.name)}</strong>${p.notes ? `<br><small style="color:var(--text-muted);">${esc(p.notes)}</small>` : ''}</td>
           <td>${esc(p.phone || '—')}</td>
-          <td>${esc(p.address || '—')}</td>
+          <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${esc(p.address || '—')}</td>
+          <td>${p.amc_active
+            ? `<span class="badge-status ${isToday ? 'green' : 'blue'}">${isToday ? '📍 TODAY' : getOrdinal(p.amc_day) + ' of every month'}</span>`
+            : '<span style="color:var(--text-muted);">—</span>'
+          }</td>
           <td style="font-weight:600;">₹${totalRev.toLocaleString('en-IN')} (${partySales.length})</td>
-          <td>${formatDate(p.created_at)}</td>
           <td><button class="btn btn-sm btn-ghost edit-party-btn" data-id="${p.id}"><i class="fas fa-pen"></i></button></td>
         </tr>`;
       }).join('')}</tbody>
@@ -60,6 +71,31 @@ function openPartyModal(party, body, header) {
         <input class="form-input" id="party-address" value="${esc(party?.address || '')}" maxlength="300" />
       </div>
     </div>
+
+    <div style="background:var(--bg-secondary);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <i class="fas fa-calendar-check" style="color:var(--primary);"></i>
+        <strong style="font-size:0.9rem;">AMC Monthly Refill Schedule</strong>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label">Enable AMC</label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="party-amc-active" ${party?.amc_active ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--primary);" />
+            <span style="font-size:0.85rem;">Monthly refill reminders</span>
+          </label>
+        </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label">Refill Day of Month *</label>
+          <select class="form-select" id="party-amc-day">
+            ${Array.from({length: 28}, (_, i) => i + 1).map(d =>
+              `<option value="${d}" ${party?.amc_day === d ? 'selected' : ''}>${getOrdinal(d)}</option>`
+            ).join('')}
+          </select>
+        </div>
+      </div>
+    </div>
+
     <div class="form-group">
       <label class="form-label">Notes</label>
       <textarea class="form-textarea" id="party-notes" maxlength="500">${esc(party?.notes || '')}</textarea>
@@ -72,11 +108,15 @@ function openPartyModal(party, body, header) {
   document.getElementById('party-save').onclick = async () => {
     const name = document.getElementById('party-name').value.trim();
     if (!name || name.length < 2) { showToast('Name is required', 'error'); return; }
+    const amcActive = document.getElementById('party-amc-active').checked;
+    const amcDay = parseInt(document.getElementById('party-amc-day').value);
     const record = {
       name,
       phone: document.getElementById('party-phone').value.trim(),
       address: document.getElementById('party-address').value.trim(),
-      notes: document.getElementById('party-notes').value.trim()
+      notes: document.getElementById('party-notes').value.trim(),
+      amc_active: amcActive,
+      amc_day: amcActive ? amcDay : null
     };
     if (isEdit) { await db.update('parties', party.id, record); showToast('Party updated', 'success'); }
     else { await db.insert('parties', record); showToast('Party added', 'success'); }

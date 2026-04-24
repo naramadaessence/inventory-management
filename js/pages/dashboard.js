@@ -24,6 +24,7 @@ export async function renderDashboard(body, header) {
   const { data: sales } = await db.getAll('sales');
   const { data: rentals } = await db.getAll('rentals');
   const { data: damages } = await db.getAll('damage_reports');
+  const { data: amcParties } = await db.getAll('parties');
 
   const activeCheckouts = sessions.filter(s => s.status === 'checked_out').length;
   const flaggedSessions = sessions.filter(s => s.status === 'flagged').length;
@@ -35,7 +36,62 @@ export async function renderDashboard(body, header) {
   const totalSalesValue = sales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
   const alertCount = lowStockProducts.length + flaggedSessions + expiredProducts.length;
 
+  // AMC Worklist
+  const today = new Date().getDate();
+  const amcEnabled = amcParties.filter(p => p.amc_active && p.amc_day);
+  const todaysRefills = amcEnabled.filter(p => p.amc_day === today);
+  const upcoming7Days = [];
+  for (let d = 1; d <= 7; d++) {
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + d);
+    const futureDay = futureDate.getDate();
+    const partiesOnDay = amcEnabled.filter(p => p.amc_day === futureDay);
+    if (partiesOnDay.length > 0) {
+      upcoming7Days.push({ date: futureDate, day: futureDay, parties: partiesOnDay });
+    }
+  }
+
+  const amcWorklistHtml = todaysRefills.length > 0 ? `
+    <div class="card" style="margin-bottom:20px;border-left:4px solid var(--primary);">
+      <div class="card-header">
+        <h3><i class="fas fa-calendar-check" style="color:var(--primary);margin-right:8px;"></i>Today's AMC Refill Worklist</h3>
+        <span class="badge-status green">${todaysRefills.length} visits</span>
+      </div>
+      <div class="card-body">
+        <div class="alert-list">
+          ${todaysRefills.map(p => `<div class="alert-item" style="background:var(--primary-soft);">
+            <i class="fas fa-map-marker-alt" style="color:var(--primary);"></i>
+            <div style="flex:1;">
+              <strong>${escapeHtml(p.name)}</strong>
+              <div style="font-size:0.75rem;color:var(--text-muted);">${escapeHtml(p.address || 'No address')} · ${escapeHtml(p.phone || 'No phone')}</div>
+            </div>
+            <button class="btn btn-sm btn-primary" onclick="window.navigateTo('parties')">View</button>
+          </div>`).join('')}
+        </div>
+      </div>
+    </div>` : '';
+
+  const upcomingHtml = upcoming7Days.length > 0 ? `
+    <div class="card" style="margin-bottom:20px;">
+      <div class="card-header">
+        <h3><i class="fas fa-calendar-alt" style="color:var(--blue);margin-right:8px;"></i>Upcoming Refills (7 Days)</h3>
+      </div>
+      <div class="card-body">
+        <div class="alert-list">
+          ${upcoming7Days.map(entry => entry.parties.map(p => `<div class="alert-item">
+            <i class="fas fa-clock" style="color:var(--blue);"></i>
+            <div style="flex:1;">
+              <strong>${escapeHtml(p.name)}</strong>
+              <div style="font-size:0.75rem;color:var(--text-muted);">${entry.date.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} — ${escapeHtml(p.address || 'No address')}</div>
+            </div>
+          </div>`).join('')).join('')}
+        </div>
+      </div>
+    </div>` : '';
+
   body.innerHTML = `
+    ${amcWorklistHtml}
+    ${upcomingHtml}
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-icon amber"><i class="fas fa-warehouse"></i></div>
