@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-04-24 — RLS Policy Fix for Seller Access
+**What**: Fixed Row-Level Security policies so sellers can read parties, sales, and write payment_followups
+**Why**: Sellers couldn't see party dropdown or log visits because RLS was admin-only
+**Files Changed**: Supabase SQL policies (no code changes)
+
+### RLS Changes
+- `parties`: Sellers can now READ (needed for Collections dropdowns), admin-only for write
+- `sales`: All authenticated users can READ/INSERT/UPDATE (sellers log sales and update payments)
+- `payment_followups`: All authenticated users can READ/INSERT
+- `inventory_transactions`: All authenticated users can READ/INSERT
+
+---
+
+## 2026-04-24 — AMC Monthly Refill Scheduling
+**What**: Added AMC mode to parties with monthly recurring refill reminders on dashboard
+**Why**: Parties have fixed refill dates (e.g. A on 12th, B on 15th) — need automatic monthly reminders
+**Files Changed**: `js/pages/parties.js`, `js/pages/dashboard.js`, `js/main.js`
+
+### Features
+- Party modal: AMC toggle + refill day selector (1st–28th)
+- Parties table: Shows AMC day, highlights today's visits in green ("📍 TODAY")
+- Dashboard: "Today's AMC Refill Worklist" card at top with party details
+- Dashboard: "Upcoming Refills (7 Days)" card showing next week's schedule
+- Seller nav: Added Collections to sidebar
+
+### Database Changes
+```sql
+ALTER TABLE parties ADD COLUMN IF NOT EXISTS amc_active BOOLEAN DEFAULT false;
+ALTER TABLE parties ADD COLUMN IF NOT EXISTS amc_day INTEGER;
+```
+
+---
+
 ## 2026-04-24 — Payment Collections & Follow-up System
 **What**: Full payment tracking module with visit-based follow-ups and dashboard reminders
 **Why**: Sellers visit customers and need to log payment status (pending/received/promised) with due dates
