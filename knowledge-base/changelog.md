@@ -1,5 +1,42 @@
 # Changelog
 
+## 2026-04-24 — Production Deployment & Supabase Go-Live
+**What**: Deployed to Vercel + connected live Supabase database
+**Why**: Move from demo localStorage to real persistent database
+**Files Changed**: `api/create-user.js`, `js/pages/login.js`, `js/pages/settings.js`, `js/supabase.js`, `supabase-schema.sql`
+
+### Deployment Details
+- **Vercel URL**: `https://inventory-management-pi-opal.vercel.app/`
+- **Supabase Project ID**: `jnfykpicpttvnihgsckt`
+- **Region**: Mumbai (ap-south-1)
+- **Admin login**: `admin@narmadaessence.com` / `12345678`
+
+### Supabase Setup Notes
+- Creating users via raw SQL INSERT into `auth.users` does NOT work — missing `auth.identities` record causes 500 errors
+- Always create users through **Supabase Dashboard → Authentication → Add User** or via the **admin API** (`auth.admin.createUser`)
+- The `handle_new_user` trigger auto-creates a `profiles` row with default role `seller` — must manually UPDATE to `admin` if needed
+- Trigger uses `ON CONFLICT DO NOTHING` and `SET search_path = public` to avoid schema errors
+
+### Features Added
+- **Serverless API** (`api/create-user.js`): Secure endpoint using `SUPABASE_SERVICE_ROLE_KEY` for admin-only seller account creation
+- **Login page**: Removed demo credentials, replaced with "Contact your administrator" message
+- **Settings → Users**: "Add Seller" button now calls the serverless API in production mode, falls back to localStorage in demo mode
+- **Exported `supabase` client** from `supabase.js` so other modules can access auth session tokens
+
+### Environment Variables (Vercel)
+| Key | Purpose |
+|-----|---------|
+| `VITE_SUPABASE_URL` | Supabase project URL |
+| `VITE_SUPABASE_ANON_KEY` | Public anon key (client-side) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Secret admin key (server-side only, for `api/create-user.js`) |
+
+### Seeded Data
+- 5 unit products (Decor, Black Touch, Lavender, Green Apple refills + White Automatic Dispenser)
+- 3 liquid products (Cool Water, Royal Oud, Cherry Blossom diffuser oils)
+- 5 categories (Automatic Dispenser, Smart Diffuser, Dispenser Refill, Diffuser Oil, Room Cream)
+
+---
+
 ## 2026-04-24 — Initial Platform Build
 **What**: Complete inventory management platform built from scratch
 **Why**: Client (Narmada Essence, Surat) needed warehouse management for daily seller operations

@@ -1,7 +1,25 @@
-import { db, auth } from '../supabase.js';
+import { db, auth, supabase } from '../supabase.js';
 import { formatCurrency, formatStock, formatDate, showToast, createModal, debounce } from '../utils/helpers.js';
 
 function escapeHtml(str) { if (!str) return ''; const d = document.createElement('div'); d.textContent = String(str); return d.innerHTML; }
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
+
+function getImageUrl(imageUrl) {
+  if (!imageUrl) return null;
+  if (imageUrl.startsWith('http')) return imageUrl;
+  // Build Supabase storage public URL
+  return `${SUPABASE_URL}/storage/v1/object/public/product-images/${imageUrl}`;
+}
+
+function productImageHtml(product, size = 'card') {
+  const url = getImageUrl(product.image_url);
+  if (url) {
+    const sizeClass = size === 'card' ? 'product-card-img' : '';
+    return `<div class="${sizeClass}" style="overflow:hidden;"><img src="${escapeHtml(url)}" alt="${escapeHtml(product.name)}" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML='<div style=\\'display:flex;align-items:center;justify-content:center;height:100%;font-size:2.5rem;color:var(--text-muted);\\' ><i class=\\'fas ${product.type === 'liquid' ? 'fa-flask' : 'fa-box'}\\'></i></div>'" /></div>`;
+  }
+  return `<div class="product-card-img" style="display:flex;align-items:center;justify-content:center;font-size:2.5rem;color:var(--text-muted);"><i class="fas ${product.type === 'liquid' ? 'fa-flask' : 'fa-box'}"></i></div>`;
+}
 
 export async function renderProducts(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
@@ -62,9 +80,7 @@ export async function renderProducts(body, header) {
         const cat = catMap[p.category_id];
         const isLow = p.current_stock <= p.min_stock_threshold;
         return `<div class="product-card" data-id="${p.id}">
-          <div class="product-card-img" style="display:flex;align-items:center;justify-content:center;font-size:2.5rem;color:var(--text-muted);">
-            <i class="fas ${p.type === 'liquid' ? 'fa-flask' : 'fa-box'}"></i>
-          </div>
+          ${productImageHtml(p)}
           <div class="product-card-body">
             <h4 title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</h4>
             <div style="font-size:0.75rem;color:var(--text-muted);">${escapeHtml(cat?.name || '—')} · ${formatCurrency(p.unit_price)}${p.type === 'liquid' ? '/g' : '/pc'}</div>
@@ -77,11 +93,13 @@ export async function renderProducts(body, header) {
       }).join('')}</div>`;
     } else {
       container.innerHTML = `<div class="table-wrapper"><table class="data-table">
-        <thead><tr><th>Product</th><th>Category</th><th>Type</th><th>Price</th><th>Stock</th><th>Threshold</th><th>Expiry</th><th>Actions</th></tr></thead>
+        <thead><tr><th></th><th>Product</th><th>Category</th><th>Type</th><th>Price</th><th>Stock</th><th>Threshold</th><th>Expiry</th><th>Actions</th></tr></thead>
         <tbody>${filtered.map(p => {
           const cat = catMap[p.category_id];
           const isLow = p.current_stock <= p.min_stock_threshold;
+          const imgUrl = getImageUrl(p.image_url);
           return `<tr>
+            <td style="width:40px;">${imgUrl ? `<img src="${escapeHtml(imgUrl)}" style="width:36px;height:36px;border-radius:6px;object-fit:cover;" />` : `<i class="fas ${p.type === 'liquid' ? 'fa-flask' : 'fa-box'}" style="color:var(--text-muted);font-size:1.2rem;"></i>`}</td>
             <td><strong>${escapeHtml(p.name)}</strong>${p.model_number ? `<br><small style="color:var(--text-muted);">${escapeHtml(p.model_number)}</small>` : ''}</td>
             <td>${escapeHtml(cat?.name || '—')}</td>
             <td><span class="badge-status ${p.type === 'liquid' ? 'purple' : 'blue'}">${p.type}</span></td>
@@ -111,6 +129,7 @@ export async function renderProducts(body, header) {
 function openProductModal(product, categories) {
   const isEdit = !!product;
   const title = isEdit ? 'Edit Product' : 'Add New Product';
+  const currentImgUrl = getImageUrl(product?.image_url);
 
   const formHtml = `
     <div class="form-row">
@@ -121,6 +140,19 @@ function openProductModal(product, categories) {
       <div class="form-group">
         <label class="form-label">Model Number</label>
         <input class="form-input" id="prod-model" value="${escapeHtml(product?.model_number || '')}" maxlength="50" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Product Image</label>
+      <div id="image-upload-area" style="border:2px dashed var(--border);border-radius:8px;padding:16px;text-align:center;cursor:pointer;transition:border-color 0.2s;">
+        ${currentImgUrl 
+          ? `<div id="image-preview" style="margin-bottom:8px;"><img src="${escapeHtml(currentImgUrl)}" style="max-height:120px;border-radius:8px;object-fit:cover;" /></div>
+             <p style="font-size:0.8rem;color:var(--text-muted);margin:0;">Click to change image</p>`
+          : `<div id="image-preview"></div>
+             <i class="fas fa-cloud-upload-alt" style="font-size:2rem;color:var(--text-muted);margin-bottom:8px;display:block;"></i>
+             <p style="font-size:0.8rem;color:var(--text-muted);margin:0;">Click or drag to upload (max 5MB)</p>`
+        }
+        <input type="file" id="prod-image" accept="image/*" style="display:none;" />
       </div>
     </div>
     <div class="form-row">
@@ -166,6 +198,37 @@ function openProductModal(product, categories) {
 
   const { close } = createModal(title, formHtml, { footer });
 
+  // Image upload handling
+  let selectedFile = null;
+  const uploadArea = document.getElementById('image-upload-area');
+  const fileInput = document.getElementById('prod-image');
+  const preview = document.getElementById('image-preview');
+
+  uploadArea.addEventListener('click', () => fileInput.click());
+  uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.style.borderColor = 'var(--primary)'; });
+  uploadArea.addEventListener('dragleave', () => { uploadArea.style.borderColor = 'var(--border)'; });
+  uploadArea.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadArea.style.borderColor = 'var(--border)';
+    if (e.dataTransfer.files.length) handleFileSelect(e.dataTransfer.files[0]);
+  });
+
+  fileInput.addEventListener('change', (e) => { if (e.target.files.length) handleFileSelect(e.target.files[0]); });
+
+  function handleFileSelect(file) {
+    if (!file.type.startsWith('image/')) { showToast('Please select an image file', 'error'); return; }
+    if (file.size > 5 * 1024 * 1024) { showToast('Image must be under 5MB', 'error'); return; }
+    selectedFile = file;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      preview.innerHTML = `<img src="${e.target.result}" style="max-height:120px;border-radius:8px;object-fit:cover;" />`;
+      uploadArea.querySelector('p').textContent = `${file.name} (${(file.size / 1024).toFixed(0)} KB)`;
+      const icon = uploadArea.querySelector('.fa-cloud-upload-alt');
+      if (icon) icon.style.display = 'none';
+    };
+    reader.readAsDataURL(file);
+  }
+
   document.getElementById('prod-cancel-btn').onclick = close;
 
   document.getElementById('prod-save-btn').onclick = async () => {
@@ -185,10 +248,40 @@ function openProductModal(product, categories) {
     if (isNaN(stock) || stock < 0) { showToast('Valid stock quantity is required', 'error'); return; }
     if (isNaN(threshold) || threshold < 0) { showToast('Valid threshold is required', 'error'); return; }
 
+    const saveBtn = document.getElementById('prod-save-btn');
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div>';
+
+    let imageUrl = product?.image_url || null;
+
+    // Upload image if selected
+    if (selectedFile && supabase) {
+      try {
+        const ext = selectedFile.name.split('.').pop().toLowerCase();
+        const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 8)}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('product-images')
+          .upload(fileName, selectedFile, { contentType: selectedFile.type, upsert: false });
+        if (uploadError) {
+          showToast('Image upload failed: ' + uploadError.message, 'error');
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = `<i class="fas fa-save"></i> ${isEdit ? 'Update' : 'Create'}`;
+          return;
+        }
+        imageUrl = fileName;
+      } catch (err) {
+        showToast('Image upload error', 'error');
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = `<i class="fas fa-save"></i> ${isEdit ? 'Update' : 'Create'}`;
+        return;
+      }
+    }
+
     const record = {
       name, model_number: model || null, category_id: catId, type: cat?.type || 'unit',
       unit_price: price, current_stock: stock, min_stock_threshold: threshold,
-      max_daily_consumption: maxDaily, expiry_date: expiry, is_active: true
+      max_daily_consumption: maxDaily, expiry_date: expiry, is_active: true,
+      image_url: imageUrl
     };
 
     if (isEdit) {
