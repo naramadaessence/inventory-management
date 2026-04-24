@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-04-24 — Per-Party Custom Product Pricing
+**What**: Each party can have custom AMC rate + custom product prices. Admin picks which products a party uses and sets individual rates.
+**Why**: Different clients get different rates — not all parties use all products
+**Files Changed**: `js/pages/parties.js`, `js/pages/sales.js`, `js/pages/collections.js`
+
+### Features
+- Party modal: AMC rate field + dynamic "Add Product" picker with per-product price input
+- Only selected products get custom rates (others = not applicable)
+- Sales page: auto-fills custom price when party+product selected (gold highlight = custom rate)
+- Collections: auto-fills AMC rate when seller selects party in Log Visit
+- Admin role: monitor-only in Collections (no Log Visit button)
+
+### Database Changes
+```sql
+ALTER TABLE parties ADD COLUMN IF NOT EXISTS amc_rate NUMERIC DEFAULT 0;
+ALTER TABLE parties ADD COLUMN IF NOT EXISTS custom_product_rates JSONB;
+```
+
+---
+
 ## 2026-04-24 — RLS Policy Fix for Seller Access
 **What**: Fixed Row-Level Security policies so sellers can read parties, sales, and write payment_followups
 **Why**: Sellers couldn't see party dropdown or log visits because RLS was admin-only
