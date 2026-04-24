@@ -83,7 +83,7 @@ function openSaleModal(parties, products, body, header) {
         <label class="form-label">Party / Customer *</label>
         <select class="form-select" id="sale-party">
           <option value="">Walk-in customer</option>
-          ${parties.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}
+          ${parties.map(p => `<option value="${p.id}" data-rates='${JSON.stringify(p.custom_product_rates || {})}'>${esc(p.name)}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
@@ -158,21 +158,52 @@ function openSaleModal(parties, products, body, header) {
     document.getElementById('sale-total').value = formatCurrency(qty * price);
   }
 
+  // Get custom price for selected party + product
+  function getCustomPrice() {
+    const partyOpt = document.getElementById('sale-party').selectedOptions[0];
+    const productId = document.getElementById('sale-product').value;
+    if (partyOpt?.dataset?.rates) {
+      try {
+        const rates = JSON.parse(partyOpt.dataset.rates);
+        if (rates[productId] !== undefined) return rates[productId];
+      } catch(e) {}
+    }
+    return null;
+  }
+
+  function applyPrice() {
+    const customPrice = getCustomPrice();
+    const prodOpt = document.getElementById('sale-product').selectedOptions[0];
+    const defaultPrice = parseFloat(prodOpt?.dataset?.price) || 0;
+    const priceInput = document.getElementById('sale-price');
+    priceInput.value = customPrice !== null ? customPrice : defaultPrice;
+    if (customPrice !== null) {
+      priceInput.style.borderColor = 'var(--primary)';
+      priceInput.style.background = 'var(--primary-soft)';
+      priceInput.title = 'Custom rate for this party';
+    } else {
+      priceInput.style.borderColor = '';
+      priceInput.style.background = '';
+      priceInput.title = '';
+    }
+    updateTotal();
+  }
+
   // Show/hide pending fields based on payment status
   document.getElementById('sale-payment').addEventListener('change', (e) => {
     const pendingFields = document.getElementById('pending-fields');
     pendingFields.style.display = (e.target.value === 'pending' || e.target.value === 'partial') ? 'flex' : 'none';
   });
 
+  document.getElementById('sale-party').addEventListener('change', applyPrice);
   document.getElementById('sale-product').addEventListener('change', (e) => {
     const opt = e.target.selectedOptions[0];
-    document.getElementById('sale-price').value = opt.dataset.price;
     document.getElementById('sale-qty').step = opt.dataset.type === 'liquid' ? '0.1' : '1';
-    updateTotal();
+    applyPrice();
   });
   document.getElementById('sale-qty').addEventListener('input', updateTotal);
   document.getElementById('sale-price').addEventListener('input', updateTotal);
-  updateTotal();
+  applyPrice();
 
   document.getElementById('sale-cancel').onclick = close;
   document.getElementById('sale-save').onclick = async () => {
