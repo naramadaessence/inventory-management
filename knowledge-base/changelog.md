@@ -1,6 +1,60 @@
 # Changelog
 
-## 2026-04-24 — Production Deployment & Supabase Go-Live
+## 2026-04-24 — Payment Collections & Follow-up System
+**What**: Full payment tracking module with visit-based follow-ups and dashboard reminders
+**Why**: Sellers visit customers and need to log payment status (pending/received/promised) with due dates
+**Files Changed**: `js/pages/collections.js` (NEW), `js/pages/sales.js`, `js/pages/dashboard.js`, `js/main.js`
+
+### New: Collections Page (`collections.js`)
+- 4 stat cards: Total Pending, Due Soon (3 days), Overdue, Collected Today
+- 3 tabs: Pending Payments, Overdue, Follow-up History
+- **Update Payment modal**: status (pending/partial/paid/promised), payment method (cash/UPI/bank/cheque), amount collected, expected date, visit notes
+- Auto-calculates balance, prevents over-collection
+
+### Updated: Sales Page
+- Added fields: payment method, amount received, expected payment date
+- Pending/partial fields auto-show/hide based on payment status selection
+- New "Pending Amount" stat card
+- Due date + overdue indicator in sales table
+
+### Updated: Dashboard
+- New "Payment Reminders" card between expiry alerts and recent activity
+- Shows overdue (red), due soon (amber), and no-date-set payments
+- "Collect" button links to Collections page
+
+### Database Changes (run in Supabase SQL Editor)
+```sql
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method TEXT;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS amount_received NUMERIC DEFAULT 0;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS expected_payment_date DATE;
+CREATE TABLE payment_followups (...);
+```
+
+---
+
+## 2026-04-24 — Product Image Upload
+**What**: Added image upload to product create/edit via Supabase Storage
+**Why**: Admin wants to see product photos in the catalog
+**Files Changed**: `js/pages/products.js`
+
+### Features
+- Drag-and-drop or click-to-upload (max 5MB)
+- Live preview before saving
+- Stored in `product-images` Supabase bucket (public)
+- Grid view shows product image instead of generic icon
+- Table view shows 36x36 thumbnail
+- Graceful fallback to flask/box icon if no image or load error
+
+### Database Changes
+```sql
+ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT;
+INSERT INTO storage.buckets (id, name, public) VALUES ('product-images', 'product-images', true);
+-- + RLS policies for public read, authenticated write
+```
+
+---
+
+
 **What**: Deployed to Vercel + connected live Supabase database
 **Why**: Move from demo localStorage to real persistent database
 **Files Changed**: `api/create-user.js`, `js/pages/login.js`, `js/pages/settings.js`, `js/supabase.js`, `supabase-schema.sql`
