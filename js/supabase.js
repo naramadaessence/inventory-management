@@ -12,6 +12,8 @@ if (!isDemoMode) {
   supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
+export { supabase };
+
 // ============================================
 // DEMO MODE — localStorage-based data store
 // Allows full app testing without Supabase

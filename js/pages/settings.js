@@ -1,4 +1,4 @@
-import { db, auth } from '../supabase.js';
+import { db, auth, supabase } from '../supabase.js';
 import { showToast, createModal } from '../utils/helpers.js';
 
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = String(s); return d.innerHTML; }
@@ -52,7 +52,7 @@ async function renderUsersTab(container, body) {
   container.innerHTML = `
     <div class="toolbar">
       <div></div>
-      <button class="btn btn-primary" id="btn-add-user"><i class="fas fa-plus"></i> Add User</button>
+      <button class="btn btn-primary" id="btn-add-user"><i class="fas fa-plus"></i> Add Seller</button>
     </div>
     <div class="table-wrapper"><table class="data-table">
       <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Phone</th><th>Status</th><th>Actions</th></tr></thead>
@@ -99,15 +99,15 @@ function openUserModal(user, container, body) {
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Role *</label>
-        <select class="form-select" id="user-role">
-          <option value="seller" ${user?.role === 'seller' ? 'selected' : ''}>Seller</option>
-          <option value="admin" ${user?.role === 'admin' ? 'selected' : ''}>Admin</option>
-        </select>
-      </div>
-      <div class="form-group">
         <label class="form-label">Phone</label>
         <input class="form-input" id="user-phone" value="${esc(user?.phone || '')}" maxlength="15" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Role</label>
+        <select class="form-select" id="user-role">
+          <option value="seller" ${!user || user?.role === 'seller' ? 'selected' : ''}>Seller</option>
+          <option value="admin" ${user?.role === 'admin' ? 'selected' : ''}>Admin</option>
+        </select>
       </div>
     </div>
     ${!isEdit ? `<div class="form-group">
@@ -115,8 +115,8 @@ function openUserModal(user, container, body) {
       <input class="form-input" type="password" id="user-password" minlength="6" maxlength="128" required placeholder="Min 6 characters" />
     </div>` : ''}
   `;
-  const footer = `<button class="btn btn-secondary" id="user-cancel">Cancel</button><button class="btn btn-primary" id="user-save"><i class="fas fa-save"></i> ${isEdit ? 'Update' : 'Create'}</button>`;
-  const { close } = createModal(isEdit ? 'Edit User' : 'Add User', content, { footer });
+  const footer = `<button class="btn btn-secondary" id="user-cancel">Cancel</button><button class="btn btn-primary" id="user-save"><i class="fas fa-save"></i> ${isEdit ? 'Update' : 'Create Account'}</button>`;
+  const { close } = createModal(isEdit ? 'Edit User' : 'Create Seller Account', content, { footer });
 
   document.getElementById('user-cancel').onclick = close;
   document.getElementById('user-save').onclick = async () => {
@@ -128,16 +128,52 @@ function openUserModal(user, container, body) {
     if (!name || name.length < 2) { showToast('Name is required', 'error'); return; }
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('Valid email is required', 'error'); return; }
 
-    const record = { full_name: name, email, role, phone, is_active: true };
     if (isEdit) {
-      await db.update('profiles', user.id, record);
+      await db.update('profiles', user.id, { full_name: name, role, phone });
       showToast('User updated', 'success');
     } else {
       const password = document.getElementById('user-password').value;
       if (!password || password.length < 6) { showToast('Password must be at least 6 characters', 'error'); return; }
-      record.id = 'user-' + Date.now();
-      await db.insert('profiles', record);
-      showToast('User created (demo mode — use seller123 to login)', 'success');
+
+      const saveBtn = document.getElementById('user-save');
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div>';
+
+      if (db.isDemoMode) {
+        // Demo mode: just insert into local store
+        await db.insert('profiles', { full_name: name, email, role, phone, is_active: true, id: 'user-' + Date.now() });
+        showToast('User created (demo mode)', 'success');
+      } else {
+        // Production: call serverless API
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          const res = await fetch('/api/create-user', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`
+            },
+            body: JSON.stringify({ email, password, full_name: name, phone })
+          });
+          const result = await res.json();
+          if (!res.ok) {
+            showToast(result.error || 'Failed to create user', 'error');
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = '<i class="fas fa-save"></i> Create Account';
+            return;
+          }
+          // Update role if not default seller
+          if (role === 'admin') {
+            await db.update('profiles', result.user_id, { role: 'admin' });
+          }
+          showToast('Seller account created successfully!', 'success');
+        } catch (err) {
+          showToast('Network error. Please try again.', 'error');
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<i class="fas fa-save"></i> Create Account';
+          return;
+        }
+      }
     }
     close();
     renderUsersTab(container, body);

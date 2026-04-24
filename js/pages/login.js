@@ -23,11 +23,7 @@ export function renderLogin(container, onSuccess) {
           </button>
         </form>
         <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);text-align:center;">
-          <p style="font-size:0.75rem;color:var(--text-muted);margin-bottom:8px;">Demo Credentials</p>
-          <p style="font-size:0.8rem;color:var(--text-secondary);">
-            <strong>Admin:</strong> admin@narmadaessence.com / admin123<br>
-            <strong>Seller:</strong> seller1@narmadaessence.com / seller123
-          </p>
+          <p style="font-size:0.75rem;color:var(--text-muted);">Contact your administrator for login credentials</p>
         </div>
       </div>
     </div>
