@@ -269,8 +269,12 @@ export async function renderCollections(body, header) {
         <label class="form-label">Party / Customer *</label>
         <select class="form-select" id="visit-party">
           <option value="">— Select Party —</option>
-          ${parties.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}
+          ${parties.map(p => `<option value="${p.id}" data-rate="${p.amc_rate || 0}">${esc(p.name)}${p.amc_rate ? ' — ₹' + Number(p.amc_rate).toLocaleString('en-IN') + '/mo' : ''}</option>`).join('')}
         </select>
+      </div>
+      <div id="visit-rate-info" style="display:none;background:var(--primary-soft);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:0.85rem;">
+        <i class="fas fa-info-circle" style="color:var(--primary);margin-right:6px;"></i>
+        <span id="visit-rate-text"></span>
       </div>
       <div class="form-row">
         <div class="form-group">
@@ -322,6 +326,22 @@ export async function renderCollections(body, header) {
     `;
     const footer = `<button class="btn btn-secondary" id="visit-cancel">Cancel</button><button class="btn btn-primary" id="visit-save"><i class="fas fa-check"></i> Log Visit</button>`;
     const { close } = createModal('Log Customer Visit', content, { footer });
+
+    // Auto-fill rate when party is selected
+    document.getElementById('visit-party').addEventListener('change', (e) => {
+      const opt = e.target.selectedOptions[0];
+      const rate = parseFloat(opt?.dataset?.rate) || 0;
+      const rateInfo = document.getElementById('visit-rate-info');
+      const rateText = document.getElementById('visit-rate-text');
+      if (rate > 0) {
+        document.getElementById('visit-amount').value = rate;
+        rateInfo.style.display = 'block';
+        rateText.textContent = `Fixed rate: ₹${rate.toLocaleString('en-IN')}/month — auto-filled`;
+      } else {
+        document.getElementById('visit-amount').value = 0;
+        rateInfo.style.display = 'none';
+      }
+    });
 
     document.getElementById('visit-sale').addEventListener('change', (e) => {
       const opt = e.target.selectedOptions[0];

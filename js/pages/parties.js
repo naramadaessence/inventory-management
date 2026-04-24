@@ -27,7 +27,7 @@ export async function renderParties(body, header) {
 
   body.innerHTML = parties.length === 0 ? '<div class="empty-state"><i class="fas fa-users"></i><h3>No parties yet</h3><p>Add your first customer or client.</p></div>' : `
     <div class="table-wrapper"><table class="data-table">
-      <thead><tr><th>Name</th><th>Phone</th><th>Address</th><th>AMC Refill</th><th>Total Sales</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Name</th><th>Phone</th><th>Address</th><th>Fixed Rate</th><th>AMC Refill</th><th>Total Sales</th><th>Actions</th></tr></thead>
       <tbody>${parties.map(p => {
         const partySales = sales.filter(s => s.party_id === p.id);
         const totalRev = partySales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
@@ -37,6 +37,7 @@ export async function renderParties(body, header) {
           <td><strong>${esc(p.name)}</strong>${p.notes ? `<br><small style="color:var(--text-muted);">${esc(p.notes)}</small>` : ''}</td>
           <td>${esc(p.phone || '—')}</td>
           <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${esc(p.address || '—')}</td>
+          <td style="font-weight:700;color:var(--primary);">${p.amc_rate ? '₹' + Number(p.amc_rate).toLocaleString('en-IN') : '<span style="color:var(--text-muted);">—</span>'}</td>
           <td>${p.amc_active
             ? `<span class="badge-status ${isToday ? 'green' : 'blue'}">${isToday ? '📍 TODAY' : getOrdinal(p.amc_day) + ' of every month'}</span>`
             : '<span style="color:var(--text-muted);">—</span>'
@@ -74,8 +75,12 @@ function openPartyModal(party, body, header) {
 
     <div style="background:var(--bg-secondary);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
-        <i class="fas fa-calendar-check" style="color:var(--primary);"></i>
-        <strong style="font-size:0.9rem;">AMC Monthly Refill Schedule</strong>
+        <i class="fas fa-indian-rupee-sign" style="color:var(--primary);"></i>
+        <strong style="font-size:0.9rem;">Pricing & AMC Schedule</strong>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Fixed Monthly Rate (₹) *</label>
+        <input class="form-input" type="number" id="party-amc-rate" min="0" step="1" value="${party?.amc_rate || ''}" placeholder="E.g. 2500" />
       </div>
       <div class="form-row">
         <div class="form-group" style="margin-bottom:0;">
@@ -110,13 +115,15 @@ function openPartyModal(party, body, header) {
     if (!name || name.length < 2) { showToast('Name is required', 'error'); return; }
     const amcActive = document.getElementById('party-amc-active').checked;
     const amcDay = parseInt(document.getElementById('party-amc-day').value);
+    const amcRate = parseFloat(document.getElementById('party-amc-rate').value) || null;
     const record = {
       name,
       phone: document.getElementById('party-phone').value.trim(),
       address: document.getElementById('party-address').value.trim(),
       notes: document.getElementById('party-notes').value.trim(),
       amc_active: amcActive,
-      amc_day: amcActive ? amcDay : null
+      amc_day: amcActive ? amcDay : null,
+      amc_rate: amcRate
     };
     if (isEdit) { await db.update('parties', party.id, record); showToast('Party updated', 'success'); }
     else { await db.insert('parties', record); showToast('Party added', 'success'); }
