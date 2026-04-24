@@ -60,7 +60,9 @@ CREATE TABLE checkout_sessions (
   seller_id UUID REFERENCES profiles(id),
   checkout_time TIMESTAMPTZ NOT NULL DEFAULT now(),
   checkin_time TIMESTAMPTZ,
-  status TEXT NOT NULL DEFAULT 'checked_out' CHECK (status IN ('checked_out', 'checked_in', 'flagged')),
+  status TEXT NOT NULL DEFAULT 'pending_issue' CHECK (status IN ('pending_issue', 'checked_out', 'pending_approval', 'checked_in', 'flagged')),
+  approved_by UUID REFERENCES profiles(id),
+  approved_at TIMESTAMPTZ,
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );

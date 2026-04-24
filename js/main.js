@@ -40,6 +40,7 @@ const adminNav = [
 const sellerNav = [
   { section: 'My Area' },
   { id: 'dashboard', icon: 'fa-th-large', label: 'My Checkouts' },
+  { id: 'daily-ops', icon: 'fa-right-left', label: 'Daily Operations' },
   { section: 'Business' },
   { id: 'collections', icon: 'fa-money-bill-wave', label: 'Collections' },
 ];

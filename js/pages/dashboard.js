@@ -28,13 +28,16 @@ export async function renderDashboard(body, header) {
 
   const activeCheckouts = sessions.filter(s => s.status === 'checked_out').length;
   const flaggedSessions = sessions.filter(s => s.status === 'flagged').length;
+  const pendingIssues = sessions.filter(s => s.status === 'pending_issue').length;
+  const pendingReturns = sessions.filter(s => s.status === 'pending_approval').length;
+  const pendingTotal = pendingIssues + pendingReturns;
   const lowStockProducts = products.filter(p => p.is_active && p.current_stock <= p.min_stock_threshold);
   const expiringProducts = products.filter(p => p.is_active && p.expiry_date && daysUntil(p.expiry_date) <= 60 && daysUntil(p.expiry_date) > 0);
   const expiredProducts = products.filter(p => p.is_active && p.expiry_date && daysUntil(p.expiry_date) <= 0);
   const totalStockValue = products.reduce((sum, p) => sum + (p.current_stock * p.unit_price), 0);
   const activeRentals = rentals.filter(r => r.status === 'active').length;
   const totalSalesValue = sales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
-  const alertCount = lowStockProducts.length + flaggedSessions + expiredProducts.length;
+  const alertCount = lowStockProducts.length + flaggedSessions + expiredProducts.length + pendingTotal;
 
   // AMC Worklist
   const today = new Date().getDate();
@@ -89,7 +92,33 @@ export async function renderDashboard(body, header) {
       </div>
     </div>` : '';
 
+  // Pending approvals alert card
+  const pendingHtml = pendingTotal > 0 ? `
+    <div class="card" style="margin-bottom:20px;border-left:4px solid var(--accent);">
+      <div class="card-header">
+        <h3><i class="fas fa-clipboard-check" style="color:var(--accent);margin-right:8px;"></i>Pending Approvals</h3>
+        <span class="badge-status amber">${pendingTotal} pending</span>
+      </div>
+      <div class="card-body">
+        <div class="alert-list">
+          ${pendingIssues > 0 ? `<div class="alert-item" style="background:var(--purple-soft);">
+            <i class="fas fa-arrow-right-from-bracket" style="color:var(--purple);"></i>
+            <div style="flex:1;"><strong>${pendingIssues} stock issue request${pendingIssues > 1 ? 's' : ''}</strong>
+            <div style="font-size:0.75rem;color:var(--text-muted);">Sellers waiting for stock approval</div></div>
+            <button class="btn btn-sm btn-primary" onclick="window.navigateTo('daily-ops')">Review</button>
+          </div>` : ''}
+          ${pendingReturns > 0 ? `<div class="alert-item" style="background:var(--accent-soft);">
+            <i class="fas fa-arrow-left" style="color:var(--accent);"></i>
+            <div style="flex:1;"><strong>${pendingReturns} return${pendingReturns > 1 ? 's' : ''} awaiting approval</strong>
+            <div style="font-size:0.75rem;color:var(--text-muted);">Stock will not be restored until confirmed</div></div>
+            <button class="btn btn-sm btn-primary" onclick="window.navigateTo('daily-ops')">Review</button>
+          </div>` : ''}
+        </div>
+      </div>
+    </div>` : '';
+
   body.innerHTML = `
+    ${pendingHtml}
     ${amcWorklistHtml}
     ${upcomingHtml}
     <div class="stats-grid">
@@ -106,7 +135,7 @@ export async function renderDashboard(body, header) {
         <div class="stat-info">
           <div class="stat-label">Active Checkouts</div>
           <div class="stat-value">${activeCheckouts}</div>
-          <div class="stat-change ${flaggedSessions ? 'down' : ''}">${flaggedSessions ? flaggedSessions + ' flagged' : 'No flags'}</div>
+          <div class="stat-change ${flaggedSessions || pendingTotal ? 'down' : ''}">${flaggedSessions ? flaggedSessions + ' flagged' : 'No flags'}</div>
         </div>
       </div>
       <div class="stat-card">
