@@ -30,15 +30,15 @@ async function renderSessionsList(body, isAdmin) {
 
   body.innerHTML = `
     <div class="tabs">
-      ${isAdmin ? `<button class="tab-btn" data-tab="pending_issue">Pending Issue (${counts.pending_issue})</button>` : ''}
+      <button class="tab-btn" data-tab="pending_issue">Pending Issue (${counts.pending_issue})</button>
       <button class="tab-btn active" data-tab="checked_out">In Field (${counts.checked_out})</button>
-      ${isAdmin ? `<button class="tab-btn" data-tab="pending_approval">Pending Return (${counts.pending_approval})</button>` : ''}
+      <button class="tab-btn" data-tab="pending_approval">Pending Return (${counts.pending_approval})</button>
       <button class="tab-btn" data-tab="checked_in">Completed</button>
       <button class="tab-btn" data-tab="flagged">Flagged (${counts.flagged})</button>
     </div>
-    ${(counts.pending_issue + counts.pending_approval > 0) && isAdmin ? `<div style="background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;">
+    ${(counts.pending_issue + counts.pending_approval > 0) ? `<div style="background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius);padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;">
       <i class="fas fa-bell" style="color:var(--accent);font-size:1.1rem;"></i>
-      <span><strong>${counts.pending_issue + counts.pending_approval}</strong> session(s) awaiting your action.</span>
+      <span>${isAdmin ? `<strong>${counts.pending_issue + counts.pending_approval}</strong> session(s) awaiting your action.` : `<strong>${counts.pending_issue + counts.pending_approval}</strong> of your request(s) are pending admin approval.`}</span>
     </div>` : ''}
     <div id="sessions-list"></div>`;
 

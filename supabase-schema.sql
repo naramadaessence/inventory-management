@@ -204,10 +204,18 @@ CREATE POLICY "Sellers read parties" ON parties FOR SELECT USING (true);
 -- CHECKOUT: sellers see own, admins see all
 CREATE POLICY "View own or admin sessions" ON checkout_sessions FOR SELECT USING (seller_id = auth.uid() OR is_admin());
 CREATE POLICY "Admins manage sessions" ON checkout_sessions FOR ALL USING (is_admin());
+CREATE POLICY "Sellers create own sessions" ON checkout_sessions FOR INSERT WITH CHECK (seller_id = auth.uid());
+CREATE POLICY "Sellers update own sessions" ON checkout_sessions FOR UPDATE USING (seller_id = auth.uid());
 CREATE POLICY "View own or admin items" ON checkout_items FOR SELECT USING (
   EXISTS (SELECT 1 FROM checkout_sessions WHERE id = checkout_items.session_id AND (seller_id = auth.uid() OR is_admin()))
 );
 CREATE POLICY "Admins manage items" ON checkout_items FOR ALL USING (is_admin());
+CREATE POLICY "Sellers create own items" ON checkout_items FOR INSERT WITH CHECK (
+  EXISTS (SELECT 1 FROM checkout_sessions WHERE id = checkout_items.session_id AND seller_id = auth.uid())
+);
+CREATE POLICY "Sellers update own items" ON checkout_items FOR UPDATE USING (
+  EXISTS (SELECT 1 FROM checkout_sessions WHERE id = checkout_items.session_id AND seller_id = auth.uid())
+);
 
 -- SALES: admins full access, sellers can read
 CREATE POLICY "Admins manage sales" ON sales FOR ALL USING (is_admin());
