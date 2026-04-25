@@ -77,7 +77,7 @@ function openSaleModal(parties, products, body, header) {
   const activeProducts = products.filter(p => p.is_active);
   const content = `
     <div class="form-row">
-      <div class="form-group">
+      <div class="form-group" style="position:relative;z-index:50;">
         <label class="form-label">Party / Customer *</label>
         <div style="position:relative;" id="party-combo">
           <input class="form-input" id="sale-party-input" placeholder="Type name or select..." autocomplete="off" />
