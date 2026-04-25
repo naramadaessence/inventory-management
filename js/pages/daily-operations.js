@@ -186,8 +186,18 @@ async function openCheckoutModal(body, isAdmin) {
     const sellerId = isSeller ? auth.currentUser.id : document.getElementById('co-seller')?.value;
     if (!sellerId) { showToast('Please select a seller','error'); return; }
     if (!checkoutItems.length) { showToast('Please add at least one product','error'); return; }
+
+    // Validate quantities and stock
     for (const item of checkoutItems) {
       if (item.quantity <= 0) { showToast(`Invalid quantity for ${item.product.name}`,'error'); return; }
+      if (item.quantity > item.product.current_stock) {
+        if (isAdmin) {
+          showToast(`Insufficient stock for ${item.product.name} — only ${formatStock(item.product.current_stock, item.product.type)} available`, 'error');
+          return;
+        }
+        // Sellers get a warning but can still request (admin will verify)
+        if (!confirm(`⚠ ${item.product.name} only has ${formatStock(item.product.current_stock, item.product.type)} in stock. You are requesting ${formatStock(item.quantity, item.product.type)}.\n\nSubmit anyway? Admin will review.`)) return;
+      }
     }
 
     // Seller: pending_issue (no stock deduction). Admin: checked_out (deduct immediately).
@@ -229,48 +239,74 @@ async function approveIssue(sessionId, body, allItems, prodMap) {
   const { data: products } = await db.getAll('products');
   const freshMap = Object.fromEntries(products.map(p => [p.id, p]));
 
+  // Check if ANY item has insufficient stock
+  const insufficientItems = sItems.filter(i => {
+    const p = freshMap[i.product_id];
+    return !p || (p.current_stock || 0) < i.checkout_quantity;
+  });
+  const canApprove = insufficientItems.length === 0;
+
   const content = `<p style="margin-bottom:12px;font-size:0.9rem;">Review items the seller wants to take:</p>
     <div class="table-wrapper"><table class="data-table">
-    <thead><tr><th>Product</th><th>Requested Qty</th><th>Current Stock</th><th>Status</th></tr></thead>
+    <thead><tr><th>Product</th><th>Requested Qty</th><th>Current Stock</th><th>Shortfall</th><th>Status</th></tr></thead>
     <tbody>${sItems.map(i => {
       const p = freshMap[i.product_id] || prodMap[i.product_id];
-      const ok = (p?.current_stock || 0) >= i.checkout_quantity;
+      const stock = p?.current_stock || 0;
+      const ok = stock >= i.checkout_quantity;
+      const shortfall = ok ? 0 : i.checkout_quantity - stock;
       return `<tr style="${!ok?'background:var(--red-soft);':''}">
         <td><strong>${esc(p?.name||'Unknown')}</strong></td>
         <td>${formatStock(i.checkout_quantity,p?.type)}</td>
-        <td>${formatStock(p?.current_stock||0,p?.type)}</td>
-        <td>${ok?'<span class="badge-status green">OK</span>':'<span class="badge-status red">Low Stock</span>'}</td>
+        <td style="${!ok?'color:var(--red);font-weight:700;':''}">${formatStock(stock,p?.type)}</td>
+        <td>${!ok ? `<span style="color:var(--red);font-weight:700;">-${formatStock(shortfall,p?.type)}</span>` : '—'}</td>
+        <td>${ok?'<span class="badge-status green">OK</span>':'<span class="badge-status red">Insufficient</span>'}</td>
       </tr>`;
     }).join('')}</tbody></table></div>
-    <div style="margin-top:14px;padding:12px;background:var(--green-soft);border:1px solid var(--green);border-radius:var(--radius);font-size:0.85rem;">
-      <i class="fas fa-info-circle" style="color:var(--green);"></i> On approval, stock will be deducted from inventory.
-    </div>`;
+    ${!canApprove ? `<div style="margin-top:14px;padding:12px;background:var(--red-soft);border:1px solid var(--red);border-radius:var(--radius);font-size:0.85rem;">
+      <i class="fas fa-exclamation-triangle" style="color:var(--red);"></i> <strong>Cannot approve:</strong> ${insufficientItems.length} item(s) have insufficient stock. Add stock first or reject this request.
+    </div>` : `<div style="margin-top:14px;padding:12px;background:var(--green-soft);border:1px solid var(--green);border-radius:var(--radius);font-size:0.85rem;">
+      <i class="fas fa-info-circle" style="color:var(--green);"></i> All items have sufficient stock. On approval, stock will be deducted.
+    </div>`}`;
   const footer = `<button class="btn btn-secondary" id="ai-cancel">Cancel</button>
     <button class="btn btn-danger" id="ai-reject"><i class="fas fa-times"></i> Reject</button>
-    <button class="btn btn-primary" id="ai-approve" style="background:var(--green);border-color:var(--green);"><i class="fas fa-check"></i> Approve Issue</button>`;
+    <button class="btn btn-primary" id="ai-approve" style="background:${canApprove ? 'var(--green)' : 'var(--text-muted)'};border-color:${canApprove ? 'var(--green)' : 'var(--text-muted)'};${canApprove ? '' : 'cursor:not-allowed;opacity:0.6;'}" ${canApprove ? '' : 'disabled'}><i class="fas fa-check"></i> Approve Issue</button>`;
   const { close } = createModal('Approve Stock Issue', content, { footer, large: true });
 
   document.getElementById('ai-cancel').onclick = close;
   document.getElementById('ai-reject').onclick = async () => { close(); await flagSession(sessionId, body, true); };
-  document.getElementById('ai-approve').onclick = async () => {
-    for (const item of sItems) {
-      const p = freshMap[item.product_id];
-      if (!p) continue;
-      const newStock = Math.max(0, (p.current_stock || 0) - item.checkout_quantity);
-      await dbOp(db.update('products', item.product_id, { current_stock: newStock }), 'Failed to deduct stock');
-      await dbOp(db.insert('inventory_transactions', {
-        product_id: item.product_id, type: 'checkout', quantity: -item.checkout_quantity,
-        reference_type: 'checkout_session', reference_id: sessionId,
-        performed_by: auth.currentUser.id, notes: 'Approved issue to seller'
-      }), 'Failed to log transaction');
-    }
-    await dbOp(db.update('checkout_sessions', sessionId, {
-      status: 'checked_out', approved_by: auth.currentUser.id, approved_at: new Date().toISOString()
-    }), 'Failed to approve');
-    showToast('Issue approved — stock deducted', 'success');
-    close();
-    await renderSessionsList(body, true);
-  };
+
+  if (canApprove) {
+    document.getElementById('ai-approve').onclick = async () => {
+      // Re-check stock at approval time (prevent race conditions)
+      const { data: latestProducts } = await db.getAll('products');
+      const latestMap = Object.fromEntries(latestProducts.map(p => [p.id, p]));
+      for (const item of sItems) {
+        const p = latestMap[item.product_id];
+        if (!p || (p.current_stock || 0) < item.checkout_quantity) {
+          showToast(`Stock changed — ${p?.name || 'Unknown'} now has only ${formatStock(p?.current_stock || 0, p?.type)}. Cannot approve.`, 'error');
+          close();
+          await renderSessionsList(body, true);
+          return;
+        }
+      }
+      for (const item of sItems) {
+        const p = latestMap[item.product_id];
+        const newStock = (p.current_stock || 0) - item.checkout_quantity;
+        await dbOp(db.update('products', item.product_id, { current_stock: newStock }), 'Failed to deduct stock');
+        await dbOp(db.insert('inventory_transactions', {
+          product_id: item.product_id, type: 'checkout', quantity: -item.checkout_quantity,
+          reference_type: 'checkout_session', reference_id: sessionId,
+          performed_by: auth.currentUser.id, notes: 'Approved issue to seller'
+        }), 'Failed to log transaction');
+      }
+      await dbOp(db.update('checkout_sessions', sessionId, {
+        status: 'checked_out', approved_by: auth.currentUser.id, approved_at: new Date().toISOString()
+      }), 'Failed to approve');
+      showToast('Issue approved — stock deducted', 'success');
+      close();
+      await renderSessionsList(body, true);
+    };
+  }
 }
 
 // ============================================
