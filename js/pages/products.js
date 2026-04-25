@@ -28,7 +28,10 @@ export async function renderProducts(body, header) {
       <h1>Products</h1>
       <div class="page-header-subtitle">Manage your product catalog & stock levels</div>
     </div>
-    <button class="btn btn-primary" id="btn-add-product"><i class="fas fa-plus"></i> Add Product</button>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" id="btn-manage-cats"><i class="fas fa-tags"></i> Categories</button>
+      <button class="btn btn-primary" id="btn-add-product"><i class="fas fa-plus"></i> Add Product</button>
+    </div>
   `;
   document.getElementById('mobile-toggle')?.addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
 
@@ -120,6 +123,7 @@ export async function renderProducts(body, header) {
   document.getElementById('product-filter-cat').addEventListener('change', e => { filterCat = e.target.value; renderList(); });
   document.getElementById('product-view').addEventListener('change', e => { view = e.target.value; renderList(); });
   document.getElementById('btn-add-product').addEventListener('click', () => openProductModal(null, categories));
+  document.getElementById('btn-manage-cats').addEventListener('click', () => openCategoryManager(body, header));
 
   renderList();
 }
@@ -307,4 +311,81 @@ function openProductModal(product, categories) {
       }
     };
   }
+}
+
+// ============================================
+// CATEGORY MANAGER
+// ============================================
+async function openCategoryManager(body, header) {
+  const { data: categories } = await db.getAll('categories');
+  const { data: products } = await db.getAll('products');
+
+  function countProducts(catId) {
+    return products.filter(p => p.category_id === catId && p.is_active !== false).length;
+  }
+
+  const content = `
+    <div style="margin-bottom:16px;display:flex;gap:8px;">
+      <input class="form-input" id="new-cat-name" placeholder="New category name..." style="flex:1;" maxlength="100" />
+      <select class="form-select" id="new-cat-type" style="width:120px;">
+        <option value="unit">Unit (pcs)</option>
+        <option value="liquid">Liquid (g)</option>
+      </select>
+      <button class="btn btn-primary" id="add-cat-btn"><i class="fas fa-plus"></i> Add</button>
+    </div>
+    <div class="table-wrapper"><table class="data-table">
+      <thead><tr><th>Name</th><th>Type</th><th>Products</th><th>Actions</th></tr></thead>
+      <tbody>${categories.length === 0 
+        ? '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px;">No categories yet</td></tr>'
+        : categories.map(c => `<tr>
+          <td><strong>${escapeHtml(c.name)}</strong></td>
+          <td><span class="badge-status ${c.type === 'liquid' ? 'purple' : 'blue'}">${c.type}</span></td>
+          <td>${countProducts(c.id)} products</td>
+          <td>
+            <button class="btn btn-sm btn-ghost edit-cat-btn" data-id="${c.id}" data-name="${escapeHtml(c.name)}" data-type="${c.type}"><i class="fas fa-pen"></i></button>
+            ${countProducts(c.id) === 0 ? `<button class="btn btn-sm btn-danger delete-cat-btn" data-id="${c.id}"><i class="fas fa-trash"></i></button>` : ''}
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
+  `;
+
+  const { close } = createModal('Manage Categories', content, { large: true });
+
+  document.getElementById('add-cat-btn').addEventListener('click', async () => {
+    const name = document.getElementById('new-cat-name').value.trim();
+    const type = document.getElementById('new-cat-type').value;
+    if (!name) { showToast('Category name is required', 'error'); return; }
+    if (categories.some(c => c.name.toLowerCase() === name.toLowerCase())) { showToast('Category already exists', 'error'); return; }
+    await dbOp(db.insert('categories', { name, type }), 'Failed to create category');
+    showToast('Category created', 'success');
+    close();
+    openCategoryManager(body, header);
+  });
+
+  document.querySelectorAll('.edit-cat-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = parseInt(btn.dataset.id);
+      const oldName = btn.dataset.name;
+      const newName = prompt('Rename category:', oldName);
+      if (newName && newName.trim() && newName.trim() !== oldName) {
+        dbOp(db.update('categories', id, { name: newName.trim() }), 'Failed to rename').then(() => {
+          showToast('Category renamed', 'success');
+          close();
+          openCategoryManager(body, header);
+        });
+      }
+    });
+  });
+
+  document.querySelectorAll('.delete-cat-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = parseInt(btn.dataset.id);
+      if (!confirm('Delete this empty category?')) return;
+      await dbOp(db.delete('categories', id), 'Failed to delete category');
+      showToast('Category deleted', 'success');
+      close();
+      openCategoryManager(body, header);
+    });
+  });
 }
