@@ -171,7 +171,7 @@ function openProductModal(product, categories) {
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Current Stock ${product?.type === 'liquid' ? '(grams)' : '(pieces)'} *</label>
+        <label class="form-label" id="prod-stock-label">Current Stock *</label>
         <input class="form-input" type="number" id="prod-stock" value="${product?.current_stock || 0}" min="0" step="${product?.type === 'liquid' ? '0.1' : '1'}" required />
       </div>
       <div class="form-group">
@@ -232,6 +232,17 @@ function openProductModal(product, categories) {
   }
 
   document.getElementById('prod-cancel-btn').onclick = close;
+
+  // Update stock/threshold labels when category changes
+  function updateStockLabels() {
+    const catId = parseInt(document.getElementById('prod-category').value);
+    const cat = categories.find(c => c.id === catId);
+    const unit = cat?.type === 'liquid' ? 'grams' : 'pieces';
+    document.getElementById('prod-stock-label').textContent = `Current Stock (${unit}) *`;
+    document.getElementById('prod-stock').step = cat?.type === 'liquid' ? '0.1' : '1';
+  }
+  updateStockLabels();
+  document.getElementById('prod-category').addEventListener('change', updateStockLabels);
 
   document.getElementById('prod-save-btn').onclick = async () => {
     const name = document.getElementById('prod-name').value.trim();
