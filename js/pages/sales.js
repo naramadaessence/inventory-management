@@ -79,10 +79,14 @@ function openSaleModal(parties, products, body, header) {
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Party / Customer *</label>
-        <select class="form-select" id="sale-party">
-          <option value="">Walk-in customer</option>
-          ${parties.map(p => `<option value="${p.id}" data-catrates='${JSON.stringify(p.custom_category_rates || {})}'>${esc(p.name)}</option>`).join('')}
-        </select>
+        <div style="position:relative;" id="party-combo">
+          <input class="form-input" id="sale-party-input" placeholder="Type name or select..." autocomplete="off" />
+          <input type="hidden" id="sale-party" value="" />
+          <div id="party-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--card);border:1px solid var(--border);border-top:none;border-radius:0 0 var(--radius) var(--radius);max-height:200px;overflow-y:auto;z-index:100;box-shadow:var(--shadow-md);">
+            <div class="party-opt" data-id="" data-catrates="{}" style="padding:10px 14px;cursor:pointer;font-size:0.9rem;color:var(--text-muted);">Walk-in customer</div>
+            ${parties.map(p => `<div class="party-opt" data-id="${p.id}" data-catrates='${JSON.stringify(p.custom_category_rates || {})}' style="padding:10px 14px;cursor:pointer;font-size:0.9rem;">${esc(p.name)}</div>`).join('')}
+          </div>
+        </div>
       </div>
       <div class="form-group">
         <label class="form-label">Sale Date *</label>
@@ -156,17 +160,50 @@ function openSaleModal(parties, products, body, header) {
     document.getElementById('sale-total').value = formatCurrency(qty * price);
   }
 
+  // Party combobox logic
+  const partyInput = document.getElementById('sale-party-input');
+  const partyHidden = document.getElementById('sale-party');
+  const partyDropdown = document.getElementById('party-dropdown');
+  const allPartyOpts = partyDropdown.querySelectorAll('.party-opt');
+  let selectedCatRates = {};
+
+  partyInput.addEventListener('focus', () => { partyDropdown.style.display = 'block'; filterPartyOpts(); });
+  partyInput.addEventListener('input', () => {
+    partyHidden.value = '';
+    selectedCatRates = {};
+    filterPartyOpts();
+    applyPrice();
+  });
+  document.addEventListener('click', (e) => {
+    if (!document.getElementById('party-combo')?.contains(e.target)) partyDropdown.style.display = 'none';
+  });
+
+  function filterPartyOpts() {
+    const term = partyInput.value.toLowerCase().trim();
+    allPartyOpts.forEach(opt => {
+      const name = opt.textContent.toLowerCase();
+      opt.style.display = (!term || name.includes(term)) ? 'block' : 'none';
+    });
+  }
+
+  allPartyOpts.forEach(opt => {
+    opt.addEventListener('mouseenter', () => { opt.style.background = 'var(--primary-soft)'; });
+    opt.addEventListener('mouseleave', () => { opt.style.background = ''; });
+    opt.addEventListener('click', () => {
+      const id = opt.dataset.id;
+      partyInput.value = opt.textContent.trim();
+      partyHidden.value = id;
+      try { selectedCatRates = JSON.parse(opt.dataset.catrates || '{}'); } catch(e) { selectedCatRates = {}; }
+      partyDropdown.style.display = 'none';
+      applyPrice();
+    });
+  });
+
   // Get custom price for selected party + product (by category)
   function getCustomPrice() {
-    const partyOpt = document.getElementById('sale-party').selectedOptions[0];
     const prodOpt = document.getElementById('sale-product').selectedOptions[0];
     const catId = prodOpt?.dataset?.catid;
-    if (partyOpt?.dataset?.catrates && catId) {
-      try {
-        const rates = JSON.parse(partyOpt.dataset.catrates);
-        if (rates[catId] !== undefined) return rates[catId];
-      } catch(e) {}
-    }
+    if (catId && selectedCatRates[catId] !== undefined) return selectedCatRates[catId];
     return null;
   }
 
@@ -194,7 +231,6 @@ function openSaleModal(parties, products, body, header) {
     pendingFields.style.display = (e.target.value === 'pending' || e.target.value === 'partial') ? 'flex' : 'none';
   });
 
-  document.getElementById('sale-party').addEventListener('change', applyPrice);
   document.getElementById('sale-product').addEventListener('change', (e) => {
     const opt = e.target.selectedOptions[0];
     document.getElementById('sale-qty').step = opt.dataset.type === 'liquid' ? '0.1' : '1';
@@ -209,7 +245,8 @@ function openSaleModal(parties, products, body, header) {
     const productId = parseInt(document.getElementById('sale-product').value);
     const qty = parseFloat(document.getElementById('sale-qty').value);
     const price = parseFloat(document.getElementById('sale-price').value);
-    const partyId = document.getElementById('sale-party').value ? parseInt(document.getElementById('sale-party').value) : null;
+    const partyId = partyHidden.value ? parseInt(partyHidden.value) : null;
+    const partyName = partyInput.value.trim();
     const paymentStatus = document.getElementById('sale-payment').value;
     const paymentMethod = document.getElementById('sale-method').value || null;
     const amountReceived = paymentStatus === 'paid' ? qty * price : parseFloat(document.getElementById('sale-received').value) || 0;
