@@ -17,6 +17,7 @@ export async function renderRentals(body, header) {
   const { data: rentals } = await db.getAll('rentals', { orderBy: ['created_at', 'desc'] });
   const { data: parties } = await db.getAll('parties');
   const { data: products } = await db.getAll('products');
+  const { data: categories } = await db.getAll('categories');
   const partyMap = Object.fromEntries(parties.map(p => [p.id, p]));
   const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
 
@@ -54,7 +55,7 @@ export async function renderRentals(body, header) {
     </table></div>`}
   `;
 
-  document.getElementById('btn-new-rental').addEventListener('click', () => openRentalModal(parties, products, body, header));
+  document.getElementById('btn-new-rental').addEventListener('click', () => openRentalModal(parties, products, categories, body, header));
   body.querySelectorAll('.return-btn').forEach(el => {
     el.addEventListener('click', async () => {
       const rental = rentals.find(r => r.id == el.dataset.id);
@@ -70,8 +71,13 @@ export async function renderRentals(body, header) {
   });
 }
 
-function openRentalModal(parties, products, body, header) {
-  const machines = products.filter(p => p.is_active && (p.category_id === 1 || p.category_id === 2));
+function openRentalModal(parties, products, categories, body, header) {
+  // Find machine categories by name (Automatic Dispenser, Mini Diffuser, Premium Diffuser)
+  const machineCatNames = ['automatic dispenser', 'mini diffuser', 'premium diffuser', 'dispenser', 'diffuser'];
+  const machineCatIds = categories
+    .filter(c => machineCatNames.some(n => c.name.toLowerCase().includes(n)))
+    .map(c => c.id);
+  const machines = products.filter(p => p.is_active && machineCatIds.includes(p.category_id));
   const content = `
     <div class="form-row">
       <div class="form-group">
