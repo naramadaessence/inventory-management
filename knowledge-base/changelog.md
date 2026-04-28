@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-04-28 — Machine Type, Sale Editing, Stock Validation & UI Fixes
+**What**: Added machine type tracking (purchased/free-to-use) on parties, editable sale records, stock validation on issue approval, searchable party combobox, category management UI, and multiple bug fixes.
+**Why**: Client requested machine deployment tracking, admin needed to edit sales, and stock approval had no checks allowing 0-stock approvals.
+**Files Changed**: `parties.js`, `sales.js`, `daily-operations.js`, `products.js`, `rentals.js`, `supabase-schema.sql`
+
+### Features Added
+- **Machine Type on Parties**: Three options — No Machine, Purchased (green badge), Free to Use (blue badge = monthly visits required)
+- **Editable Sale Records**: Click any sale row to edit qty, price, payment status, notes. Stock auto-adjusts on qty change. Delete restores stock.
+- **Category Management UI**: "Categories" button on Products page opens modal to add/rename/delete categories
+- **Searchable Party Combobox**: Sale modal party field is now typeable with autocomplete dropdown (supports walk-in customers)
+- **Dynamic Stock Labels**: Product form shows "grams" or "pieces" based on selected category type
+
+### Bug Fixes
+- **Stock validation on issue approval**: Approve button is disabled + greyed out when insufficient stock. Shows shortfall per item. Re-checks at click time to prevent race conditions.
+- **Admin direct issue blocked** when stock is 0 or insufficient
+- **Seller request warns** if requesting more than available (can still submit for admin review)
+- **Rental dropdown empty**: Was using hardcoded category_id 1/2 — now filters by category name pattern
+- **Party dropdown z-index**: Dropdown was rendering behind form fields — fixed with z-index + solid white background
+
+### DB Migration (run in Supabase SQL Editor)
+```sql
+ALTER TABLE parties ADD COLUMN IF NOT EXISTS machine_type TEXT DEFAULT 'none' CHECK (machine_type IN ('none', 'purchased', 'free_to_use'));
+```
+
+### Design Decision: Liquid Units
+- All liquid products measured in **grams** everywhere (stock, checkout, sales, price)
+- Price is ₹/gram (e.g., ₹0.80/g instead of ₹800/litre)
+- Reason: sellers weigh on scales daily — grams is the natural unit, avoids gram↔litre conversion errors
+
 ## 2026-04-24 — Issue → Return → Admin Approval System
 **What**: Complete rewrite of Daily Operations into a 4-step approval workflow
 **Why**: Stock should only be deducted/restored with admin confirmation. Sellers need to track their own field stock.
