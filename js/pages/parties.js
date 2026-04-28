@@ -28,7 +28,7 @@ export async function renderParties(body, header) {
 
   body.innerHTML = parties.length === 0 ? '<div class="empty-state"><i class="fas fa-users"></i><h3>No parties yet</h3><p>Add your first customer or client.</p></div>' : `
     <div class="table-wrapper"><table class="data-table">
-      <thead><tr><th>Name</th><th>Phone</th><th>Address</th><th>AMC Rate</th><th>AMC Refill</th><th>Category Pricing</th><th>Total Sales</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Name</th><th>Phone</th><th>Machine</th><th>AMC Rate</th><th>AMC Refill</th><th>Category Pricing</th><th>Total Sales</th><th>Actions</th></tr></thead>
       <tbody>${parties.map(p => {
         const partySales = sales.filter(s => s.party_id === p.id);
         const totalRev = partySales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
@@ -37,9 +37,14 @@ export async function renderParties(body, header) {
         const catRates = p.custom_category_rates || {};
         const rateEntries = Object.entries(catRates);
         return `<tr style="${isToday ? 'background:var(--primary-soft);' : ''}">
-          <td><strong>${esc(p.name)}</strong>${p.notes ? `<br><small style="color:var(--text-muted);">${esc(p.notes)}</small>` : ''}</td>
+          <td><strong>${esc(p.name)}</strong>${p.notes ? `<br><small style="color:var(--text-muted);">${esc(p.notes)}</small>` : ''}${p.address ? `<br><small style="color:var(--text-muted);"><i class="fas fa-map-marker-alt" style="font-size:0.65rem;"></i> ${esc(p.address)}</small>` : ''}</td>
           <td>${esc(p.phone || '—')}</td>
-          <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;">${esc(p.address || '—')}</td>
+          <td>${p.machine_type === 'purchased' 
+            ? '<span class="badge-status green"><i class="fas fa-shopping-cart" style="font-size:0.65rem;"></i> Purchased</span>' 
+            : p.machine_type === 'free_to_use' 
+              ? '<span class="badge-status blue"><i class="fas fa-handshake" style="font-size:0.65rem;"></i> Free to Use</span>' 
+              : '<span style="color:var(--text-muted);">—</span>'
+          }</td>
           <td style="font-weight:700;color:var(--primary);">${p.amc_rate ? '₹' + Number(p.amc_rate).toLocaleString('en-IN') + '/mo' : '<span style="color:var(--text-muted);">—</span>'}</td>
           <td>${p.amc_active
             ? `<span class="badge-status ${isToday ? 'green' : 'blue'}">${isToday ? '📍 TODAY' : getOrdinal(p.amc_day) + ' of month'}</span>`
@@ -82,6 +87,27 @@ function openPartyModal(party, body, header, products, categories) {
       <div class="form-group">
         <label class="form-label">Address</label>
         <input class="form-input" id="party-address" value="${esc(party?.address || '')}" maxlength="300" />
+      </div>
+    </div>
+
+    <div style="background:var(--bg-secondary);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <i class="fas fa-cogs" style="color:var(--green);"></i>
+        <strong style="font-size:0.9rem;">Machine Type</strong>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <label style="display:flex;align-items:center;gap:6px;padding:10px 16px;border-radius:var(--radius);border:2px solid var(--border);cursor:pointer;flex:1;min-width:140px;transition:all 0.2s;" class="machine-opt" data-val="none">
+          <input type="radio" name="machine-type" value="none" ${!party?.machine_type || party?.machine_type === 'none' ? 'checked' : ''} style="accent-color:var(--text-muted);" />
+          <div><strong style="font-size:0.85rem;">No Machine</strong><div style="font-size:0.7rem;color:var(--text-muted);">Only refills / oils</div></div>
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;padding:10px 16px;border-radius:var(--radius);border:2px solid var(--border);cursor:pointer;flex:1;min-width:140px;transition:all 0.2s;" class="machine-opt" data-val="purchased">
+          <input type="radio" name="machine-type" value="purchased" ${party?.machine_type === 'purchased' ? 'checked' : ''} style="accent-color:var(--green);" />
+          <div><strong style="font-size:0.85rem;color:var(--green);"><i class="fas fa-shopping-cart"></i> Purchased</strong><div style="font-size:0.7rem;color:var(--text-muted);">Machine bought outright</div></div>
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;padding:10px 16px;border-radius:var(--radius);border:2px solid var(--border);cursor:pointer;flex:1;min-width:140px;transition:all 0.2s;" class="machine-opt" data-val="free_to_use">
+          <input type="radio" name="machine-type" value="free_to_use" ${party?.machine_type === 'free_to_use' ? 'checked' : ''} style="accent-color:var(--blue);" />
+          <div><strong style="font-size:0.85rem;color:var(--blue);"><i class="fas fa-handshake"></i> Free to Use</strong><div style="font-size:0.7rem;color:var(--text-muted);">Monthly visits required</div></div>
+        </label>
       </div>
     </div>
 
@@ -186,11 +212,14 @@ function openPartyModal(party, body, header, products, categories) {
       }
     });
 
+    const machineType = document.querySelector('input[name="machine-type"]:checked')?.value || 'none';
+
     const record = {
       name,
       phone: document.getElementById('party-phone').value.trim(),
       address: document.getElementById('party-address').value.trim(),
       notes: document.getElementById('party-notes').value.trim(),
+      machine_type: machineType,
       amc_active: amcActive,
       amc_day: amcActive ? amcDay : null,
       amc_rate: amcRate,
