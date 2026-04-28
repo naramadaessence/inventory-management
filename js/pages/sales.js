@@ -56,7 +56,7 @@ export async function renderSales(body, header) {
         const prod = prodMap[s.product_id];
         const balance = (s.total_amount || 0) - (s.amount_received || 0);
         const isOverdue = s.expected_payment_date && s.payment_status !== 'paid' && daysUntil(s.expected_payment_date) < 0;
-        return `<tr>
+        return `<tr class="sale-row" data-id="${s.id}" style="cursor:pointer;">
           <td>${formatDate(s.sale_date || s.created_at)}</td>
           <td><strong>${esc(party?.name || 'Walk-in')}</strong></td>
           <td>${esc(prod?.name || 'Unknown')}</td>
@@ -71,6 +71,12 @@ export async function renderSales(body, header) {
   `;
 
   document.getElementById('btn-new-sale').addEventListener('click', () => openSaleModal(parties, products, body, header));
+  document.querySelectorAll('.sale-row').forEach(row => {
+    row.addEventListener('click', () => {
+      const sale = sales.find(s => s.id == row.dataset.id);
+      if (sale) openEditSaleModal(sale, parties, products, body, header);
+    });
+  });
 }
 
 function openSaleModal(parties, products, body, header) {
@@ -287,6 +293,169 @@ function openSaleModal(parties, products, body, header) {
     }), 'Failed to log transaction');
 
     showToast('Sale recorded', 'success');
+    close();
+    renderSales(body, header);
+  };
+}
+
+// ============================================
+// EDIT SALE MODAL
+// ============================================
+function openEditSaleModal(sale, parties, products, body, header) {
+  const prod = products.find(p => p.id === sale.product_id);
+  const party = parties.find(p => p.id === sale.party_id);
+
+  const content = `
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Party / Customer</label>
+        <input class="form-input" value="${esc(party?.name || 'Walk-in')}" disabled style="background:var(--bg);" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Product</label>
+        <input class="form-input" value="${esc(prod?.name || 'Unknown')}" disabled style="background:var(--bg);" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Sale Date *</label>
+        <input class="form-input" type="date" id="edit-sale-date" value="${sale.sale_date || ''}" required />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Quantity (${prod?.type === 'liquid' ? 'grams' : 'pieces'}) *</label>
+        <input class="form-input" type="number" id="edit-sale-qty" value="${sale.quantity}" min="0.1" step="${prod?.type === 'liquid' ? '0.1' : '1'}" required />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Unit Price (₹) *</label>
+        <input class="form-input" type="number" id="edit-sale-price" value="${sale.unit_price}" min="0" step="0.01" required />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Total Amount</label>
+        <input class="form-input" type="text" id="edit-sale-total" value="${formatCurrency(sale.total_amount)}" readonly style="font-weight:700;color:var(--green);" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Payment Status</label>
+        <select class="form-select" id="edit-sale-payment">
+          <option value="paid" ${sale.payment_status === 'paid' ? 'selected' : ''}>Paid</option>
+          <option value="partial" ${sale.payment_status === 'partial' ? 'selected' : ''}>Partial</option>
+          <option value="pending" ${sale.payment_status === 'pending' ? 'selected' : ''}>Pending</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Payment Method</label>
+        <select class="form-select" id="edit-sale-method">
+          <option value="">— Select —</option>
+          <option value="cash" ${sale.payment_method === 'cash' ? 'selected' : ''}>Cash</option>
+          <option value="upi" ${sale.payment_method === 'upi' ? 'selected' : ''}>UPI / Online</option>
+          <option value="bank_transfer" ${sale.payment_method === 'bank_transfer' ? 'selected' : ''}>Bank Transfer</option>
+          <option value="cheque" ${sale.payment_method === 'cheque' ? 'selected' : ''}>Cheque</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row" id="edit-pending-fields" style="display:${sale.payment_status === 'pending' || sale.payment_status === 'partial' ? 'flex' : 'none'};">
+      <div class="form-group">
+        <label class="form-label">Amount Received (₹)</label>
+        <input class="form-input" type="number" id="edit-sale-received" value="${sale.amount_received || 0}" min="0" step="0.01" />
+      </div>
+      <div class="form-group">
+        <label class="form-label">Expected Payment Date</label>
+        <input class="form-input" type="date" id="edit-sale-expected" value="${sale.expected_payment_date || ''}" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes</label>
+      <textarea class="form-textarea" id="edit-sale-notes" maxlength="500">${esc(sale.notes || '')}</textarea>
+    </div>
+  `;
+
+  const footer = `
+    <button class="btn btn-danger" id="edit-sale-delete"><i class="fas fa-trash"></i> Delete</button>
+    <div style="flex:1;"></div>
+    <button class="btn btn-secondary" id="edit-sale-cancel">Cancel</button>
+    <button class="btn btn-primary" id="edit-sale-save"><i class="fas fa-save"></i> Update Sale</button>
+  `;
+
+  const { close } = createModal('Edit Sale', content, { footer });
+
+  function updateEditTotal() {
+    const qty = parseFloat(document.getElementById('edit-sale-qty').value) || 0;
+    const price = parseFloat(document.getElementById('edit-sale-price').value) || 0;
+    document.getElementById('edit-sale-total').value = formatCurrency(qty * price);
+  }
+
+  document.getElementById('edit-sale-qty').addEventListener('input', updateEditTotal);
+  document.getElementById('edit-sale-price').addEventListener('input', updateEditTotal);
+  document.getElementById('edit-sale-payment').addEventListener('change', (e) => {
+    document.getElementById('edit-pending-fields').style.display = (e.target.value === 'pending' || e.target.value === 'partial') ? 'flex' : 'none';
+  });
+
+  document.getElementById('edit-sale-cancel').onclick = close;
+
+  // SAVE
+  document.getElementById('edit-sale-save').onclick = async () => {
+    const newQty = parseFloat(document.getElementById('edit-sale-qty').value);
+    const newPrice = parseFloat(document.getElementById('edit-sale-price').value);
+    const paymentStatus = document.getElementById('edit-sale-payment').value;
+    const paymentMethod = document.getElementById('edit-sale-method').value || null;
+    const amountReceived = paymentStatus === 'paid' ? newQty * newPrice : parseFloat(document.getElementById('edit-sale-received').value) || 0;
+
+    if (isNaN(newQty) || newQty <= 0 || isNaN(newPrice) || newPrice < 0) {
+      showToast('Invalid quantity or price', 'error'); return;
+    }
+
+    // Adjust stock: restore old qty, check new qty, deduct new qty
+    const oldQty = sale.quantity;
+    const qtyDiff = newQty - oldQty; // positive = need more stock, negative = return stock
+    if (qtyDiff > 0 && qtyDiff > (prod?.current_stock || 0)) {
+      showToast(`Insufficient stock — only ${prod?.current_stock || 0} available, need ${qtyDiff} more`, 'error');
+      return;
+    }
+
+    await dbOp(db.update('sales', sale.id, {
+      quantity: newQty,
+      unit_price: newPrice,
+      total_amount: newQty * newPrice,
+      payment_status: paymentStatus,
+      payment_method: paymentMethod,
+      amount_received: amountReceived,
+      expected_payment_date: document.getElementById('edit-sale-expected')?.value || null,
+      sale_date: document.getElementById('edit-sale-date').value,
+      notes: document.getElementById('edit-sale-notes').value.trim()
+    }), 'Failed to update sale');
+
+    // Adjust product stock if quantity changed
+    if (qtyDiff !== 0 && prod) {
+      await dbOp(db.update('products', prod.id, { current_stock: prod.current_stock - qtyDiff }), 'Failed to adjust stock');
+      await dbOp(db.insert('inventory_transactions', {
+        product_id: prod.id, type: 'sale_edit', quantity: -qtyDiff,
+        reference_type: 'sale', performed_by: auth.currentUser.id,
+        notes: `Sale edited: qty ${oldQty} → ${newQty}`
+      }), 'Failed to log adjustment');
+    }
+
+    showToast('Sale updated', 'success');
+    close();
+    renderSales(body, header);
+  };
+
+  // DELETE
+  document.getElementById('edit-sale-delete').onclick = async () => {
+    if (!confirm('Delete this sale? Stock will be restored.')) return;
+    // Restore stock
+    if (prod) {
+      await dbOp(db.update('products', prod.id, { current_stock: (prod.current_stock || 0) + sale.quantity }), 'Failed to restore stock');
+      await dbOp(db.insert('inventory_transactions', {
+        product_id: prod.id, type: 'sale_delete', quantity: sale.quantity,
+        reference_type: 'sale', performed_by: auth.currentUser.id,
+        notes: `Sale deleted, restored ${sale.quantity}`
+      }), 'Failed to log restoration');
+    }
+    await dbOp(db.delete('sales', sale.id), 'Failed to delete sale');
+    showToast('Sale deleted — stock restored', 'success');
     close();
     renderSales(body, header);
   };
