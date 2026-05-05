@@ -39,12 +39,21 @@ export async function renderParties(body, header) {
         return `<tr style="${isToday ? 'background:var(--primary-soft);' : ''}">
           <td><strong>${esc(p.name)}</strong>${p.notes ? `<br><small style="color:var(--text-muted);">${esc(p.notes)}</small>` : ''}${p.address ? `<br><small style="color:var(--text-muted);"><i class="fas fa-map-marker-alt" style="font-size:0.65rem;"></i> ${esc(p.address)}</small>` : ''}</td>
           <td>${esc(p.phone || '—')}</td>
-          <td>${p.machine_type === 'purchased' 
-            ? `<span class="badge-status green"><i class="fas fa-shopping-cart" style="font-size:0.65rem;"></i> Purchased${p.machine_count > 1 ? ` ×${p.machine_count}` : ''}</span>` 
-            : p.machine_type === 'free_to_use' 
-              ? `<span class="badge-status blue"><i class="fas fa-handshake" style="font-size:0.65rem;"></i> Free to Use${p.machine_count > 1 ? ` ×${p.machine_count}` : ''}</span>` 
-              : '<span style="color:var(--text-muted);">—</span>'
-          }</td>
+          <td>${(() => {
+            const mc = p.machine_counts || {};
+            const entries = Object.entries(mc).filter(([,v]) => v > 0);
+            if (entries.length === 0 && (!p.machine_type || p.machine_type === 'none')) return '<span style="color:var(--text-muted);">—</span>';
+            const typeColor = p.machine_type === 'purchased' ? 'green' : p.machine_type === 'free_to_use' ? 'blue' : 'gray';
+            const typeIcon = p.machine_type === 'purchased' ? 'fa-shopping-cart' : 'fa-handshake';
+            const typeLabel = p.machine_type === 'purchased' ? 'Purchased' : p.machine_type === 'free_to_use' ? 'Free to Use' : '';
+            if (entries.length > 0) {
+              return entries.map(([cid, qty]) => {
+                const cat = catMap[parseInt(cid)];
+                return `<div style="font-size:0.75rem;"><span class="badge-status ${typeColor}"><i class="fas ${typeIcon}" style="font-size:0.6rem;"></i> ${qty}× ${esc(cat?.name || '?')}</span></div>`;
+              }).join('');
+            }
+            return `<span class="badge-status ${typeColor}"><i class="fas ${typeIcon}" style="font-size:0.65rem;"></i> ${typeLabel}</span>`;
+          })()}</td>
           <td style="font-weight:700;color:var(--primary);">${p.amc_rate ? '₹' + Number(p.amc_rate).toLocaleString('en-IN') + '/mo' : '<span style="color:var(--text-muted);">—</span>'}</td>
           <td>${p.amc_active
             ? `<span class="badge-status ${isToday ? 'green' : 'blue'}">${isToday ? '📍 TODAY' : getOrdinal(p.amc_day) + ' of month'}</span>`
@@ -109,11 +118,6 @@ function openPartyModal(party, body, header, products, categories) {
           <div><strong style="font-size:0.85rem;color:var(--blue);"><i class="fas fa-handshake"></i> Free to Use</strong><div style="font-size:0.7rem;color:var(--text-muted);">Monthly visits required</div></div>
         </label>
       </div>
-      <div id="machine-count-row" style="display:${party?.machine_type && party?.machine_type !== 'none' ? 'flex' : 'none'};align-items:center;gap:12px;margin-top:12px;padding:10px 14px;background:var(--card);border-radius:var(--radius);border:1px solid var(--border);">
-        <i class="fas fa-hashtag" style="color:var(--primary);font-size:0.9rem;"></i>
-        <label style="font-size:0.85rem;font-weight:600;white-space:nowrap;">Number of Machines</label>
-        <input class="form-input" type="number" id="party-machine-count" value="${party?.machine_count || 1}" min="1" max="100" step="1" style="width:80px;text-align:center;font-weight:700;font-size:1rem;" />
-      </div>
     </div>
 
     <div style="background:var(--bg-secondary);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
@@ -152,6 +156,9 @@ function openPartyModal(party, body, header, products, categories) {
       <p style="font-size:0.75rem;color:var(--text-muted);margin:0 0 12px;">Set a fixed price per category. Any product in that category will auto-use this rate for this party.</p>
       ${categories.map(c => {
         const hasRate = catRates[String(c.id)] !== undefined && catRates[String(c.id)] !== null;
+        const isMachineCat = /dispenser|diffuser/i.test(c.name) && !/oil|refill/i.test(c.name);
+        const machineCounts = party?.machine_counts || {};
+        const machineQty = machineCounts[String(c.id)] || '';
         return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
           <label style="display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;">
             <input type="checkbox" class="cat-toggle" data-cid="${c.id}" ${hasRate ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--primary);" />
@@ -160,6 +167,10 @@ function openPartyModal(party, body, header, products, categories) {
               <div style="font-size:0.7rem;color:var(--text-muted);">${c.type === 'liquid' ? 'Oils (per gram)' : 'Units (per piece)'}</div>
             </div>
           </label>
+          ${isMachineCat ? `<input class="form-input machine-qty-input" data-cid="${c.id}" type="number" min="0" max="100" step="1"
+            value="${machineQty}"
+            placeholder="Qty"
+            style="width:65px;padding:6px 8px;font-size:0.8rem;text-align:center;font-weight:700;" />` : ''}
           <input class="form-input cat-rate-input" data-cid="${c.id}" type="number" min="0" step="1"
             value="${hasRate ? catRates[String(c.id)] : ''}"
             placeholder="₹ rate"
@@ -199,11 +210,7 @@ function openPartyModal(party, body, header, products, categories) {
 
   // Toggle machine count row based on machine type
   document.querySelectorAll('input[name="machine-type"]').forEach(radio => {
-    radio.addEventListener('change', () => {
-      const row = document.getElementById('machine-count-row');
-      row.style.display = radio.value !== 'none' ? 'flex' : 'none';
-      if (radio.value === 'none') document.getElementById('party-machine-count').value = 1;
-    });
+    radio.addEventListener('change', () => {});
   });
 
   document.getElementById('party-cancel').onclick = close;
@@ -228,13 +235,22 @@ function openPartyModal(party, body, header, products, categories) {
 
     const machineType = document.querySelector('input[name="machine-type"]:checked')?.value || 'none';
 
+    // Collect machine quantities per category
+    const machineCounts = {};
+    document.querySelectorAll('.machine-qty-input').forEach(input => {
+      const val = parseInt(input.value);
+      if (!isNaN(val) && val > 0) {
+        machineCounts[input.dataset.cid] = val;
+      }
+    });
+
     const record = {
       name,
       phone: document.getElementById('party-phone').value.trim(),
       address: document.getElementById('party-address').value.trim(),
       notes: document.getElementById('party-notes').value.trim(),
       machine_type: machineType,
-      machine_count: machineType !== 'none' ? (parseInt(document.getElementById('party-machine-count').value) || 1) : null,
+      machine_counts: Object.keys(machineCounts).length > 0 ? machineCounts : null,
       amc_active: amcActive,
       amc_day: amcActive ? amcDay : null,
       amc_rate: amcRate,
