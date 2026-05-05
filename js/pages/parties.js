@@ -156,7 +156,6 @@ function openPartyModal(party, body, header, products, categories) {
       <p style="font-size:0.75rem;color:var(--text-muted);margin:0 0 12px;">Set a fixed price per category. Any product in that category will auto-use this rate for this party.</p>
       ${categories.map(c => {
         const hasRate = catRates[String(c.id)] !== undefined && catRates[String(c.id)] !== null;
-        const isMachineCat = /dispenser|diffuser/i.test(c.name) && !/oil|refill/i.test(c.name);
         const machineCounts = party?.machine_counts || {};
         const machineQty = machineCounts[String(c.id)] || '';
         return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
@@ -167,10 +166,10 @@ function openPartyModal(party, body, header, products, categories) {
               <div style="font-size:0.7rem;color:var(--text-muted);">${c.type === 'liquid' ? 'Oils (per gram)' : 'Units (per piece)'}</div>
             </div>
           </label>
-          ${isMachineCat ? `<input class="form-input machine-qty-input" data-cid="${c.id}" type="number" min="0" max="100" step="1"
+          <input class="form-input machine-qty-input" data-cid="${c.id}" type="number" min="0" max="100" step="1"
             value="${machineQty}"
             placeholder="Qty"
-            style="width:65px;padding:6px 8px;font-size:0.8rem;text-align:center;font-weight:700;" />` : ''}
+            style="width:65px;padding:6px 8px;font-size:0.8rem;text-align:center;font-weight:700;" />
           <input class="form-input cat-rate-input" data-cid="${c.id}" type="number" min="0" step="1"
             value="${hasRate ? catRates[String(c.id)] : ''}"
             placeholder="₹ rate"
