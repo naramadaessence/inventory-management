@@ -48,6 +48,7 @@ CREATE TABLE parties (
   address TEXT,
   notes TEXT,
   machine_type TEXT DEFAULT 'none' CHECK (machine_type IN ('none', 'purchased', 'free_to_use')),
+  machine_count INTEGER DEFAULT 1,
   amc_active BOOLEAN DEFAULT false,
   amc_day INTEGER CHECK (amc_day >= 1 AND amc_day <= 28),
   amc_rate NUMERIC DEFAULT 0,

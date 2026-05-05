@@ -40,9 +40,9 @@ export async function renderParties(body, header) {
           <td><strong>${esc(p.name)}</strong>${p.notes ? `<br><small style="color:var(--text-muted);">${esc(p.notes)}</small>` : ''}${p.address ? `<br><small style="color:var(--text-muted);"><i class="fas fa-map-marker-alt" style="font-size:0.65rem;"></i> ${esc(p.address)}</small>` : ''}</td>
           <td>${esc(p.phone || '—')}</td>
           <td>${p.machine_type === 'purchased' 
-            ? '<span class="badge-status green"><i class="fas fa-shopping-cart" style="font-size:0.65rem;"></i> Purchased</span>' 
+            ? `<span class="badge-status green"><i class="fas fa-shopping-cart" style="font-size:0.65rem;"></i> Purchased${p.machine_count > 1 ? ` ×${p.machine_count}` : ''}</span>` 
             : p.machine_type === 'free_to_use' 
-              ? '<span class="badge-status blue"><i class="fas fa-handshake" style="font-size:0.65rem;"></i> Free to Use</span>' 
+              ? `<span class="badge-status blue"><i class="fas fa-handshake" style="font-size:0.65rem;"></i> Free to Use${p.machine_count > 1 ? ` ×${p.machine_count}` : ''}</span>` 
               : '<span style="color:var(--text-muted);">—</span>'
           }</td>
           <td style="font-weight:700;color:var(--primary);">${p.amc_rate ? '₹' + Number(p.amc_rate).toLocaleString('en-IN') + '/mo' : '<span style="color:var(--text-muted);">—</span>'}</td>
@@ -108,6 +108,11 @@ function openPartyModal(party, body, header, products, categories) {
           <input type="radio" name="machine-type" value="free_to_use" ${party?.machine_type === 'free_to_use' ? 'checked' : ''} style="accent-color:var(--blue);" />
           <div><strong style="font-size:0.85rem;color:var(--blue);"><i class="fas fa-handshake"></i> Free to Use</strong><div style="font-size:0.7rem;color:var(--text-muted);">Monthly visits required</div></div>
         </label>
+      </div>
+      <div id="machine-count-row" style="display:${party?.machine_type && party?.machine_type !== 'none' ? 'flex' : 'none'};align-items:center;gap:12px;margin-top:12px;padding:10px 14px;background:var(--card);border-radius:var(--radius);border:1px solid var(--border);">
+        <i class="fas fa-hashtag" style="color:var(--primary);font-size:0.9rem;"></i>
+        <label style="font-size:0.85rem;font-weight:600;white-space:nowrap;">Number of Machines</label>
+        <input class="form-input" type="number" id="party-machine-count" value="${party?.machine_count || 1}" min="1" max="100" step="1" style="width:80px;text-align:center;font-weight:700;font-size:1rem;" />
       </div>
     </div>
 
@@ -192,6 +197,15 @@ function openPartyModal(party, body, header, products, categories) {
     });
   });
 
+  // Toggle machine count row based on machine type
+  document.querySelectorAll('input[name="machine-type"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      const row = document.getElementById('machine-count-row');
+      row.style.display = radio.value !== 'none' ? 'flex' : 'none';
+      if (radio.value === 'none') document.getElementById('party-machine-count').value = 1;
+    });
+  });
+
   document.getElementById('party-cancel').onclick = close;
   document.getElementById('party-save').onclick = async () => {
     const name = document.getElementById('party-name').value.trim();
@@ -220,6 +234,7 @@ function openPartyModal(party, body, header, products, categories) {
       address: document.getElementById('party-address').value.trim(),
       notes: document.getElementById('party-notes').value.trim(),
       machine_type: machineType,
+      machine_count: machineType !== 'none' ? (parseInt(document.getElementById('party-machine-count').value) || 1) : null,
       amc_active: amcActive,
       amc_day: amcActive ? amcDay : null,
       amc_rate: amcRate,
