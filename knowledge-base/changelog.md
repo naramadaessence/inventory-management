@@ -1,5 +1,36 @@
 # Changelog
 
+## 2026-05-07 — Installations Page + Per-Category Machine Quantities
+**What**: Added dedicated Installations page for tracking machines deployed at party locations. Also added per-category Qty inputs on party form.
+**Why**: Client needs to track which machines are installed where, when they were installed, and how many — without price info.
+**Files Changed**: `installations.js` (NEW), `main.js`, `parties.js`, `supabase-schema.sql`
+
+### Features Added
+- **Installations page**: New sidebar item under Operations. Shows: Party, Machine, Model Number, Qty, Installation Date, Status (Active/Removed/Replaced)
+- **Add/Edit/Remove** installations with full CRUD
+- **Stats cards**: Active Locations count + Total Machines Deployed
+- **Per-category Qty on parties**: Every category row now has a Qty input (not just machines)
+
+### DB Migration (run in Supabase SQL Editor)
+```sql
+CREATE TABLE installations (
+  id SERIAL PRIMARY KEY,
+  party_id INTEGER REFERENCES parties(id) ON DELETE CASCADE,
+  product_id INTEGER REFERENCES products(id),
+  quantity INTEGER NOT NULL DEFAULT 1,
+  installation_date DATE NOT NULL,
+  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'removed', 'replaced')),
+  removed_date DATE,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+ALTER TABLE installations ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all for authenticated" ON installations FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+ALTER TABLE parties ADD COLUMN IF NOT EXISTS machine_counts JSONB;
+ALTER TABLE parties DROP COLUMN IF EXISTS machine_count;
+```
+
 ## 2026-04-28 — Machine Type, Sale Editing, Stock Validation & UI Fixes
 **What**: Added machine type tracking (purchased/free-to-use) on parties, editable sale records, stock validation on issue approval, searchable party combobox, category management UI, and multiple bug fixes.
 **Why**: Client requested machine deployment tracking, admin needed to edit sales, and stock approval had no checks allowing 0-stock approvals.
