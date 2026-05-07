@@ -56,6 +56,19 @@ CREATE TABLE parties (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 4b. INSTALLATIONS (machines deployed at party locations)
+CREATE TABLE installations (
+  id SERIAL PRIMARY KEY,
+  party_id INTEGER REFERENCES parties(id) ON DELETE CASCADE,
+  product_id INTEGER REFERENCES products(id),
+  quantity INTEGER NOT NULL DEFAULT 1,
+  installation_date DATE NOT NULL,
+  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'removed', 'replaced')),
+  removed_date DATE,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- 5. CHECKOUT SESSIONS
 CREATE TABLE checkout_sessions (
   id SERIAL PRIMARY KEY,

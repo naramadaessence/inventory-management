@@ -7,6 +7,7 @@ import { renderSales } from './pages/sales.js';
 import { renderCollections } from './pages/collections.js';
 import { renderParties } from './pages/parties.js';
 import { renderRentals } from './pages/rentals.js';
+import { renderInstallations } from './pages/installations.js';
 import { renderDamageLoss } from './pages/damage-loss.js';
 import { renderInventoryLog } from './pages/inventory-log.js';
 import { renderReports } from './pages/reports.js';
@@ -30,6 +31,7 @@ const adminNav = [
   { id: 'collections', icon: 'fa-money-bill-wave', label: 'Collections' },
   { id: 'parties', icon: 'fa-users', label: 'Parties' },
   { id: 'rentals', icon: 'fa-handshake', label: 'Rentals' },
+  { id: 'installations', icon: 'fa-tools', label: 'Installations' },
   { section: 'Tracking' },
   { id: 'damage-loss', icon: 'fa-triangle-exclamation', label: 'Damage & Loss' },
   { id: 'reports', icon: 'fa-chart-line', label: 'Reports' },
@@ -156,6 +158,7 @@ function navigateTo(page) {
     'collections': () => renderCollections(body, header),
     'parties': () => renderParties(body, header),
     'rentals': () => renderRentals(body, header),
+    'installations': () => renderInstallations(body, header),
     'damage-loss': () => renderDamageLoss(body, header),
     'inventory-log': () => renderInventoryLog(body, header),
     'reports': () => renderReports(body, header),
