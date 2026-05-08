@@ -26,57 +26,205 @@ export async function renderParties(body, header) {
   const { data: categories } = await db.getAll('categories');
   const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
 
-  body.innerHTML = parties.length === 0 ? '<div class="empty-state"><i class="fas fa-users"></i><h3>No parties yet</h3><p>Add your first customer or client.</p></div>' : `
-    <div class="table-wrapper"><table class="data-table">
-      <thead><tr><th>Name</th><th>Phone</th><th>Machine</th><th>AMC Rate</th><th>AMC Refill</th><th>Category Pricing</th><th>Total Sales</th><th>Actions</th></tr></thead>
-      <tbody>${parties.map(p => {
-        const partySales = sales.filter(s => s.party_id === p.id);
-        const totalRev = partySales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
-        const today = new Date().getDate();
-        const isToday = p.amc_active && p.amc_day === today;
-        const catRates = p.custom_category_rates || {};
-        const rateEntries = Object.entries(catRates);
-        return `<tr style="${isToday ? 'background:var(--primary-soft);' : ''}">
-          <td><strong>${esc(p.name)}</strong>${p.notes ? `<br><small style="color:var(--text-muted);">${esc(p.notes)}</small>` : ''}${p.address ? `<br><small style="color:var(--text-muted);"><i class="fas fa-map-marker-alt" style="font-size:0.65rem;"></i> ${esc(p.address)}</small>` : ''}</td>
-          <td>${esc(p.phone || '—')}</td>
-          <td>${(() => {
-            const mc = p.machine_counts || {};
-            const entries = Object.entries(mc).filter(([,v]) => v > 0);
-            if (entries.length === 0 && (!p.machine_type || p.machine_type === 'none')) return '<span style="color:var(--text-muted);">—</span>';
-            const typeColor = p.machine_type === 'purchased' ? 'green' : p.machine_type === 'free_to_use' ? 'blue' : 'gray';
-            const typeIcon = p.machine_type === 'purchased' ? 'fa-shopping-cart' : 'fa-handshake';
-            const typeLabel = p.machine_type === 'purchased' ? 'Purchased' : p.machine_type === 'free_to_use' ? 'Free to Use' : '';
-            if (entries.length > 0) {
-              return entries.map(([cid, qty]) => {
-                const cat = catMap[parseInt(cid)];
-                return `<div style="font-size:0.75rem;"><span class="badge-status ${typeColor}"><i class="fas ${typeIcon}" style="font-size:0.6rem;"></i> ${qty}× ${esc(cat?.name || '?')}</span></div>`;
-              }).join('');
-            }
-            return `<span class="badge-status ${typeColor}"><i class="fas ${typeIcon}" style="font-size:0.65rem;"></i> ${typeLabel}</span>`;
-          })()}</td>
-          <td style="font-weight:700;color:var(--primary);">${p.amc_rate ? '₹' + Number(p.amc_rate).toLocaleString('en-IN') + '/mo' : '<span style="color:var(--text-muted);">—</span>'}</td>
-          <td>${p.amc_active
-            ? `<span class="badge-status ${isToday ? 'green' : 'blue'}">${isToday ? '📍 TODAY' : getOrdinal(p.amc_day) + ' of month'}</span>`
-            : '<span style="color:var(--text-muted);">—</span>'
-          }</td>
-          <td>${rateEntries.length > 0
-            ? rateEntries.map(([cid, rate]) => {
-                const cat = catMap[parseInt(cid)];
-                return `<div style="font-size:0.75rem;"><strong>${esc(cat?.name || '?')}</strong>: ₹${Number(rate).toLocaleString('en-IN')}</div>`;
-              }).join('')
-            : '<span style="color:var(--text-muted);">Default</span>'
-          }</td>
-          <td style="font-weight:600;">₹${totalRev.toLocaleString('en-IN')} (${partySales.length})</td>
-          <td><button class="btn btn-sm btn-ghost edit-party-btn" data-id="${p.id}"><i class="fas fa-pen"></i></button></td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table></div>
+  // Pre-compute sales per party
+  const salesByParty = {};
+  sales.forEach(s => {
+    if (!salesByParty[s.party_id]) salesByParty[s.party_id] = { count: 0, total: 0 };
+    salesByParty[s.party_id].count++;
+    salesByParty[s.party_id].total += (s.total_amount || 0);
+  });
+
+  // Unique addresses for location filter
+  const addresses = [...new Set(parties.map(p => p.address).filter(Boolean))].sort();
+
+  body.innerHTML = `
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+        <i class="fas fa-filter" style="color:var(--primary);font-size:0.85rem;"></i>
+        <strong style="font-size:0.85rem;">Filters & Sorting</strong>
+        <button class="btn btn-ghost btn-sm" id="btn-clear-filters" style="margin-left:auto;font-size:0.75rem;"><i class="fas fa-times"></i> Clear All</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+        <div>
+          <label style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Search</label>
+          <div style="position:relative;">
+            <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:0.75rem;"></i>
+            <input class="form-input" id="pf-search" placeholder="Name, phone, address..." style="padding:8px 10px 8px 30px;font-size:0.8rem;" />
+          </div>
+        </div>
+        <div>
+          <label style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Machine Type</label>
+          <select class="form-select" id="pf-machine" style="padding:8px 10px;font-size:0.8rem;">
+            <option value="">All Types</option>
+            <option value="purchased">Purchased</option>
+            <option value="free_to_use">Free to Use</option>
+            <option value="none">No Machine</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">AMC Status</label>
+          <select class="form-select" id="pf-amc" style="padding:8px 10px;font-size:0.8rem;">
+            <option value="">All</option>
+            <option value="active">AMC Active</option>
+            <option value="inactive">No AMC</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Location</label>
+          <select class="form-select" id="pf-location" style="padding:8px 10px;font-size:0.8rem;">
+            <option value="">All Locations</option>
+            ${addresses.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Has Custom Pricing</label>
+          <select class="form-select" id="pf-pricing" style="padding:8px 10px;font-size:0.8rem;">
+            <option value="">All</option>
+            <option value="yes">Has Custom Rates</option>
+            <option value="no">Default Pricing</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Sort By</label>
+          <select class="form-select" id="pf-sort" style="padding:8px 10px;font-size:0.8rem;">
+            <option value="name_asc">Name: A → Z</option>
+            <option value="name_desc">Name: Z → A</option>
+            <option value="sales_desc">Sales: High → Low</option>
+            <option value="sales_asc">Sales: Low → High</option>
+            <option value="amc_desc">AMC Rate: High → Low</option>
+            <option value="amc_asc">AMC Rate: Low → High</option>
+            <option value="amc_day_asc">AMC Day: 1st → 28th</option>
+            <option value="newest">Newest First</option>
+            <option value="oldest">Oldest First</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div id="party-results-info" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:10px;"></div>
+    <div id="party-table-container"></div>
   `;
 
-  document.getElementById('btn-add-party').addEventListener('click', () => openPartyModal(null, body, header, products, categories));
-  body.querySelectorAll('.edit-party-btn').forEach(el => {
-    el.addEventListener('click', () => openPartyModal(parties.find(p => p.id == el.dataset.id), body, header, products, categories));
+  function renderRow(p) {
+    const ps = salesByParty[p.id] || { count: 0, total: 0 };
+    const today = new Date().getDate();
+    const isToday = p.amc_active && p.amc_day === today;
+    const catRates = p.custom_category_rates || {};
+    const rateEntries = Object.entries(catRates);
+    return `<tr style="${isToday ? 'background:var(--primary-soft);' : ''}">
+      <td><strong>${esc(p.name)}</strong>${p.notes ? `<br><small style="color:var(--text-muted);">${esc(p.notes)}</small>` : ''}${p.address ? `<br><small style="color:var(--text-muted);"><i class="fas fa-map-marker-alt" style="font-size:0.65rem;"></i> ${esc(p.address)}</small>` : ''}</td>
+      <td>${esc(p.phone || '—')}</td>
+      <td>${(() => {
+        const mc = p.machine_counts || {};
+        const entries = Object.entries(mc).filter(([,v]) => v > 0);
+        if (entries.length === 0 && (!p.machine_type || p.machine_type === 'none')) return '<span style="color:var(--text-muted);">—</span>';
+        const typeColor = p.machine_type === 'purchased' ? 'green' : p.machine_type === 'free_to_use' ? 'blue' : 'gray';
+        const typeIcon = p.machine_type === 'purchased' ? 'fa-shopping-cart' : 'fa-handshake';
+        const typeLabel = p.machine_type === 'purchased' ? 'Purchased' : p.machine_type === 'free_to_use' ? 'Free to Use' : '';
+        if (entries.length > 0) {
+          return entries.map(([cid, qty]) => {
+            const cat = catMap[parseInt(cid)];
+            return `<div style="font-size:0.75rem;"><span class="badge-status ${typeColor}"><i class="fas ${typeIcon}" style="font-size:0.6rem;"></i> ${qty}× ${esc(cat?.name || '?')}</span></div>`;
+          }).join('');
+        }
+        return `<span class="badge-status ${typeColor}"><i class="fas ${typeIcon}" style="font-size:0.65rem;"></i> ${typeLabel}</span>`;
+      })()}</td>
+      <td style="font-weight:700;color:var(--primary);">${p.amc_rate ? '₹' + Number(p.amc_rate).toLocaleString('en-IN') + '/mo' : '<span style="color:var(--text-muted);">—</span>'}</td>
+      <td>${p.amc_active
+        ? `<span class="badge-status ${isToday ? 'green' : 'blue'}">${isToday ? '📍 TODAY' : getOrdinal(p.amc_day) + ' of month'}</span>`
+        : '<span style="color:var(--text-muted);">—</span>'
+      }</td>
+      <td>${rateEntries.length > 0
+        ? rateEntries.map(([cid, rate]) => {
+            const cat = catMap[parseInt(cid)];
+            return `<div style="font-size:0.75rem;"><strong>${esc(cat?.name || '?')}</strong>: ₹${Number(rate).toLocaleString('en-IN')}</div>`;
+          }).join('')
+        : '<span style="color:var(--text-muted);">Default</span>'
+      }</td>
+      <td style="font-weight:600;">₹${ps.total.toLocaleString('en-IN')} (${ps.count})</td>
+      <td><button class="btn btn-sm btn-ghost edit-party-btn" data-id="${p.id}"><i class="fas fa-pen"></i></button></td>
+    </tr>`;
+  }
+
+  function applyFilters() {
+    const search = (document.getElementById('pf-search').value || '').toLowerCase();
+    const machineFilter = document.getElementById('pf-machine').value;
+    const amcFilter = document.getElementById('pf-amc').value;
+    const locationFilter = document.getElementById('pf-location').value;
+    const pricingFilter = document.getElementById('pf-pricing').value;
+    const sortVal = document.getElementById('pf-sort').value;
+
+    let filtered = parties.filter(p => {
+      if (search) {
+        const haystack = [p.name, p.phone, p.address, p.notes].filter(Boolean).join(' ').toLowerCase();
+        if (!haystack.includes(search)) return false;
+      }
+      if (machineFilter && (p.machine_type || 'none') !== machineFilter) return false;
+      if (amcFilter === 'active' && !p.amc_active) return false;
+      if (amcFilter === 'inactive' && p.amc_active) return false;
+      if (locationFilter && p.address !== locationFilter) return false;
+      if (pricingFilter === 'yes' && (!p.custom_category_rates || Object.keys(p.custom_category_rates).length === 0)) return false;
+      if (pricingFilter === 'no' && p.custom_category_rates && Object.keys(p.custom_category_rates).length > 0) return false;
+      return true;
+    });
+
+    filtered.sort((a, b) => {
+      const sA = salesByParty[a.id] || { total: 0 };
+      const sB = salesByParty[b.id] || { total: 0 };
+      switch (sortVal) {
+        case 'name_asc': return (a.name || '').localeCompare(b.name || '');
+        case 'name_desc': return (b.name || '').localeCompare(a.name || '');
+        case 'sales_desc': return sB.total - sA.total;
+        case 'sales_asc': return sA.total - sB.total;
+        case 'amc_desc': return (Number(b.amc_rate) || 0) - (Number(a.amc_rate) || 0);
+        case 'amc_asc': return (Number(a.amc_rate) || 0) - (Number(b.amc_rate) || 0);
+        case 'amc_day_asc': return (a.amc_day || 99) - (b.amc_day || 99);
+        case 'newest': return (b.created_at || '').localeCompare(a.created_at || '');
+        case 'oldest': return (a.created_at || '').localeCompare(b.created_at || '');
+        default: return 0;
+      }
+    });
+
+    const info = document.getElementById('party-results-info');
+    info.textContent = filtered.length === parties.length
+      ? `Showing all ${parties.length} parties`
+      : `Showing ${filtered.length} of ${parties.length} parties`;
+
+    const container = document.getElementById('party-table-container');
+    if (filtered.length === 0) {
+      container.innerHTML = '<div class="empty-state"><i class="fas fa-search"></i><h3>No parties match</h3><p>Try changing your filters.</p></div>';
+      return;
+    }
+    container.innerHTML = `
+      <div class="table-wrapper"><table class="data-table">
+        <thead><tr><th>Name</th><th>Phone</th><th>Machine</th><th>AMC Rate</th><th>AMC Refill</th><th>Category Pricing</th><th>Total Sales</th><th>Actions</th></tr></thead>
+        <tbody>${filtered.map(renderRow).join('')}</tbody>
+      </table></div>
+    `;
+
+    container.querySelectorAll('.edit-party-btn').forEach(el => {
+      el.addEventListener('click', () => openPartyModal(parties.find(p => p.id == el.dataset.id), body, header, products, categories));
+    });
+  }
+
+  // Bind filter events
+  ['pf-search', 'pf-machine', 'pf-amc', 'pf-location', 'pf-pricing', 'pf-sort'].forEach(id => {
+    document.getElementById(id).addEventListener(id === 'pf-search' ? 'input' : 'change', applyFilters);
   });
+
+  document.getElementById('btn-clear-filters').addEventListener('click', () => {
+    document.getElementById('pf-search').value = '';
+    document.getElementById('pf-machine').value = '';
+    document.getElementById('pf-amc').value = '';
+    document.getElementById('pf-location').value = '';
+    document.getElementById('pf-pricing').value = '';
+    document.getElementById('pf-sort').value = 'name_asc';
+    applyFilters();
+  });
+
+  document.getElementById('btn-add-party').addEventListener('click', () => openPartyModal(null, body, header, products, categories));
+
+  // Initial render
+  applyFilters();
 }
 
 function openPartyModal(party, body, header, products, categories) {
