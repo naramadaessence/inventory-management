@@ -27,6 +27,10 @@ export async function renderInstallations(body, header) {
     .map(c => c.id);
   const machineProducts = products.filter(p => p.is_active && machineCatIds.includes(p.category_id));
 
+  // Unique parties and products that appear in installations
+  const usedPartyIds = [...new Set(installations.map(i => i.party_id))];
+  const usedProductIds = [...new Set(installations.map(i => i.product_id))];
+
   const active = installations.filter(i => i.status === 'active').length;
   const totalMachines = installations.filter(i => i.status === 'active').reduce((sum, i) => sum + (i.quantity || 1), 0);
 
@@ -41,43 +45,203 @@ export async function renderInstallations(body, header) {
         <div class="stat-info"><div class="stat-label">Total Machines Deployed</div><div class="stat-value">${totalMachines}</div></div>
       </div>
     </div>
-    ${installations.length === 0 ? '<div class="empty-state"><i class="fas fa-tools"></i><h3>No installations yet</h3><p>Click "Add Installation" to record a machine deployment.</p></div>' : `
-    <div class="table-wrapper"><table class="data-table">
-      <thead><tr><th>Party / Location</th><th>Machine</th><th>Model</th><th>Qty</th><th>Installed On</th><th>Status</th><th>Actions</th></tr></thead>
-      <tbody>${installations.map(i => {
-        const party = partyMap[i.party_id];
-        const prod = prodMap[i.product_id];
-        return `<tr>
-          <td><strong>${esc(party?.name || 'Unknown')}</strong>${party?.address ? `<br><small style="color:var(--text-muted);"><i class="fas fa-map-marker-alt" style="font-size:0.6rem;"></i> ${esc(party.address)}</small>` : ''}</td>
-          <td>${esc(prod?.name || 'Unknown')}</td>
-          <td style="color:var(--text-muted);font-size:0.8rem;">${esc(prod?.model_number || '—')}</td>
-          <td style="font-weight:700;font-size:1.1rem;">${i.quantity || 1}</td>
-          <td>${formatDate(i.installation_date)}</td>
-          <td><span class="badge-status ${i.status === 'active' ? 'green' : i.status === 'removed' ? 'red' : 'amber'}">${i.status === 'active' ? 'Active' : i.status === 'removed' ? 'Removed' : 'Replaced'}</span></td>
-          <td>
-            ${i.status === 'active' ? `<button class="btn btn-sm btn-ghost edit-install" data-id="${i.id}"><i class="fas fa-pen"></i></button>
-            <button class="btn btn-sm btn-ghost remove-install" data-id="${i.id}" style="color:var(--red);"><i class="fas fa-times"></i></button>` : ''}
-          </td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table></div>`}
+
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:20px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;">
+        <i class="fas fa-filter" style="color:var(--primary);font-size:0.85rem;"></i>
+        <strong style="font-size:0.85rem;">Filters & Sorting</strong>
+        <button class="btn btn-ghost btn-sm" id="btn-clear-filters" style="margin-left:auto;font-size:0.75rem;"><i class="fas fa-times"></i> Clear All</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+        <div>
+          <label style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Search</label>
+          <div style="position:relative;">
+            <i class="fas fa-search" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:0.75rem;"></i>
+            <input class="form-input" id="filter-search" placeholder="Party, machine..." style="padding:8px 10px 8px 30px;font-size:0.8rem;" />
+          </div>
+        </div>
+        <div>
+          <label style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Party</label>
+          <select class="form-select" id="filter-party" style="padding:8px 10px;font-size:0.8rem;">
+            <option value="">All Parties</option>
+            ${usedPartyIds.map(pid => {
+              const p = partyMap[pid];
+              return p ? `<option value="${pid}">${esc(p.name)}</option>` : '';
+            }).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Machine</label>
+          <select class="form-select" id="filter-machine" style="padding:8px 10px;font-size:0.8rem;">
+            <option value="">All Machines</option>
+            ${usedProductIds.map(pid => {
+              const p = prodMap[pid];
+              return p ? `<option value="${pid}">${esc(p.name)}</option>` : '';
+            }).join('')}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Status</label>
+          <select class="form-select" id="filter-status" style="padding:8px 10px;font-size:0.8rem;">
+            <option value="">All Statuses</option>
+            <option value="active">Active</option>
+            <option value="removed">Removed</option>
+            <option value="replaced">Replaced</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">From Date</label>
+          <input class="form-input" type="date" id="filter-date-from" style="padding:8px 10px;font-size:0.8rem;" />
+        </div>
+        <div>
+          <label style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">To Date</label>
+          <input class="form-input" type="date" id="filter-date-to" style="padding:8px 10px;font-size:0.8rem;" />
+        </div>
+        <div>
+          <label style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">Sort By</label>
+          <select class="form-select" id="filter-sort" style="padding:8px 10px;font-size:0.8rem;">
+            <option value="date_desc">Date: Newest First</option>
+            <option value="date_asc">Date: Oldest First</option>
+            <option value="party_asc">Party: A → Z</option>
+            <option value="party_desc">Party: Z → A</option>
+            <option value="machine_asc">Machine: A → Z</option>
+            <option value="machine_desc">Machine: Z → A</option>
+            <option value="qty_desc">Qty: High → Low</option>
+            <option value="qty_asc">Qty: Low → High</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div id="install-results-info" style="font-size:0.8rem;color:var(--text-muted);margin-bottom:10px;"></div>
+    <div id="install-table-container"></div>
   `;
 
+  // ---- Client-side filter + sort engine ----
+  function applyFilters() {
+    const search = (document.getElementById('filter-search').value || '').toLowerCase();
+    const partyFilter = document.getElementById('filter-party').value;
+    const machineFilter = document.getElementById('filter-machine').value;
+    const statusFilter = document.getElementById('filter-status').value;
+    const dateFrom = document.getElementById('filter-date-from').value;
+    const dateTo = document.getElementById('filter-date-to').value;
+    const sortVal = document.getElementById('filter-sort').value;
+
+    let filtered = installations.filter(i => {
+      const party = partyMap[i.party_id];
+      const prod = prodMap[i.product_id];
+      // Search (party name, address, machine name, model, notes)
+      if (search) {
+        const haystack = [
+          party?.name, party?.address, prod?.name, prod?.model_number, i.notes
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (!haystack.includes(search)) return false;
+      }
+      if (partyFilter && String(i.party_id) !== partyFilter) return false;
+      if (machineFilter && String(i.product_id) !== machineFilter) return false;
+      if (statusFilter && i.status !== statusFilter) return false;
+      if (dateFrom && i.installation_date < dateFrom) return false;
+      if (dateTo && i.installation_date > dateTo) return false;
+      return true;
+    });
+
+    // Sort
+    filtered.sort((a, b) => {
+      const pA = partyMap[a.party_id]?.name || '';
+      const pB = partyMap[b.party_id]?.name || '';
+      const mA = prodMap[a.product_id]?.name || '';
+      const mB = prodMap[b.product_id]?.name || '';
+      switch (sortVal) {
+        case 'date_desc': return (b.installation_date || '').localeCompare(a.installation_date || '');
+        case 'date_asc': return (a.installation_date || '').localeCompare(b.installation_date || '');
+        case 'party_asc': return pA.localeCompare(pB);
+        case 'party_desc': return pB.localeCompare(pA);
+        case 'machine_asc': return mA.localeCompare(mB);
+        case 'machine_desc': return mB.localeCompare(mA);
+        case 'qty_desc': return (b.quantity || 1) - (a.quantity || 1);
+        case 'qty_asc': return (a.quantity || 1) - (b.quantity || 1);
+        default: return 0;
+      }
+    });
+
+    // Results info
+    const info = document.getElementById('install-results-info');
+    if (filtered.length === installations.length) {
+      info.textContent = `Showing all ${installations.length} installations`;
+    } else {
+      info.textContent = `Showing ${filtered.length} of ${installations.length} installations`;
+    }
+
+    // Render table
+    const container = document.getElementById('install-table-container');
+    if (filtered.length === 0) {
+      container.innerHTML = '<div class="empty-state"><i class="fas fa-search"></i><h3>No installations match</h3><p>Try changing your filters.</p></div>';
+      return;
+    }
+    container.innerHTML = `
+      <div class="table-wrapper"><table class="data-table">
+        <thead><tr><th>Party / Location</th><th>Machine</th><th>Model</th><th>Qty</th><th>Installed On</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody>${filtered.map(i => {
+          const party = partyMap[i.party_id];
+          const prod = prodMap[i.product_id];
+          return `<tr>
+            <td><strong>${esc(party?.name || 'Unknown')}</strong>${party?.address ? `<br><small style="color:var(--text-muted);"><i class="fas fa-map-marker-alt" style="font-size:0.6rem;"></i> ${esc(party.address)}</small>` : ''}</td>
+            <td>${esc(prod?.name || 'Unknown')}</td>
+            <td style="color:var(--text-muted);font-size:0.8rem;">${esc(prod?.model_number || '—')}</td>
+            <td style="font-weight:700;font-size:1.1rem;">${i.quantity || 1}</td>
+            <td>${formatDate(i.installation_date)}</td>
+            <td><span class="badge-status ${i.status === 'active' ? 'green' : i.status === 'removed' ? 'red' : 'amber'}">${i.status === 'active' ? 'Active' : i.status === 'removed' ? 'Removed' : 'Replaced'}</span></td>
+            <td>
+              ${i.status === 'active' ? `<button class="btn btn-sm btn-ghost edit-install" data-id="${i.id}"><i class="fas fa-pen"></i></button>
+              <button class="btn btn-sm btn-ghost remove-install" data-id="${i.id}" style="color:var(--red);"><i class="fas fa-times"></i></button>` : ''}
+            </td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table></div>
+    `;
+
+    // Re-bind action buttons
+    container.querySelectorAll('.edit-install').forEach(el => {
+      el.addEventListener('click', () => {
+        const inst = installations.find(i => i.id == el.dataset.id);
+        if (inst) openInstallModal(inst, parties, machineProducts, body, header);
+      });
+    });
+    container.querySelectorAll('.remove-install').forEach(el => {
+      el.addEventListener('click', async () => {
+        if (!confirm('Mark this installation as removed?')) return;
+        await dbOp(db.update('installations', parseInt(el.dataset.id), { status: 'removed', removed_date: new Date().toISOString().split('T')[0] }), 'Failed to update');
+        showToast('Installation marked as removed', 'success');
+        renderInstallations(body, header);
+      });
+    });
+  }
+
+  // Bind filter/sort events
+  ['filter-search', 'filter-party', 'filter-machine', 'filter-status', 'filter-date-from', 'filter-date-to', 'filter-sort'].forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener(el.tagName === 'INPUT' && el.type === 'text' ? 'input' : 'change', applyFilters);
+  });
+  // Search also triggers on input for type="text" — handle the search input specifically
+  document.getElementById('filter-search').addEventListener('input', applyFilters);
+
+  // Clear all filters
+  document.getElementById('btn-clear-filters').addEventListener('click', () => {
+    document.getElementById('filter-search').value = '';
+    document.getElementById('filter-party').value = '';
+    document.getElementById('filter-machine').value = '';
+    document.getElementById('filter-status').value = '';
+    document.getElementById('filter-date-from').value = '';
+    document.getElementById('filter-date-to').value = '';
+    document.getElementById('filter-sort').value = 'date_desc';
+    applyFilters();
+  });
+
+  // Add installation button
   document.getElementById('btn-add-install').addEventListener('click', () => openInstallModal(null, parties, machineProducts, body, header));
-  body.querySelectorAll('.edit-install').forEach(el => {
-    el.addEventListener('click', () => {
-      const inst = installations.find(i => i.id == el.dataset.id);
-      if (inst) openInstallModal(inst, parties, machineProducts, body, header);
-    });
-  });
-  body.querySelectorAll('.remove-install').forEach(el => {
-    el.addEventListener('click', async () => {
-      if (!confirm('Mark this installation as removed?')) return;
-      await dbOp(db.update('installations', parseInt(el.dataset.id), { status: 'removed', removed_date: new Date().toISOString().split('T')[0] }), 'Failed to update');
-      showToast('Installation marked as removed', 'success');
-      renderInstallations(body, header);
-    });
-  });
+
+  // Initial render
+  applyFilters();
 }
 
 function openInstallModal(inst, parties, machineProducts, body, header) {
