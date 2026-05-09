@@ -1,5 +1,5 @@
 import { db, auth, supabase } from '../supabase.js';
-import { showToast, createModal, esc, dbOp } from '../utils/helpers.js';
+import { showToast, createModal, esc, formatWeight, formatStock, gramsToKg, kgToGrams, dbOp } from '../utils/helpers.js';
 
 export async function renderSettings(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
@@ -200,7 +200,7 @@ async function renderCategoriesTab(container, body) {
     const content = `
       <div class="form-group"><label class="form-label">Category Name *</label><input class="form-input" id="cat-name" maxlength="100" required /></div>
       <div class="form-group"><label class="form-label">Tracking Type *</label>
-        <select class="form-select" id="cat-type"><option value="unit">Unit (pieces)</option><option value="liquid">Liquid (grams)</option></select>
+        <select class="form-select" id="cat-type"><option value="unit">Unit (pieces)</option><option value="liquid">Liquid (kg)</option></select>
       </div>
     `;
     const footer = `<button class="btn btn-secondary" id="cat-cancel">Cancel</button><button class="btn btn-primary" id="cat-save"><i class="fas fa-save"></i> Create</button>`;
@@ -259,7 +259,7 @@ async function renderStockIntakeTab(container, body) {
         return `<tr>
           <td>${new Date(i.created_at).toLocaleDateString('en-IN')}</td>
           <td>${esc(prod?.name || 'Unknown')}</td>
-          <td style="color:var(--green);font-weight:700;">+${i.quantity}${prod?.type === 'liquid' ? 'g' : ' pcs'}</td>
+          <td style="color:var(--green);font-weight:700;">+${prod?.type === 'liquid' ? formatWeight(i.quantity) : i.quantity + ' pcs'}</td>
           <td>${esc(i.notes || '—')}</td>
         </tr>`;
       }).join('')}</tbody>
@@ -270,12 +270,12 @@ async function renderStockIntakeTab(container, body) {
     const content = `
       <div class="form-group">
         <label class="form-label">Product *</label>
-        <select class="form-select" id="intake-product">${activeProducts.map(p => `<option value="${p.id}">${esc(p.name)} (current: ${p.current_stock})</option>`).join('')}</select>
+        <select class="form-select" id="intake-product">${activeProducts.map(p => `<option value="${p.id}" data-type="${p.type}">${esc(p.name)} (current: ${p.type === 'liquid' ? formatWeight(p.current_stock) : p.current_stock + ' pcs'})</option>`).join('')}</select>
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label">Quantity to Add *</label>
-          <input class="form-input" type="number" id="intake-qty" min="0.1" required />
+          <label class="form-label" id="intake-qty-label">Quantity to Add *</label>
+          <input class="form-input" type="number" id="intake-qty" min="0.001" step="0.001" required />
         </div>
         <div class="form-group">
           <label class="form-label">Supplier / Batch</label>
@@ -290,13 +290,25 @@ async function renderStockIntakeTab(container, body) {
     const footer = `<button class="btn btn-secondary" id="intake-cancel">Cancel</button><button class="btn btn-primary" id="intake-save"><i class="fas fa-plus"></i> Add Stock</button>`;
     const { close } = createModal('Stock Intake', content, { footer });
 
+    // Update label based on product type
+    function updateIntakeLabel() {
+      const opt = document.getElementById('intake-product').selectedOptions[0];
+      const isLiquid = opt?.dataset?.type === 'liquid';
+      document.getElementById('intake-qty-label').textContent = isLiquid ? 'Quantity to Add (kg) *' : 'Quantity to Add (pcs) *';
+      document.getElementById('intake-qty').step = isLiquid ? '0.001' : '1';
+    }
+    updateIntakeLabel();
+    document.getElementById('intake-product').addEventListener('change', updateIntakeLabel);
+
     document.getElementById('intake-cancel').onclick = close;
     document.getElementById('intake-save').onclick = async () => {
       const productId = parseInt(document.getElementById('intake-product').value);
-      const qty = parseFloat(document.getElementById('intake-qty').value);
-      if (isNaN(qty) || qty <= 0) { showToast('Valid quantity required', 'error'); return; }
+      const rawQty = parseFloat(document.getElementById('intake-qty').value);
+      if (isNaN(rawQty) || rawQty <= 0) { showToast('Valid quantity required', 'error'); return; }
 
       const prod = products.find(p => p.id === productId);
+      const isLiquid = prod?.type === 'liquid';
+      const qty = isLiquid ? kgToGrams(rawQty) : rawQty; // Convert KG to grams for storage
       await db.insert('stock_intakes', {
         product_id: productId,
         quantity: qty,

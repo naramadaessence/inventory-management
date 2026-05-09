@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatStock, formatDateTime, showToast, createModal, esc, dbOp } from '../utils/helpers.js';
+import { formatStock, formatWeight, gramsToKg, kgToGrams, formatDateTime, showToast, createModal, esc, dbOp } from '../utils/helpers.js';
 
 export async function renderDailyOps(body, header) {
   const isAdmin = auth.isAdmin();
@@ -144,7 +144,7 @@ async function openCheckoutModal(body, isAdmin) {
       </select></div>
     <div id="co-items-list" class="checkout-items-list" style="margin-top:12px;"></div>
     <div style="margin-top:12px;padding:12px;background:var(--bg-input);border-radius:var(--radius-sm);font-size:0.8rem;color:var(--text-muted);">
-      <i class="fas fa-info-circle"></i> ${isSeller ? 'Enter weight/quantity you are taking. Admin will approve before stock is deducted.' : 'For liquid items enter weight in grams. For unit items enter piece count.'}
+      <i class="fas fa-info-circle"></i> ${isSeller ? 'Enter weight/quantity you are taking. Admin will approve before stock is deducted.' : 'For liquid items enter weight in KG (e.g., 0.200 for 200g). For unit items enter piece count.'}
     </div>`;
   const footer = `<button class="btn btn-secondary" id="co-cancel">Cancel</button>
     <button class="btn btn-primary" id="co-submit"><i class="fas fa-check"></i> ${isSeller ? 'Request Stock' : 'Confirm Issue'}</button>`;
@@ -155,7 +155,7 @@ async function openCheckoutModal(body, isAdmin) {
     const prodId = parseInt(e.target.value);
     if (!prodId || checkoutItems.find(i => i.product_id === prodId)) { e.target.value = ''; return; }
     const prod = activeProducts.find(p => p.id === prodId);
-    checkoutItems.push({ product_id: prodId, product: prod, quantity: prod.type === 'liquid' ? 100 : 1 });
+    checkoutItems.push({ product_id: prodId, product: prod, quantity: prod.type === 'liquid' ? 0.2 : 1 });
     e.target.value = '';
     renderItems();
   });
@@ -167,9 +167,9 @@ async function openCheckoutModal(body, isAdmin) {
       <div class="checkout-item">
         <div class="checkout-item-info">
           <div class="checkout-item-name">${esc(item.product.name)}</div>
-          <div class="checkout-item-type">${item.product.type==='liquid'?'Liquid (grams)':'Unit (pieces)'} · Stock: ${formatStock(item.product.current_stock,item.product.type)}</div>
+          <div class="checkout-item-type">${item.product.type==='liquid'?'Liquid (kg)':'Unit (pieces)'} · Stock: ${formatStock(item.product.current_stock,item.product.type)}</div>
         </div>
-        <input class="form-input co-qty" type="number" data-idx="${idx}" value="${item.quantity}" min="${item.product.type==='liquid'?'0.1':'1'}" step="${item.product.type==='liquid'?'0.1':'1'}" style="width:100px;" />
+        <input class="form-input co-qty" type="number" data-idx="${idx}" value="${item.quantity}" min="${item.product.type==='liquid'?'0.001':'1'}" step="${item.product.type==='liquid'?'0.001':'1'}" style="width:100px;" />
         <button class="btn-remove co-rm" data-idx="${idx}"><i class="fas fa-times"></i></button>
       </div>`).join('');
     list.querySelectorAll('.co-qty').forEach(inp => inp.addEventListener('change', e => {
@@ -189,14 +189,15 @@ async function openCheckoutModal(body, isAdmin) {
 
     // Validate quantities and stock
     for (const item of checkoutItems) {
+      const checkQty = item.product.type === 'liquid' ? kgToGrams(item.quantity) : item.quantity;
       if (item.quantity <= 0) { showToast(`Invalid quantity for ${item.product.name}`,'error'); return; }
-      if (item.quantity > item.product.current_stock) {
+      if (checkQty > item.product.current_stock) {
         if (isAdmin) {
           showToast(`Insufficient stock for ${item.product.name} — only ${formatStock(item.product.current_stock, item.product.type)} available`, 'error');
           return;
         }
         // Sellers get a warning but can still request (admin will verify)
-        if (!confirm(`⚠ ${item.product.name} only has ${formatStock(item.product.current_stock, item.product.type)} in stock. You are requesting ${formatStock(item.quantity, item.product.type)}.\n\nSubmit anyway? Admin will review.`)) return;
+        if (!confirm(`⚠ ${item.product.name} only has ${formatStock(item.product.current_stock, item.product.type)} in stock. You are requesting ${item.product.type === 'liquid' ? item.quantity + ' kg' : item.quantity + ' pcs'}.\n\nSubmit anyway? Admin will review.`)) return;
       }
     }
 
@@ -208,17 +209,19 @@ async function openCheckoutModal(body, isAdmin) {
     if (!session) return;
 
     for (const item of checkoutItems) {
+      // Convert KG input to grams for liquid items before saving
+      const storeQty = item.product.type === 'liquid' ? kgToGrams(item.quantity) : item.quantity;
       await dbOp(db.insert('checkout_items', {
         session_id: session.data.id, product_id: item.product_id,
-        checkout_quantity: item.quantity, checkin_quantity: null, is_flagged: false, flag_reason: null
+        checkout_quantity: storeQty, checkin_quantity: null, is_flagged: false, flag_reason: null
       }), 'Failed to add item');
 
       // Only deduct stock if admin is creating (immediate approval)
       if (isAdmin) {
-        const newStock = item.product.current_stock - item.quantity;
+        const newStock = item.product.current_stock - storeQty;
         await dbOp(db.update('products', item.product_id, { current_stock: Math.max(0, newStock) }), 'Failed to update stock');
         await dbOp(db.insert('inventory_transactions', {
-          product_id: item.product_id, type: 'checkout', quantity: -item.quantity,
+          product_id: item.product_id, type: 'checkout', quantity: -storeQty,
           reference_type: 'checkout_session', reference_id: session.data.id,
           performed_by: auth.currentUser.id, notes: 'Issued to seller'
         }), 'Failed to log transaction');
@@ -326,9 +329,9 @@ async function openCheckinModal(sessionId, body, isAdmin) {
       <thead><tr><th>Product</th><th>Issued Qty</th><th>Return Qty</th></tr></thead>
       <tbody>${sessionItems.map(i => {
         const p = prodMap[i.product_id];
-        return `<tr><td>${esc(p?.name||'Unknown')}<br><small style="color:var(--text-muted);">${p?.type==='liquid'?'grams':'pieces'}</small></td>
+        return `<tr><td>${esc(p?.name||'Unknown')}<br><small style="color:var(--text-muted);">${p?.type==='liquid'?'kg':'pieces'}</small></td>
           <td>${formatStock(i.checkout_quantity,p?.type)}</td>
-          <td><input class="form-input ci-rq" type="number" data-item-id="${i.id}" value="${i.checkout_quantity}" min="0" max="${i.checkout_quantity}" step="${p?.type==='liquid'?'0.1':'1'}" style="width:120px;" /></td></tr>`;
+          <td><input class="form-input ci-rq" type="number" data-item-id="${i.id}" value="${p?.type==='liquid' ? gramsToKg(i.checkout_quantity) : i.checkout_quantity}" min="0" max="${p?.type==='liquid' ? gramsToKg(i.checkout_quantity) : i.checkout_quantity}" step="${p?.type==='liquid'?'0.001':'1'}" style="width:120px;" /></td></tr>`;
       }).join('')}</tbody></table></div>
     <div class="form-group" style="margin-top:16px;"><label class="form-label">Notes</label>
       <textarea class="form-textarea" id="ci-notes" placeholder="Any observations..." maxlength="500"></textarea></div>`;
@@ -340,12 +343,14 @@ async function openCheckinModal(sessionId, body, isAdmin) {
   document.getElementById('ci-submit').onclick = async () => {
     const returnData = [];
     document.querySelectorAll('.ci-rq').forEach(inp => {
-      const itemId = parseInt(inp.dataset.itemId), rq = parseFloat(inp.value);
+      const itemId = parseInt(inp.dataset.itemId), rawRq = parseFloat(inp.value);
       const item = sessionItems.find(i => i.id === itemId);
       const p = prodMap[item.product_id];
+      // Convert KG input to grams for liquid items
+      const rq = p?.type === 'liquid' ? kgToGrams(rawRq) : rawRq;
       const consumed = (item.checkout_quantity||0) - rq;
       const flagged = consumed > (p?.max_daily_consumption || 30);
-      if (isNaN(rq)||rq<0) { showToast(`Invalid qty for ${p?.name}`,'error'); return; }
+      if (isNaN(rawRq)||rawRq<0) { showToast(`Invalid qty for ${p?.name}`,'error'); return; }
       returnData.push({ itemId, rq, consumed, flagged, item, p });
     });
     if (returnData.length !== sessionItems.length) return;

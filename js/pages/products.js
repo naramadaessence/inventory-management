@@ -1,5 +1,5 @@
 import { db, auth, supabase } from '../supabase.js';
-import { formatCurrency, formatStock, formatDate, showToast, createModal, debounce, escapeHtml, dbOp } from '../utils/helpers.js';
+import { formatCurrency, formatStock, formatDate, formatPricePerUnit, formatWeight, gramsToKg, kgToGrams, showToast, createModal, debounce, escapeHtml, dbOp } from '../utils/helpers.js';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 
@@ -84,7 +84,7 @@ export async function renderProducts(body, header) {
           ${productImageHtml(p)}
           <div class="product-card-body">
             <h4 title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</h4>
-            <div style="font-size:0.75rem;color:var(--text-muted);">${escapeHtml(cat?.name || '—')} · ${formatCurrency(p.unit_price)}${p.type === 'liquid' ? '/g' : '/pc'}</div>
+            <div style="font-size:0.75rem;color:var(--text-muted);">${escapeHtml(cat?.name || '—')} · ${formatPricePerUnit(p.unit_price, p.type)}</div>
             <div class="product-card-meta">
               <span class="product-card-stock" style="${isLow ? 'color:var(--red);font-weight:600;' : ''}">${isLow ? '⚠ ' : ''}${formatStock(p.current_stock, p.type)}</span>
               <span class="product-card-type ${p.type}">${p.type}</span>
@@ -104,7 +104,7 @@ export async function renderProducts(body, header) {
             <td><strong>${escapeHtml(p.name)}</strong>${p.model_number ? `<br><small style="color:var(--text-muted);">${escapeHtml(p.model_number)}</small>` : ''}</td>
             <td>${escapeHtml(cat?.name || '—')}</td>
             <td><span class="badge-status ${p.type === 'liquid' ? 'purple' : 'blue'}">${p.type}</span></td>
-            <td>${formatCurrency(p.unit_price)}${p.type === 'liquid' ? '/g' : ''}</td>
+            <td>${formatPricePerUnit(p.unit_price, p.type)}</td>
             <td style="${isLow ? 'color:var(--red);font-weight:700;' : ''}">${isLow ? '⚠ ' : ''}${formatStock(p.current_stock, p.type)}</td>
             <td>${formatStock(p.min_stock_threshold, p.type)}</td>
             <td>${formatDate(p.expiry_date)}</td>
@@ -165,14 +165,14 @@ function openProductModal(product, categories) {
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">Unit Price (₹) *</label>
-        <input class="form-input" type="number" id="prod-price" value="${product?.unit_price || ''}" min="0" step="0.01" required />
+        <label class="form-label" id="prod-price-label">Unit Price (₹) *</label>
+        <input class="form-input" type="number" id="prod-price" value="${product ? (product.type === 'liquid' ? (product.unit_price * 1000).toFixed(2) : product.unit_price) : ''}" min="0" step="0.01" required />
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
         <label class="form-label" id="prod-stock-label">Current Stock *</label>
-        <input class="form-input" type="number" id="prod-stock" value="${product?.current_stock || 0}" min="0" step="${product?.type === 'liquid' ? '0.1' : '1'}" required />
+        <input class="form-input" type="number" id="prod-stock" value="${product ? (product.type === 'liquid' ? gramsToKg(product.current_stock) : product.current_stock) : 0}" min="0" step="${product?.type === 'liquid' ? '0.001' : '1'}" required />
       </div>
       <div class="form-group">
         <label class="form-label">Min Stock Threshold *</label>
@@ -237,9 +237,10 @@ function openProductModal(product, categories) {
   function updateStockLabels() {
     const catId = parseInt(document.getElementById('prod-category').value);
     const cat = categories.find(c => c.id === catId);
-    const unit = cat?.type === 'liquid' ? 'grams' : 'pieces';
-    document.getElementById('prod-stock-label').textContent = `Current Stock (${unit}) *`;
-    document.getElementById('prod-stock').step = cat?.type === 'liquid' ? '0.1' : '1';
+    const isLiquid = cat?.type === 'liquid';
+    document.getElementById('prod-stock-label').textContent = `Current Stock (${isLiquid ? 'kg' : 'pieces'}) *`;
+    document.getElementById('prod-stock').step = isLiquid ? '0.001' : '1';
+    document.getElementById('prod-price-label').textContent = isLiquid ? 'Unit Price (₹/kg) *' : 'Unit Price (₹/pc) *';
   }
   updateStockLabels();
   document.getElementById('prod-category').addEventListener('change', updateStockLabels);
@@ -248,12 +249,17 @@ function openProductModal(product, categories) {
     const name = document.getElementById('prod-name').value.trim();
     const model = document.getElementById('prod-model').value.trim();
     const catId = parseInt(document.getElementById('prod-category').value);
-    const price = parseFloat(document.getElementById('prod-price').value);
-    const stock = parseFloat(document.getElementById('prod-stock').value);
-    const threshold = parseFloat(document.getElementById('prod-threshold').value);
-    const maxDaily = parseFloat(document.getElementById('prod-maxdaily').value) || null;
-    const expiry = document.getElementById('prod-expiry').value || null;
     const cat = categories.find(c => c.id === catId);
+    const isLiquid = cat?.type === 'liquid';
+    const rawPrice = parseFloat(document.getElementById('prod-price').value);
+    const price = isLiquid ? rawPrice / 1000 : rawPrice; // ₹/kg → ₹/gram for storage
+    const rawStock = parseFloat(document.getElementById('prod-stock').value);
+    const stock = isLiquid ? kgToGrams(rawStock) : rawStock; // kg → grams for storage
+    const rawThreshold = parseFloat(document.getElementById('prod-threshold').value);
+    const threshold = isLiquid ? kgToGrams(rawThreshold) : rawThreshold;
+    const rawMaxDaily = parseFloat(document.getElementById('prod-maxdaily').value) || null;
+    const maxDaily = (rawMaxDaily && isLiquid) ? kgToGrams(rawMaxDaily) : rawMaxDaily;
+    const expiry = document.getElementById('prod-expiry').value || null;
 
     // Validation
     if (!name || name.length < 2) { showToast('Product name is required (min 2 chars)', 'error'); return; }

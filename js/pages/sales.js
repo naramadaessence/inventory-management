@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatDateTime, formatDate, showToast, createModal, daysUntil, esc, dbOp } from '../utils/helpers.js';
+import { formatCurrency, formatDateTime, formatDate, formatWeight, gramsToKg, kgToGrams, showToast, createModal, daysUntil, esc, dbOp } from '../utils/helpers.js';
 
 export async function renderSales(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
@@ -60,7 +60,7 @@ export async function renderSales(body, header) {
           <td>${formatDate(s.sale_date || s.created_at)}</td>
           <td><strong>${esc(party?.name || 'Walk-in')}</strong></td>
           <td>${esc(prod?.name || 'Unknown')}</td>
-          <td>${s.quantity}${prod?.type === 'liquid' ? 'g' : ' pcs'}</td>
+          <td>${prod?.type === 'liquid' ? formatWeight(s.quantity) : s.quantity + ' pcs'}</td>
           <td style="font-weight:600;color:var(--green);">${formatCurrency(s.total_amount)}</td>
           <td>${s.amount_received ? formatCurrency(s.amount_received) : '—'}</td>
           <td><span class="badge-status ${s.payment_status === 'paid' ? 'green' : s.payment_status === 'partial' ? 'amber' : 'red'}">${esc(s.payment_status || 'pending')}</span></td>
@@ -103,18 +103,18 @@ function openSaleModal(parties, products, body, header) {
       <div class="form-group">
         <label class="form-label">Product *</label>
         <select class="form-select" id="sale-product">
-          ${activeProducts.map(p => `<option value="${p.id}" data-price="${p.unit_price}" data-type="${p.type}" data-catid="${p.category_id}">${esc(p.name)} (₹${p.unit_price}${p.type === 'liquid' ? '/g' : '/pc'})</option>`).join('')}
+          ${activeProducts.map(p => `<option value="${p.id}" data-price="${p.unit_price}" data-type="${p.type}" data-catid="${p.category_id}">${esc(p.name)} (${p.type === 'liquid' ? '₹' + (p.unit_price * 1000).toFixed(2) + '/kg' : '₹' + p.unit_price + '/pc'})</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
-        <label class="form-label">Quantity *</label>
-        <input class="form-input" type="number" id="sale-qty" value="1" min="0.1" step="1" required />
+        <label class="form-label" id="sale-qty-label">Quantity *</label>
+        <input class="form-input" type="number" id="sale-qty" value="1" min="0.001" step="0.001" required />
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Unit Price (₹)</label>
-        <input class="form-input" type="number" id="sale-price" value="${activeProducts[0]?.unit_price || 0}" min="0" step="0.01" />
+        <label class="form-label" id="sale-price-label">Unit Price (₹)</label>
+        <input class="form-input" type="number" id="sale-price" value="${activeProducts[0] ? (activeProducts[0].type === 'liquid' ? (activeProducts[0].unit_price * 1000).toFixed(2) : activeProducts[0].unit_price) : 0}" min="0" step="0.01" />
       </div>
       <div class="form-group">
         <label class="form-label">Total Amount</label>
@@ -216,10 +216,18 @@ function openSaleModal(parties, products, body, header) {
   function applyPrice() {
     const customPrice = getCustomPrice();
     const prodOpt = document.getElementById('sale-product').selectedOptions[0];
-    const defaultPrice = parseFloat(prodOpt?.dataset?.price) || 0;
+    const defaultPricePerGram = parseFloat(prodOpt?.dataset?.price) || 0;
+    const isLiquid = prodOpt?.dataset?.type === 'liquid';
     const priceInput = document.getElementById('sale-price');
-    priceInput.value = customPrice !== null ? customPrice : defaultPrice;
-    if (customPrice !== null) {
+    // Display price: convert ₹/gram → ₹/kg for liquids
+    const displayDefault = isLiquid ? (defaultPricePerGram * 1000) : defaultPricePerGram;
+    const displayCustom = (customPrice !== null && isLiquid) ? (customPrice * 1000) : customPrice;
+    priceInput.value = displayCustom !== null ? displayCustom.toFixed(2) : displayDefault.toFixed(2);
+    // Update labels
+    document.getElementById('sale-qty-label').textContent = isLiquid ? 'Quantity (kg) *' : 'Quantity (pcs) *';
+    document.getElementById('sale-price-label').textContent = isLiquid ? 'Unit Price (₹/kg)' : 'Unit Price (₹/pc)';
+    document.getElementById('sale-qty').step = isLiquid ? '0.001' : '1';
+    if (displayCustom !== null) {
       priceInput.style.borderColor = 'var(--primary)';
       priceInput.style.background = 'var(--primary-soft)';
       priceInput.title = 'Custom rate for this party';
@@ -237,9 +245,7 @@ function openSaleModal(parties, products, body, header) {
     pendingFields.style.display = (e.target.value === 'pending' || e.target.value === 'partial') ? 'flex' : 'none';
   });
 
-  document.getElementById('sale-product').addEventListener('change', (e) => {
-    const opt = e.target.selectedOptions[0];
-    document.getElementById('sale-qty').step = opt.dataset.type === 'liquid' ? '0.1' : '1';
+  document.getElementById('sale-product').addEventListener('change', () => {
     applyPrice();
   });
   document.getElementById('sale-qty').addEventListener('input', updateTotal);
@@ -249,29 +255,35 @@ function openSaleModal(parties, products, body, header) {
   document.getElementById('sale-cancel').onclick = close;
   document.getElementById('sale-save').onclick = async () => {
     const productId = parseInt(document.getElementById('sale-product').value);
-    const qty = parseFloat(document.getElementById('sale-qty').value);
-    const price = parseFloat(document.getElementById('sale-price').value);
+    const rawQty = parseFloat(document.getElementById('sale-qty').value);
+    const rawPrice = parseFloat(document.getElementById('sale-price').value);
     const partyId = partyHidden.value ? parseInt(partyHidden.value) : null;
     const partyName = partyInput.value.trim();
     const paymentStatus = document.getElementById('sale-payment').value;
     const paymentMethod = document.getElementById('sale-method').value || null;
-    const amountReceived = paymentStatus === 'paid' ? qty * price : parseFloat(document.getElementById('sale-received').value) || 0;
     const expectedDate = document.getElementById('sale-expected-date')?.value || null;
 
-    if (!productId || isNaN(qty) || qty <= 0 || isNaN(price) || price < 0) {
+    if (!productId || isNaN(rawQty) || rawQty <= 0 || isNaN(rawPrice) || rawPrice < 0) {
       showToast('Please fill in all required fields with valid values', 'error');
       return;
     }
 
     const prod = products.find(p => p.id === productId);
-    if (qty > prod.current_stock) { showToast('Insufficient stock', 'error'); return; }
+    const isLiquid = prod?.type === 'liquid';
+    // Convert UI values to storage values
+    const qty = isLiquid ? kgToGrams(rawQty) : rawQty; // kg → grams
+    const price = isLiquid ? rawPrice / 1000 : rawPrice; // ₹/kg → ₹/gram
+    const totalAmount = qty * price;
+    const amountReceived = paymentStatus === 'paid' ? totalAmount : parseFloat(document.getElementById('sale-received').value) || 0;
+
+    if (qty > prod.current_stock) { showToast(`Insufficient stock — only ${isLiquid ? formatWeight(prod.current_stock) : prod.current_stock + ' pcs'} available`, 'error'); return; }
 
     const saleResult = await dbOp(db.insert('sales', {
       party_id: partyId,
       product_id: productId,
       quantity: qty,
       unit_price: price,
-      total_amount: qty * price,
+      total_amount: totalAmount,
       payment_status: paymentStatus,
       payment_method: paymentMethod,
       amount_received: amountReceived,
@@ -322,14 +334,14 @@ function openEditSaleModal(sale, parties, products, body, header) {
         <input class="form-input" type="date" id="edit-sale-date" value="${sale.sale_date || ''}" required />
       </div>
       <div class="form-group">
-        <label class="form-label">Quantity (${prod?.type === 'liquid' ? 'grams' : 'pieces'}) *</label>
-        <input class="form-input" type="number" id="edit-sale-qty" value="${sale.quantity}" min="0.1" step="${prod?.type === 'liquid' ? '0.1' : '1'}" required />
+        <label class="form-label">Quantity (${prod?.type === 'liquid' ? 'kg' : 'pieces'}) *</label>
+        <input class="form-input" type="number" id="edit-sale-qty" value="${prod?.type === 'liquid' ? gramsToKg(sale.quantity) : sale.quantity}" min="0.001" step="${prod?.type === 'liquid' ? '0.001' : '1'}" required />
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label class="form-label">Unit Price (₹) *</label>
-        <input class="form-input" type="number" id="edit-sale-price" value="${sale.unit_price}" min="0" step="0.01" required />
+        <label class="form-label">${prod?.type === 'liquid' ? 'Unit Price (₹/kg) *' : 'Unit Price (₹/pc) *'}</label>
+        <input class="form-input" type="number" id="edit-sale-price" value="${prod?.type === 'liquid' ? (sale.unit_price * 1000).toFixed(2) : sale.unit_price}" min="0" step="0.01" required />
       </div>
       <div class="form-group">
         <label class="form-label">Total Amount</label>
@@ -397,13 +409,17 @@ function openEditSaleModal(sale, parties, products, body, header) {
 
   // SAVE
   document.getElementById('edit-sale-save').onclick = async () => {
-    const newQty = parseFloat(document.getElementById('edit-sale-qty').value);
-    const newPrice = parseFloat(document.getElementById('edit-sale-price').value);
+    const rawQty = parseFloat(document.getElementById('edit-sale-qty').value);
+    const rawPrice = parseFloat(document.getElementById('edit-sale-price').value);
+    const isLiquid = prod?.type === 'liquid';
+    const newQty = isLiquid ? kgToGrams(rawQty) : rawQty;
+    const newPrice = isLiquid ? rawPrice / 1000 : rawPrice;
+    const totalAmount = newQty * newPrice;
     const paymentStatus = document.getElementById('edit-sale-payment').value;
     const paymentMethod = document.getElementById('edit-sale-method').value || null;
-    const amountReceived = paymentStatus === 'paid' ? newQty * newPrice : parseFloat(document.getElementById('edit-sale-received').value) || 0;
+    const amountReceived = paymentStatus === 'paid' ? totalAmount : parseFloat(document.getElementById('edit-sale-received').value) || 0;
 
-    if (isNaN(newQty) || newQty <= 0 || isNaN(newPrice) || newPrice < 0) {
+    if (isNaN(rawQty) || rawQty <= 0 || isNaN(rawPrice) || rawPrice < 0) {
       showToast('Invalid quantity or price', 'error'); return;
     }
 
@@ -411,14 +427,14 @@ function openEditSaleModal(sale, parties, products, body, header) {
     const oldQty = sale.quantity;
     const qtyDiff = newQty - oldQty; // positive = need more stock, negative = return stock
     if (qtyDiff > 0 && qtyDiff > (prod?.current_stock || 0)) {
-      showToast(`Insufficient stock — only ${prod?.current_stock || 0} available, need ${qtyDiff} more`, 'error');
+      showToast(`Insufficient stock — only ${isLiquid ? formatWeight(prod?.current_stock || 0) : (prod?.current_stock || 0) + ' pcs'} available`, 'error');
       return;
     }
 
     await dbOp(db.update('sales', sale.id, {
       quantity: newQty,
       unit_price: newPrice,
-      total_amount: newQty * newPrice,
+      total_amount: totalAmount,
       payment_status: paymentStatus,
       payment_method: paymentMethod,
       amount_received: amountReceived,

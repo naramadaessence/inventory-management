@@ -311,15 +311,15 @@ function openPartyModal(party, body, header, products, categories) {
             <input type="checkbox" class="cat-toggle" data-cid="${c.id}" ${hasRate ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--primary);" />
             <div>
               <strong style="font-size:0.85rem;">${esc(c.name)}</strong>
-              <div style="font-size:0.7rem;color:var(--text-muted);">${c.type === 'liquid' ? 'Oils (per gram)' : 'Units (per piece)'}</div>
+              <div style="font-size:0.7rem;color:var(--text-muted);">${c.type === 'liquid' ? 'Oils (₹/kg)' : 'Units (₹/pc)'}</div>
             </div>
           </label>
           <input class="form-input machine-qty-input" data-cid="${c.id}" type="number" min="0" max="100" step="1"
             value="${machineQty}"
             placeholder="Qty"
             style="width:65px;padding:6px 8px;font-size:0.8rem;text-align:center;font-weight:700;" />
-          <input class="form-input cat-rate-input" data-cid="${c.id}" type="number" min="0" step="1"
-            value="${hasRate ? catRates[String(c.id)] : ''}"
+          <input class="form-input cat-rate-input" data-cid="${c.id}" data-cattype="${c.type}" type="number" min="0" step="1"
+            value="${hasRate ? (c.type === 'liquid' ? (catRates[String(c.id)] * 1000).toFixed(0) : catRates[String(c.id)]) : ''}"
             placeholder="₹ rate"
             style="width:110px;padding:6px 8px;font-size:0.8rem;${hasRate ? 'border-color:var(--primary);background:var(--primary-soft);' : 'opacity:0.4;'}"
             ${hasRate ? '' : 'disabled'} />
@@ -375,7 +375,9 @@ function openPartyModal(party, body, header, products, categories) {
       if (cb?.checked) {
         const val = parseFloat(input.value);
         if (!isNaN(val) && val >= 0) {
-          customCategoryRates[input.dataset.cid] = val;
+          // Convert ₹/kg to ₹/gram for liquid categories before storing
+          const catType = input.dataset.cattype;
+          customCategoryRates[input.dataset.cid] = catType === 'liquid' ? val / 1000 : val;
         }
       }
     });
