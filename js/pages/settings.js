@@ -1,5 +1,5 @@
 import { db, auth, supabase } from '../supabase.js';
-import { showToast, createModal, esc, formatWeight, formatStock, gramsToKg, kgToGrams, dbOp } from '../utils/helpers.js';
+import { showToast, createModal, esc, formatWeight, formatStock, dbOp } from '../utils/helpers.js';
 
 export async function renderSettings(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
@@ -303,12 +303,10 @@ async function renderStockIntakeTab(container, body) {
     document.getElementById('intake-cancel').onclick = close;
     document.getElementById('intake-save').onclick = async () => {
       const productId = parseInt(document.getElementById('intake-product').value);
-      const rawQty = parseFloat(document.getElementById('intake-qty').value);
-      if (isNaN(rawQty) || rawQty <= 0) { showToast('Valid quantity required', 'error'); return; }
+      const qty = parseFloat(document.getElementById('intake-qty').value);
+      if (isNaN(qty) || qty <= 0) { showToast('Valid quantity required', 'error'); return; }
 
       const prod = products.find(p => p.id === productId);
-      const isLiquid = prod?.type === 'liquid';
-      const qty = isLiquid ? kgToGrams(rawQty) : rawQty; // Convert KG to grams for storage
       await db.insert('stock_intakes', {
         product_id: productId,
         quantity: qty,

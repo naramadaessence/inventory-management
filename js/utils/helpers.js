@@ -33,20 +33,9 @@ export function formatCurrency(amount) {
   return '₹' + Number(amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 });
 }
 
-// Format grams as KG display — always shows KG (e.g., 5.000 kg, 0.900 kg)
-export function formatWeight(grams) {
-  const kg = (grams || 0) / 1000;
-  return kg.toFixed(3) + ' kg';
-}
-
-// Convert KG input to grams for storage
-export function kgToGrams(kg) {
-  return Math.round((parseFloat(kg) || 0) * 1000);
-}
-
-// Convert grams to KG for input fields
-export function gramsToKg(grams) {
-  return ((grams || 0) / 1000).toFixed(3);
+// Format KG display — always shows KG (e.g., 5.000 kg, 0.900 kg)
+export function formatWeight(kg) {
+  return (kg || 0).toFixed(3) + ' kg';
 }
 
 export function formatStock(qty, type) {
@@ -55,13 +44,11 @@ export function formatStock(qty, type) {
 }
 
 // Format price display — ₹/kg for liquids, ₹/pc for units
-// Internally stored as ₹/gram, displayed as ₹/kg (×1000)
-export function formatPricePerUnit(pricePerGram, type) {
+export function formatPricePerUnit(price, type) {
   if (type === 'liquid') {
-    const perKg = (pricePerGram || 0) * 1000;
-    return '₹' + perKg.toLocaleString('en-IN', { maximumFractionDigits: 2 }) + '/kg';
+    return '₹' + Number(price || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }) + '/kg';
   }
-  return '₹' + Number(pricePerGram || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }) + '/pc';
+  return '₹' + Number(price || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 }) + '/pc';
 }
 
 export function formatDate(dateStr) {

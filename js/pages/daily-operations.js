@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatStock, formatWeight, gramsToKg, kgToGrams, formatDateTime, showToast, createModal, esc, dbOp } from '../utils/helpers.js';
+import { formatStock, formatDateTime, showToast, createModal, esc, dbOp } from '../utils/helpers.js';
 
 export async function renderDailyOps(body, header) {
   const isAdmin = auth.isAdmin();
@@ -155,7 +155,7 @@ async function openCheckoutModal(body, isAdmin) {
     const prodId = parseInt(e.target.value);
     if (!prodId || checkoutItems.find(i => i.product_id === prodId)) { e.target.value = ''; return; }
     const prod = activeProducts.find(p => p.id === prodId);
-    checkoutItems.push({ product_id: prodId, product: prod, quantity: prod.type === 'liquid' ? 0.2 : 1 });
+    checkoutItems.push({ product_id: prodId, product: prod, quantity: prod.type === 'liquid' ? 0.200 : 1 });
     e.target.value = '';
     renderItems();
   });
@@ -187,21 +187,17 @@ async function openCheckoutModal(body, isAdmin) {
     if (!sellerId) { showToast('Please select a seller','error'); return; }
     if (!checkoutItems.length) { showToast('Please add at least one product','error'); return; }
 
-    // Validate quantities and stock
     for (const item of checkoutItems) {
-      const checkQty = item.product.type === 'liquid' ? kgToGrams(item.quantity) : item.quantity;
       if (item.quantity <= 0) { showToast(`Invalid quantity for ${item.product.name}`,'error'); return; }
-      if (checkQty > item.product.current_stock) {
+      if (item.quantity > item.product.current_stock) {
         if (isAdmin) {
           showToast(`Insufficient stock for ${item.product.name} — only ${formatStock(item.product.current_stock, item.product.type)} available`, 'error');
           return;
         }
-        // Sellers get a warning but can still request (admin will verify)
         if (!confirm(`⚠ ${item.product.name} only has ${formatStock(item.product.current_stock, item.product.type)} in stock. You are requesting ${item.product.type === 'liquid' ? item.quantity + ' kg' : item.quantity + ' pcs'}.\n\nSubmit anyway? Admin will review.`)) return;
       }
     }
 
-    // Seller: pending_issue (no stock deduction). Admin: checked_out (deduct immediately).
     const status = isSeller ? 'pending_issue' : 'checked_out';
     const session = await dbOp(db.insert('checkout_sessions', {
       seller_id: sellerId, checkout_time: new Date().toISOString(), checkin_time: null, status, notes: ''
@@ -209,19 +205,17 @@ async function openCheckoutModal(body, isAdmin) {
     if (!session) return;
 
     for (const item of checkoutItems) {
-      // Convert KG input to grams for liquid items before saving
-      const storeQty = item.product.type === 'liquid' ? kgToGrams(item.quantity) : item.quantity;
       await dbOp(db.insert('checkout_items', {
         session_id: session.data.id, product_id: item.product_id,
-        checkout_quantity: storeQty, checkin_quantity: null, is_flagged: false, flag_reason: null
+        checkout_quantity: item.quantity, checkin_quantity: null, is_flagged: false, flag_reason: null
       }), 'Failed to add item');
 
       // Only deduct stock if admin is creating (immediate approval)
       if (isAdmin) {
-        const newStock = item.product.current_stock - storeQty;
+        const newStock = item.product.current_stock - item.quantity;
         await dbOp(db.update('products', item.product_id, { current_stock: Math.max(0, newStock) }), 'Failed to update stock');
         await dbOp(db.insert('inventory_transactions', {
-          product_id: item.product_id, type: 'checkout', quantity: -storeQty,
+          product_id: item.product_id, type: 'checkout', quantity: -item.quantity,
           reference_type: 'checkout_session', reference_id: session.data.id,
           performed_by: auth.currentUser.id, notes: 'Issued to seller'
         }), 'Failed to log transaction');
@@ -331,7 +325,7 @@ async function openCheckinModal(sessionId, body, isAdmin) {
         const p = prodMap[i.product_id];
         return `<tr><td>${esc(p?.name||'Unknown')}<br><small style="color:var(--text-muted);">${p?.type==='liquid'?'kg':'pieces'}</small></td>
           <td>${formatStock(i.checkout_quantity,p?.type)}</td>
-          <td><input class="form-input ci-rq" type="number" data-item-id="${i.id}" value="${p?.type==='liquid' ? gramsToKg(i.checkout_quantity) : i.checkout_quantity}" min="0" max="${p?.type==='liquid' ? gramsToKg(i.checkout_quantity) : i.checkout_quantity}" step="${p?.type==='liquid'?'0.001':'1'}" style="width:120px;" /></td></tr>`;
+          <td><input class="form-input ci-rq" type="number" data-item-id="${i.id}" value="${i.checkout_quantity}" min="0" max="${i.checkout_quantity}" step="${p?.type==='liquid'?'0.001':'1'}" style="width:120px;" /></td></tr>`;
       }).join('')}</tbody></table></div>
     <div class="form-group" style="margin-top:16px;"><label class="form-label">Notes</label>
       <textarea class="form-textarea" id="ci-notes" placeholder="Any observations..." maxlength="500"></textarea></div>`;
@@ -343,14 +337,12 @@ async function openCheckinModal(sessionId, body, isAdmin) {
   document.getElementById('ci-submit').onclick = async () => {
     const returnData = [];
     document.querySelectorAll('.ci-rq').forEach(inp => {
-      const itemId = parseInt(inp.dataset.itemId), rawRq = parseFloat(inp.value);
+      const itemId = parseInt(inp.dataset.itemId), rq = parseFloat(inp.value);
       const item = sessionItems.find(i => i.id === itemId);
       const p = prodMap[item.product_id];
-      // Convert KG input to grams for liquid items
-      const rq = p?.type === 'liquid' ? kgToGrams(rawRq) : rawRq;
       const consumed = (item.checkout_quantity||0) - rq;
       const flagged = consumed > (p?.max_daily_consumption || 30);
-      if (isNaN(rawRq)||rawRq<0) { showToast(`Invalid qty for ${p?.name}`,'error'); return; }
+      if (isNaN(rq)||rq<0) { showToast(`Invalid qty for ${p?.name}`,'error'); return; }
       returnData.push({ itemId, rq, consumed, flagged, item, p });
     });
     if (returnData.length !== sessionItems.length) return;

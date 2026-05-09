@@ -1,5 +1,5 @@
 import { db, auth, supabase } from '../supabase.js';
-import { formatCurrency, formatStock, formatDate, formatPricePerUnit, formatWeight, gramsToKg, kgToGrams, showToast, createModal, debounce, escapeHtml, dbOp } from '../utils/helpers.js';
+import { formatCurrency, formatStock, formatDate, formatPricePerUnit, showToast, createModal, debounce, escapeHtml, dbOp } from '../utils/helpers.js';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 
@@ -166,13 +166,13 @@ function openProductModal(product, categories) {
       </div>
       <div class="form-group">
         <label class="form-label" id="prod-price-label">Unit Price (₹) *</label>
-        <input class="form-input" type="number" id="prod-price" value="${product ? (product.type === 'liquid' ? (product.unit_price * 1000).toFixed(2) : product.unit_price) : ''}" min="0" step="0.01" required />
+        <input class="form-input" type="number" id="prod-price" value="${product?.unit_price || ''}" min="0" step="0.01" required />
       </div>
     </div>
     <div class="form-row">
       <div class="form-group">
         <label class="form-label" id="prod-stock-label">Current Stock *</label>
-        <input class="form-input" type="number" id="prod-stock" value="${product ? (product.type === 'liquid' ? gramsToKg(product.current_stock) : product.current_stock) : 0}" min="0" step="${product?.type === 'liquid' ? '0.001' : '1'}" required />
+        <input class="form-input" type="number" id="prod-stock" value="${product?.current_stock || 0}" min="0" step="${product?.type === 'liquid' ? '0.001' : '1'}" required />
       </div>
       <div class="form-group">
         <label class="form-label">Min Stock Threshold *</label>
@@ -251,14 +251,10 @@ function openProductModal(product, categories) {
     const catId = parseInt(document.getElementById('prod-category').value);
     const cat = categories.find(c => c.id === catId);
     const isLiquid = cat?.type === 'liquid';
-    const rawPrice = parseFloat(document.getElementById('prod-price').value);
-    const price = isLiquid ? rawPrice / 1000 : rawPrice; // ₹/kg → ₹/gram for storage
-    const rawStock = parseFloat(document.getElementById('prod-stock').value);
-    const stock = isLiquid ? kgToGrams(rawStock) : rawStock; // kg → grams for storage
-    const rawThreshold = parseFloat(document.getElementById('prod-threshold').value);
-    const threshold = isLiquid ? kgToGrams(rawThreshold) : rawThreshold;
-    const rawMaxDaily = parseFloat(document.getElementById('prod-maxdaily').value) || null;
-    const maxDaily = (rawMaxDaily && isLiquid) ? kgToGrams(rawMaxDaily) : rawMaxDaily;
+    const price = parseFloat(document.getElementById('prod-price').value);
+    const stock = parseFloat(document.getElementById('prod-stock').value);
+    const threshold = parseFloat(document.getElementById('prod-threshold').value);
+    const maxDaily = parseFloat(document.getElementById('prod-maxdaily').value) || null;
     const expiry = document.getElementById('prod-expiry').value || null;
 
     // Validation

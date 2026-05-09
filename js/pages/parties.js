@@ -318,8 +318,8 @@ function openPartyModal(party, body, header, products, categories) {
             value="${machineQty}"
             placeholder="Qty"
             style="width:65px;padding:6px 8px;font-size:0.8rem;text-align:center;font-weight:700;" />
-          <input class="form-input cat-rate-input" data-cid="${c.id}" data-cattype="${c.type}" type="number" min="0" step="1"
-            value="${hasRate ? (c.type === 'liquid' ? (catRates[String(c.id)] * 1000).toFixed(0) : catRates[String(c.id)]) : ''}"
+          <input class="form-input cat-rate-input" data-cid="${c.id}" type="number" min="0" step="1"
+            value="${hasRate ? catRates[String(c.id)] : ''}"
             placeholder="₹ rate"
             style="width:110px;padding:6px 8px;font-size:0.8rem;${hasRate ? 'border-color:var(--primary);background:var(--primary-soft);' : 'opacity:0.4;'}"
             ${hasRate ? '' : 'disabled'} />
@@ -375,9 +375,7 @@ function openPartyModal(party, body, header, products, categories) {
       if (cb?.checked) {
         const val = parseFloat(input.value);
         if (!isNaN(val) && val >= 0) {
-          // Convert ₹/kg to ₹/gram for liquid categories before storing
-          const catType = input.dataset.cattype;
-          customCategoryRates[input.dataset.cid] = catType === 'liquid' ? val / 1000 : val;
+          customCategoryRates[input.dataset.cid] = val;
         }
       }
     });
