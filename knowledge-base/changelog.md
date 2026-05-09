@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-05-09 — Migrate Liquid Stock from Grams to KG (Direct Storage)
+**What**: Switched all liquid product data from internal grams storage to direct KG storage. Removed all UI conversion logic.
+**Why**: Conversion-at-boundary approach was error-prone (25+ conversion calls across 6 files). Direct KG storage is simpler — what you see = what's stored.
+**Impact**: Requires running `migrations/002_grams_to_kg.sql` ONCE in Supabase before deploying. After migration, all liquid values in DB are in KG and ₹/kg.
+**Files Changed**: `helpers.js`, `products.js`, `sales.js`, `daily-operations.js`, `parties.js`, `settings.js`, `migrations/002_grams_to_kg.sql` (NEW)
+
+- Removed `kgToGrams()` and `gramsToKg()` helper functions entirely
+- `formatWeight(kg)` now takes KG directly (no division)
+- `formatPricePerUnit(price)` now takes ₹/kg directly (no multiplication)
+- All form inputs/outputs pass values through without conversion
+- Migration SQL handles: products, sales, checkout_items, stock_intakes, inventory_transactions, party custom_category_rates
+
 ## 2026-05-07 — Installations Page + Per-Category Machine Quantities
 **What**: Added dedicated Installations page for tracking machines deployed at party locations. Also added per-category Qty inputs on party form.
 **Why**: Client needs to track which machines are installed where, when they were installed, and how many — without price info.
