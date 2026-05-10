@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-05-10 — Seller Experience: Dashboard, Parties, Refills
+**What**: Redesigned seller account with dedicated Dashboard (upcoming refills), Parties access (add-only), and kept Collections.
+**Why**: Sellers need to see their daily refill schedule and add new parties on the field without admin involvement.
+**Impact**: Seller sidebar now shows 4 items instead of 3. No DB changes required.
+**Files Changed**: `main.js`, `dashboard.js`, `parties.js`
+
+- **Dashboard**: Sellers see today's refills + next 7 days schedule with Call buttons (no checkout history)
+- **Parties**: Sellers can view full party list + add new parties (simplified form: name, phone, address, notes)
+- **Parties (admin)**: Edit button hidden for sellers. Admin-only fields (AMC, pricing, machine config) only shown to admins
+- **Nav**: Seller sidebar: Dashboard → Daily Operations → Collections → Parties
+
 ## 2026-05-09 — Migrate Liquid Stock from Grams to KG (Direct Storage)
 **What**: Switched all liquid product data from internal grams storage to direct KG storage. Removed all UI conversion logic.
 **Why**: Conversion-at-boundary approach was error-prone (25+ conversion calls across 6 files). Direct KG storage is simpler — what you see = what's stored.
