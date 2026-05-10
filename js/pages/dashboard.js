@@ -7,8 +7,8 @@ export async function renderDashboard(body, header) {
   header.innerHTML = `
     <div>
       <button class="mobile-toggle" id="mobile-toggle"><i class="fas fa-bars"></i></button>
-      <h1>${isAdmin ? 'Dashboard' : 'My Checkouts'}</h1>
-      <div class="page-header-subtitle">${isAdmin ? 'Warehouse overview & alerts' : 'Your checkout history'}</div>
+      <h1>${isAdmin ? 'Dashboard' : 'Dashboard'}</h1>
+      <div class="page-header-subtitle">${isAdmin ? 'Warehouse overview & alerts' : 'Upcoming refill schedule'}</div>
     </div>
     <div style="font-size:0.85rem;color:var(--text-muted);">${new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div>
   `;
@@ -299,28 +299,78 @@ export async function renderDashboard(body, header) {
 }
 
 async function renderSellerView(body) {
-  const userId = auth.currentUser.id;
-  const { data: sessions } = await db.getAll('checkout_sessions');
-  const mySessions = sessions.filter(s => s.seller_id === userId).sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+  const { data: amcParties } = await db.getAll('parties');
+  const amcEnabled = amcParties.filter(p => p.amc_active && p.amc_day);
 
-  body.innerHTML = `
-    <div class="card">
+  const today = new Date().getDate();
+  const todaysRefills = amcEnabled.filter(p => p.amc_day === today);
+
+  const upcoming7Days = [];
+  for (let d = 1; d <= 7; d++) {
+    const futureDate = new Date();
+    futureDate.setDate(futureDate.getDate() + d);
+    const futureDay = futureDate.getDate();
+    const partiesOnDay = amcEnabled.filter(p => p.amc_day === futureDay);
+    if (partiesOnDay.length > 0) {
+      upcoming7Days.push({ date: futureDate, day: futureDay, parties: partiesOnDay });
+    }
+  }
+
+  const todayHtml = todaysRefills.length > 0 ? `
+    <div class="card" style="margin-bottom:20px;border-left:4px solid var(--primary);">
       <div class="card-header">
-        <h3>My Checkout History</h3>
+        <h3><i class="fas fa-calendar-check" style="color:var(--primary);margin-right:8px;"></i>Today's Refill Visits</h3>
+        <span class="badge-status green">${todaysRefills.length} visit${todaysRefills.length > 1 ? 's' : ''}</span>
       </div>
       <div class="card-body">
-        ${mySessions.length === 0 ? '<div class="empty-state"><i class="fas fa-inbox"></i><h3>No checkouts yet</h3><p>Your daily checkouts will appear here.</p></div>' : `
-          <div class="table-wrapper"><table class="data-table">
-            <thead><tr><th>Date</th><th>Checkout</th><th>Checkin</th><th>Status</th></tr></thead>
-            <tbody>${mySessions.map(s => `<tr>
-              <td>${formatDateTime(s.checkout_time)}</td>
-              <td>${formatDateTime(s.checkout_time)}</td>
-              <td>${s.checkin_time ? formatDateTime(s.checkin_time) : '—'}</td>
-              <td><span class="badge-status ${s.status === 'checked_in' ? 'green' : s.status === 'flagged' ? 'red' : 'amber'}">${escapeHtml(s.status.replace(/_/g, ' '))}</span></td>
-            </tr>`).join('')}</tbody>
-          </table></div>
-        `}
+        <div class="alert-list">
+          ${todaysRefills.map(p => `<div class="alert-item" style="background:var(--primary-soft);">
+            <i class="fas fa-map-marker-alt" style="color:var(--primary);"></i>
+            <div style="flex:1;">
+              <strong>${escapeHtml(p.name)}</strong>
+              <div style="font-size:0.75rem;color:var(--text-muted);">${escapeHtml(p.address || 'No address')} · ${escapeHtml(p.phone || 'No phone')}</div>
+            </div>
+            ${p.phone ? `<a href="tel:${p.phone}" class="btn btn-sm btn-primary"><i class="fas fa-phone"></i> Call</a>` : ''}
+          </div>`).join('')}
+        </div>
       </div>
-    </div>
-  `;
+    </div>` : `
+    <div class="card" style="margin-bottom:20px;border-left:4px solid var(--green);">
+      <div class="card-header">
+        <h3><i class="fas fa-check-circle" style="color:var(--green);margin-right:8px;"></i>Today's Refills</h3>
+      </div>
+      <div class="card-body">
+        <div class="empty-state" style="padding:20px;"><i class="fas fa-check-circle" style="font-size:1.5rem;color:var(--green);"></i><p style="color:var(--text-secondary);margin-top:8px;">No refills scheduled for today</p></div>
+      </div>
+    </div>`;
+
+  const upcomingHtml = upcoming7Days.length > 0 ? `
+    <div class="card">
+      <div class="card-header">
+        <h3><i class="fas fa-calendar-alt" style="color:var(--blue);margin-right:8px;"></i>Upcoming Refills (Next 7 Days)</h3>
+        <span class="badge-status blue">${upcoming7Days.reduce((s, e) => s + e.parties.length, 0)} visits</span>
+      </div>
+      <div class="card-body">
+        <div class="alert-list">
+          ${upcoming7Days.map(entry => entry.parties.map(p => `<div class="alert-item">
+            <i class="fas fa-clock" style="color:var(--blue);"></i>
+            <div style="flex:1;">
+              <strong>${escapeHtml(p.name)}</strong>
+              <div style="font-size:0.75rem;color:var(--text-muted);">${entry.date.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })} — ${escapeHtml(p.address || 'No address')}</div>
+            </div>
+            ${p.phone ? `<a href="tel:${p.phone}" class="btn btn-sm btn-secondary"><i class="fas fa-phone"></i></a>` : ''}
+          </div>`).join('')).join('')}
+        </div>
+      </div>
+    </div>` : `
+    <div class="card">
+      <div class="card-header">
+        <h3><i class="fas fa-calendar-alt" style="color:var(--blue);margin-right:8px;"></i>Upcoming Refills</h3>
+      </div>
+      <div class="card-body">
+        <div class="empty-state" style="padding:20px;"><i class="fas fa-calendar-check" style="font-size:1.5rem;color:var(--blue);"></i><p style="color:var(--text-secondary);margin-top:8px;">No refills in the next 7 days</p></div>
+      </div>
+    </div>`;
+
+  body.innerHTML = `${todayHtml}${upcomingHtml}`;
 }

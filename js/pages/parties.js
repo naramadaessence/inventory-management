@@ -8,7 +8,7 @@ function getOrdinal(n) {
 }
 
 export async function renderParties(body, header) {
-  if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
+  const isAdmin = auth.isAdmin();
 
   header.innerHTML = `
     <div>
@@ -141,7 +141,7 @@ export async function renderParties(body, header) {
         : '<span style="color:var(--text-muted);">Default</span>'
       }</td>
       <td style="font-weight:600;">₹${ps.total.toLocaleString('en-IN')} (${ps.count})</td>
-      <td><button class="btn btn-sm btn-ghost edit-party-btn" data-id="${p.id}"><i class="fas fa-pen"></i></button></td>
+      <td>${isAdmin ? `<button class="btn btn-sm btn-ghost edit-party-btn" data-id="${p.id}"><i class="fas fa-pen"></i></button>` : ''}</td>
     </tr>`;
   }
 
@@ -229,9 +229,12 @@ export async function renderParties(body, header) {
 
 function openPartyModal(party, body, header, products, categories) {
   const isEdit = !!party;
+  const isAdminUser = auth.isAdmin();
   const catRates = party?.custom_category_rates || {};
 
-  const content = `
+  if (!isAdminUser && isEdit) { showToast('Contact admin to edit party details', 'error'); return; }
+
+  const basicFields = `
     <div class="form-group">
       <label class="form-label">Party Name *</label>
       <input class="form-input" id="party-name" value="${esc(party?.name || '')}" required maxlength="200" />
@@ -246,22 +249,28 @@ function openPartyModal(party, body, header, products, categories) {
         <input class="form-input" id="party-address" value="${esc(party?.address || '')}" maxlength="300" />
       </div>
     </div>
+    <div class="form-group">
+      <label class="form-label">Notes</label>
+      <textarea class="form-textarea" id="party-notes" maxlength="500">${esc(party?.notes || '')}</textarea>
+    </div>
+  `;
 
+  const adminFields = isAdminUser ? `
     <div style="background:var(--bg-secondary);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
         <i class="fas fa-cogs" style="color:var(--green);"></i>
         <strong style="font-size:0.9rem;">Machine Type</strong>
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <label style="display:flex;align-items:center;gap:6px;padding:10px 16px;border-radius:var(--radius);border:2px solid var(--border);cursor:pointer;flex:1;min-width:140px;transition:all 0.2s;" class="machine-opt" data-val="none">
+        <label style="display:flex;align-items:center;gap:6px;padding:10px 16px;border-radius:var(--radius);border:2px solid var(--border);cursor:pointer;flex:1;min-width:140px;" class="machine-opt" data-val="none">
           <input type="radio" name="machine-type" value="none" ${!party?.machine_type || party?.machine_type === 'none' ? 'checked' : ''} style="accent-color:var(--text-muted);" />
           <div><strong style="font-size:0.85rem;">No Machine</strong><div style="font-size:0.7rem;color:var(--text-muted);">Only refills / oils</div></div>
         </label>
-        <label style="display:flex;align-items:center;gap:6px;padding:10px 16px;border-radius:var(--radius);border:2px solid var(--border);cursor:pointer;flex:1;min-width:140px;transition:all 0.2s;" class="machine-opt" data-val="purchased">
+        <label style="display:flex;align-items:center;gap:6px;padding:10px 16px;border-radius:var(--radius);border:2px solid var(--border);cursor:pointer;flex:1;min-width:140px;" class="machine-opt" data-val="purchased">
           <input type="radio" name="machine-type" value="purchased" ${party?.machine_type === 'purchased' ? 'checked' : ''} style="accent-color:var(--green);" />
           <div><strong style="font-size:0.85rem;color:var(--green);"><i class="fas fa-shopping-cart"></i> Purchased</strong><div style="font-size:0.7rem;color:var(--text-muted);">Machine bought outright</div></div>
         </label>
-        <label style="display:flex;align-items:center;gap:6px;padding:10px 16px;border-radius:var(--radius);border:2px solid var(--border);cursor:pointer;flex:1;min-width:140px;transition:all 0.2s;" class="machine-opt" data-val="free_to_use">
+        <label style="display:flex;align-items:center;gap:6px;padding:10px 16px;border-radius:var(--radius);border:2px solid var(--border);cursor:pointer;flex:1;min-width:140px;" class="machine-opt" data-val="free_to_use">
           <input type="radio" name="machine-type" value="free_to_use" ${party?.machine_type === 'free_to_use' ? 'checked' : ''} style="accent-color:var(--blue);" />
           <div><strong style="font-size:0.85rem;color:var(--blue);"><i class="fas fa-handshake"></i> Free to Use</strong><div style="font-size:0.7rem;color:var(--text-muted);">Monthly visits required</div></div>
         </label>
@@ -315,94 +324,77 @@ function openPartyModal(party, body, header, products, categories) {
             </div>
           </label>
           <input class="form-input machine-qty-input" data-cid="${c.id}" type="number" min="0" max="100" step="1"
-            value="${machineQty}"
-            placeholder="Qty"
+            value="${machineQty}" placeholder="Qty"
             style="width:65px;padding:6px 8px;font-size:0.8rem;text-align:center;font-weight:700;" />
           <input class="form-input cat-rate-input" data-cid="${c.id}" type="number" min="0" step="1"
-            value="${hasRate ? catRates[String(c.id)] : ''}"
-            placeholder="₹ rate"
+            value="${hasRate ? catRates[String(c.id)] : ''}" placeholder="₹ rate"
             style="width:110px;padding:6px 8px;font-size:0.8rem;${hasRate ? 'border-color:var(--primary);background:var(--primary-soft);' : 'opacity:0.4;'}"
             ${hasRate ? '' : 'disabled'} />
         </div>`;
       }).join('')}
     </div>
+  ` : '';
 
-    <div class="form-group">
-      <label class="form-label">Notes</label>
-      <textarea class="form-textarea" id="party-notes" maxlength="500">${esc(party?.notes || '')}</textarea>
-    </div>
-  `;
+  const content = basicFields + adminFields;
   const footer = `<button class="btn btn-secondary" id="party-cancel">Cancel</button><button class="btn btn-primary" id="party-save"><i class="fas fa-save"></i> ${isEdit ? 'Update' : 'Create'}</button>`;
   const { close } = createModal(isEdit ? 'Edit Party' : 'Add Party', content, { footer });
 
-  // Toggle category rate inputs
-  document.querySelectorAll('.cat-toggle').forEach(cb => {
-    cb.addEventListener('change', () => {
-      const input = document.querySelector(`.cat-rate-input[data-cid="${cb.dataset.cid}"]`);
-      if (cb.checked) {
-        input.disabled = false;
-        input.style.opacity = '1';
-        input.style.borderColor = 'var(--primary)';
-        input.style.background = 'var(--primary-soft)';
-        input.focus();
-      } else {
-        input.disabled = true;
-        input.value = '';
-        input.style.opacity = '0.4';
-        input.style.borderColor = '';
-        input.style.background = '';
-      }
+  if (isAdminUser) {
+    document.querySelectorAll('.cat-toggle').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const input = document.querySelector(`.cat-rate-input[data-cid="${cb.dataset.cid}"]`);
+        if (cb.checked) {
+          input.disabled = false; input.style.opacity = '1';
+          input.style.borderColor = 'var(--primary)'; input.style.background = 'var(--primary-soft)'; input.focus();
+        } else {
+          input.disabled = true; input.value = '';
+          input.style.opacity = '0.4'; input.style.borderColor = ''; input.style.background = '';
+        }
+      });
     });
-  });
-
-  // Toggle machine count row based on machine type
-  document.querySelectorAll('input[name="machine-type"]').forEach(radio => {
-    radio.addEventListener('change', () => {});
-  });
+  }
 
   document.getElementById('party-cancel').onclick = close;
   document.getElementById('party-save').onclick = async () => {
     const name = document.getElementById('party-name').value.trim();
     if (!name || name.length < 2) { showToast('Name is required', 'error'); return; }
-    const amcActive = document.getElementById('party-amc-active').checked;
-    const amcDay = parseInt(document.getElementById('party-amc-day').value);
-    const amcRate = parseFloat(document.getElementById('party-amc-rate').value) || null;
-
-    // Collect category rates (only checked ones with values)
-    const customCategoryRates = {};
-    document.querySelectorAll('.cat-rate-input').forEach(input => {
-      const cb = document.querySelector(`.cat-toggle[data-cid="${input.dataset.cid}"]`);
-      if (cb?.checked) {
-        const val = parseFloat(input.value);
-        if (!isNaN(val) && val >= 0) {
-          customCategoryRates[input.dataset.cid] = val;
-        }
-      }
-    });
-
-    const machineType = document.querySelector('input[name="machine-type"]:checked')?.value || 'none';
-
-    // Collect machine quantities per category
-    const machineCounts = {};
-    document.querySelectorAll('.machine-qty-input').forEach(input => {
-      const val = parseInt(input.value);
-      if (!isNaN(val) && val > 0) {
-        machineCounts[input.dataset.cid] = val;
-      }
-    });
 
     const record = {
       name,
       phone: document.getElementById('party-phone').value.trim(),
       address: document.getElementById('party-address').value.trim(),
       notes: document.getElementById('party-notes').value.trim(),
-      machine_type: machineType,
-      machine_counts: Object.keys(machineCounts).length > 0 ? machineCounts : null,
-      amc_active: amcActive,
-      amc_day: amcActive ? amcDay : null,
-      amc_rate: amcRate,
-      custom_category_rates: Object.keys(customCategoryRates).length > 0 ? customCategoryRates : null
     };
+
+    if (isAdminUser) {
+      const amcActive = document.getElementById('party-amc-active').checked;
+      const amcDay = parseInt(document.getElementById('party-amc-day').value);
+      const amcRate = parseFloat(document.getElementById('party-amc-rate').value) || null;
+
+      const customCategoryRates = {};
+      document.querySelectorAll('.cat-rate-input').forEach(input => {
+        const cb = document.querySelector(`.cat-toggle[data-cid="${input.dataset.cid}"]`);
+        if (cb?.checked) {
+          const val = parseFloat(input.value);
+          if (!isNaN(val) && val >= 0) { customCategoryRates[input.dataset.cid] = val; }
+        }
+      });
+
+      const machineType = document.querySelector('input[name="machine-type"]:checked')?.value || 'none';
+      const machineCounts = {};
+      document.querySelectorAll('.machine-qty-input').forEach(input => {
+        const val = parseInt(input.value);
+        if (!isNaN(val) && val > 0) { machineCounts[input.dataset.cid] = val; }
+      });
+
+      record.machine_type = machineType;
+      record.machine_counts = Object.keys(machineCounts).length > 0 ? machineCounts : null;
+      record.amc_active = amcActive;
+      record.amc_day = amcActive ? amcDay : null;
+      record.amc_rate = amcRate;
+      record.custom_category_rates = Object.keys(customCategoryRates).length > 0 ? customCategoryRates : null;
+    }
+
     const result = isEdit
       ? await dbOp(db.update('parties', party.id, record), 'Failed to update party')
       : await dbOp(db.insert('parties', record), 'Failed to add party');
