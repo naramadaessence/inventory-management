@@ -44,6 +44,7 @@ const sellerNav = [
   { id: 'dashboard', icon: 'fa-th-large', label: 'Dashboard' },
   { section: 'My Area' },
   { id: 'daily-ops', icon: 'fa-right-left', label: 'Daily Operations' },
+  { id: 'sales', icon: 'fa-receipt', label: 'Record Sale' },
   { section: 'Business' },
   { id: 'collections', icon: 'fa-money-bill-wave', label: 'Collections' },
   { id: 'parties', icon: 'fa-users', label: 'Parties' },

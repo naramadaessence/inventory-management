@@ -39,20 +39,55 @@ export async function renderDashboard(body, header) {
   const totalSalesValue = sales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
   const alertCount = lowStockProducts.length + flaggedSessions + expiredProducts.length + pendingTotal;
 
-  // AMC Worklist
-  const today = new Date().getDate();
+  // AMC Worklist with completion tracking
+  const now = new Date();
+  const curMonth = now.getMonth() + 1;
+  const curYear = now.getFullYear();
+  const today = now.getDate();
   const amcEnabled = amcParties.filter(p => p.amc_active && p.amc_day);
-  const todaysRefills = amcEnabled.filter(p => p.amc_day === today);
+
+  const { data: completions } = await db.getAll('refill_completions');
+  const completedThisMonth = new Set(
+    completions.filter(c => c.month === curMonth && c.year === curYear).map(c => c.party_id)
+  );
+
+  // Overdue: amc_day < today AND not completed this month
+  const overdueRefills = amcEnabled.filter(p => p.amc_day < today && !completedThisMonth.has(p.id));
+  // Today: amc_day === today AND not completed
+  const todaysRefills = amcEnabled.filter(p => p.amc_day === today && !completedThisMonth.has(p.id));
+  // Upcoming 7 days: amc_day > today, within next 7 calendar days, not completed
   const upcoming7Days = [];
   for (let d = 1; d <= 7; d++) {
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + d);
     const futureDay = futureDate.getDate();
-    const partiesOnDay = amcEnabled.filter(p => p.amc_day === futureDay);
+    // If month rolls over, skip (different month's refills)
+    if (futureDate.getMonth() + 1 !== curMonth) continue;
+    const partiesOnDay = amcEnabled.filter(p => p.amc_day === futureDay && !completedThisMonth.has(p.id));
     if (partiesOnDay.length > 0) {
       upcoming7Days.push({ date: futureDate, day: futureDay, parties: partiesOnDay });
     }
   }
+
+  const overdueHtml = overdueRefills.length > 0 ? `
+    <div class="card" style="margin-bottom:20px;border-left:4px solid var(--red);">
+      <div class="card-header">
+        <h3><i class="fas fa-exclamation-triangle" style="color:var(--red);margin-right:8px;"></i>Overdue Refills</h3>
+        <span class="badge-status red">${overdueRefills.length} missed</span>
+      </div>
+      <div class="card-body">
+        <div class="alert-list">
+          ${overdueRefills.map(p => `<div class="alert-item" style="background:rgba(220,38,38,0.06);">
+            <i class="fas fa-exclamation-circle" style="color:var(--red);"></i>
+            <div style="flex:1;">
+              <strong>${escapeHtml(p.name)}</strong>
+              <div style="font-size:0.75rem;color:var(--red);">${today - p.amc_day} day${today - p.amc_day > 1 ? 's' : ''} overdue · ${escapeHtml(p.address || 'No address')} · ${escapeHtml(p.phone || 'No phone')}</div>
+            </div>
+            <button class="btn btn-sm btn-primary refill-complete-btn" data-party-id="${p.id}" style="white-space:nowrap;"><i class="fas fa-check"></i> Done</button>
+          </div>`).join('')}
+        </div>
+      </div>
+    </div>` : '';
 
   const amcWorklistHtml = todaysRefills.length > 0 ? `
     <div class="card" style="margin-bottom:20px;border-left:4px solid var(--primary);">
@@ -68,7 +103,7 @@ export async function renderDashboard(body, header) {
               <strong>${escapeHtml(p.name)}</strong>
               <div style="font-size:0.75rem;color:var(--text-muted);">${escapeHtml(p.address || 'No address')} · ${escapeHtml(p.phone || 'No phone')}</div>
             </div>
-            <button class="btn btn-sm btn-primary" onclick="window.navigateTo('parties')">View</button>
+            <button class="btn btn-sm btn-primary refill-complete-btn" data-party-id="${p.id}" style="white-space:nowrap;"><i class="fas fa-check"></i> Done</button>
           </div>`).join('')}
         </div>
       </div>
@@ -118,6 +153,7 @@ export async function renderDashboard(body, header) {
     </div>` : '';
 
   body.innerHTML = `
+    ${overdueHtml}
     ${pendingHtml}
     ${amcWorklistHtml}
     ${upcomingHtml}
@@ -192,6 +228,20 @@ export async function renderDashboard(body, header) {
       </div>
     </div>
   `;
+
+  // Refill completion handler
+  body.querySelectorAll('.refill-complete-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const partyId = parseInt(btn.dataset.partyId);
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      try {
+        await db.insert('refill_completions', { party_id: partyId, month: curMonth, year: curYear, completed_by: auth.currentUser.id });
+        showToast('Refill marked as done ✓', 'success');
+        renderDashboard(body, header);
+      } catch(err) { showToast('Failed to mark complete', 'error'); btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Done'; }
+    });
+  });
 
   // Low stock list
   const lowStockEl = document.getElementById('low-stock-list');
@@ -302,19 +352,53 @@ async function renderSellerView(body) {
   const { data: amcParties } = await db.getAll('parties');
   const amcEnabled = amcParties.filter(p => p.amc_active && p.amc_day);
 
-  const today = new Date().getDate();
-  const todaysRefills = amcEnabled.filter(p => p.amc_day === today);
+  const now = new Date();
+  const curMonth = now.getMonth() + 1;
+  const curYear = now.getFullYear();
+  const today = now.getDate();
+
+  const { data: completions } = await db.getAll('refill_completions');
+  const completedThisMonth = new Set(
+    completions.filter(c => c.month === curMonth && c.year === curYear).map(c => c.party_id)
+  );
+
+  const overdueRefills = amcEnabled.filter(p => p.amc_day < today && !completedThisMonth.has(p.id));
+  const todaysRefills = amcEnabled.filter(p => p.amc_day === today && !completedThisMonth.has(p.id));
 
   const upcoming7Days = [];
   for (let d = 1; d <= 7; d++) {
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + d);
     const futureDay = futureDate.getDate();
-    const partiesOnDay = amcEnabled.filter(p => p.amc_day === futureDay);
+    if (futureDate.getMonth() + 1 !== curMonth) continue;
+    const partiesOnDay = amcEnabled.filter(p => p.amc_day === futureDay && !completedThisMonth.has(p.id));
     if (partiesOnDay.length > 0) {
       upcoming7Days.push({ date: futureDate, day: futureDay, parties: partiesOnDay });
     }
   }
+
+  const overdueHtml = overdueRefills.length > 0 ? `
+    <div class="card" style="margin-bottom:20px;border-left:4px solid var(--red);">
+      <div class="card-header">
+        <h3><i class="fas fa-exclamation-triangle" style="color:var(--red);margin-right:8px;"></i>Overdue Refills</h3>
+        <span class="badge-status red">${overdueRefills.length} missed</span>
+      </div>
+      <div class="card-body">
+        <div class="alert-list">
+          ${overdueRefills.map(p => `<div class="alert-item" style="background:rgba(220,38,38,0.06);">
+            <i class="fas fa-exclamation-circle" style="color:var(--red);"></i>
+            <div style="flex:1;">
+              <strong>${escapeHtml(p.name)}</strong>
+              <div style="font-size:0.75rem;color:var(--red);">${today - p.amc_day} day${today - p.amc_day > 1 ? 's' : ''} overdue · ${escapeHtml(p.address || 'No address')}</div>
+            </div>
+            <div style="display:flex;gap:6px;">
+              ${p.phone ? `<a href="tel:${p.phone}" class="btn btn-sm btn-secondary"><i class="fas fa-phone"></i></a>` : ''}
+              <button class="btn btn-sm btn-primary seller-refill-done" data-party-id="${p.id}" style="white-space:nowrap;"><i class="fas fa-check"></i> Done</button>
+            </div>
+          </div>`).join('')}
+        </div>
+      </div>
+    </div>` : '';
 
   const todayHtml = todaysRefills.length > 0 ? `
     <div class="card" style="margin-bottom:20px;border-left:4px solid var(--primary);">
@@ -330,7 +414,10 @@ async function renderSellerView(body) {
               <strong>${escapeHtml(p.name)}</strong>
               <div style="font-size:0.75rem;color:var(--text-muted);">${escapeHtml(p.address || 'No address')} · ${escapeHtml(p.phone || 'No phone')}</div>
             </div>
-            ${p.phone ? `<a href="tel:${p.phone}" class="btn btn-sm btn-primary"><i class="fas fa-phone"></i> Call</a>` : ''}
+            <div style="display:flex;gap:6px;">
+              ${p.phone ? `<a href="tel:${p.phone}" class="btn btn-sm btn-secondary"><i class="fas fa-phone"></i></a>` : ''}
+              <button class="btn btn-sm btn-primary seller-refill-done" data-party-id="${p.id}" style="white-space:nowrap;"><i class="fas fa-check"></i> Done</button>
+            </div>
           </div>`).join('')}
         </div>
       </div>
@@ -340,7 +427,7 @@ async function renderSellerView(body) {
         <h3><i class="fas fa-check-circle" style="color:var(--green);margin-right:8px;"></i>Today's Refills</h3>
       </div>
       <div class="card-body">
-        <div class="empty-state" style="padding:20px;"><i class="fas fa-check-circle" style="font-size:1.5rem;color:var(--green);"></i><p style="color:var(--text-secondary);margin-top:8px;">No refills scheduled for today</p></div>
+        <div class="empty-state" style="padding:20px;"><i class="fas fa-check-circle" style="font-size:1.5rem;color:var(--green);"></i><p style="color:var(--text-secondary);margin-top:8px;">All refills done or none scheduled for today</p></div>
       </div>
     </div>`;
 
@@ -372,5 +459,19 @@ async function renderSellerView(body) {
       </div>
     </div>`;
 
-  body.innerHTML = `${todayHtml}${upcomingHtml}`;
+  body.innerHTML = `${overdueHtml}${todayHtml}${upcomingHtml}`;
+
+  // Seller refill completion handler
+  body.querySelectorAll('.seller-refill-done').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const partyId = parseInt(btn.dataset.partyId);
+      btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+      try {
+        await db.insert('refill_completions', { party_id: partyId, month: curMonth, year: curYear, completed_by: auth.currentUser.id });
+        showToast('Refill marked as done ✓', 'success');
+        renderSellerView(body);
+      } catch(err) { showToast('Failed to mark complete', 'error'); btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Done'; }
+    });
+  });
 }

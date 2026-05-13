@@ -79,11 +79,13 @@ function initStore() {
       { id: 3, name: 'City Pulse Mall', phone: '9898111222', address: 'Dumas Road, Surat', notes: 'Large order monthly', created_at: now }
     ],
     sales: [],
+    sale_items: [],
     rentals: [],
     inventory_transactions: [],
     damage_reports: [],
     stock_intakes: [],
-    _nextId: { checkout_sessions: 1, checkout_items: 1, sales: 1, rentals: 1, inventory_transactions: 1, damage_reports: 1, stock_intakes: 1, parties: 4, products: 23, categories: 6 }
+    refill_completions: [],
+    _nextId: { checkout_sessions: 1, checkout_items: 1, sales: 1, sale_items: 1, rentals: 1, inventory_transactions: 1, damage_reports: 1, stock_intakes: 1, refill_completions: 1, parties: 4, products: 23, categories: 6 }
   });
 }
 

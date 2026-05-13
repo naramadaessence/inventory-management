@@ -87,6 +87,7 @@ export async function renderReports(body, header) {
     const { data: sessions } = await db.getAll('checkout_sessions');
     const { data: checkoutItems } = await db.getAll('checkout_items');
     const { data: categories } = await db.getAll('categories');
+    const { data: allSaleItems } = await db.getAll('sale_items');
     const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
     const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
 
@@ -94,27 +95,29 @@ export async function renderReports(body, header) {
       const d = (s.sale_date || s.created_at || '').split('T')[0];
       return d >= startDate && d <= endDate;
     });
+    const filteredSaleIds = new Set(filteredSales.map(s => s.id));
+    const filteredItems = allSaleItems.filter(si => filteredSaleIds.has(si.sale_id));
 
-    if (activeTab === 'sales') renderSalesReport(container, filteredSales, prodMap, profiles);
+    if (activeTab === 'sales') renderSalesReport(container, filteredSales, filteredItems, prodMap, profiles);
     else if (activeTab === 'stock') renderStockReport(container, products, catMap);
     else if (activeTab === 'sellers') renderSellerReport(container, sessions, checkoutItems, profiles, prodMap, startDate, endDate);
-    else if (activeTab === 'movers') renderMoversReport(container, filteredSales, products, prodMap);
+    else if (activeTab === 'movers') renderMoversReport(container, filteredItems, products, prodMap);
   }
 
   loadReport();
 }
 
-function renderSalesReport(container, sales, prodMap, profiles) {
+function renderSalesReport(container, sales, saleItems, prodMap, profiles) {
   const totalRev = sales.reduce((s, r) => s + (r.total_amount || 0), 0);
   const avgOrder = sales.length ? totalRev / sales.length : 0;
 
-  // Group by product
+  // Group by product using sale_items
   const byProduct = {};
-  sales.forEach(s => {
-    const pName = prodMap[s.product_id]?.name || 'Unknown';
+  saleItems.forEach(si => {
+    const pName = prodMap[si.product_id]?.name || 'Unknown';
     if (!byProduct[pName]) byProduct[pName] = { revenue: 0, qty: 0 };
-    byProduct[pName].revenue += s.total_amount || 0;
-    byProduct[pName].qty += s.quantity || 0;
+    byProduct[pName].revenue += si.line_total || 0;
+    byProduct[pName].qty += si.quantity || 0;
   });
   const topProducts = Object.entries(byProduct).sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 10);
 
@@ -225,11 +228,11 @@ function renderSellerReport(container, sessions, checkoutItems, profiles, prodMa
   `;
 }
 
-function renderMoversReport(container, sales, products, prodMap) {
+function renderMoversReport(container, saleItems, products, prodMap) {
   const salesByProduct = {};
-  sales.forEach(s => {
-    if (!salesByProduct[s.product_id]) salesByProduct[s.product_id] = 0;
-    salesByProduct[s.product_id] += s.quantity || 0;
+  saleItems.forEach(si => {
+    if (!salesByProduct[si.product_id]) salesByProduct[si.product_id] = 0;
+    salesByProduct[si.product_id] += si.quantity || 0;
   });
   const movers = Object.entries(salesByProduct).map(([id, qty]) => ({ product: prodMap[parseInt(id)], qty })).filter(m => m.product).sort((a, b) => b.qty - a.qty);
   const fast = movers.slice(0, 10);

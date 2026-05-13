@@ -1,5 +1,33 @@
 # Changelog
 
+## 2026-05-13 — Refill Completion Tracking (refill_completions table)
+**What**: Refill reminders now persist until manually marked "Done". Overdue refills show in a red card above today's list.
+**Why**: Client reported missed refills when sellers are outstation — reminders vanished when the date passed with no way to track.
+**Impact**: Requires running `migrations/004_refill_completions.sql` in Supabase. Dashboard now shows 3 buckets: Overdue (red), Today (green), Upcoming (blue).
+**Files Changed**: `dashboard.js` (both admin + seller views), `supabase.js` (demo store), `migrations/004_refill_completions.sql` (NEW)
+
+- **refill_completions table**: `party_id + month + year` unique — one completion per party per month
+- **Overdue bucket**: Parties where `amc_day < today` and no completion this month — shows "X days overdue" in red
+- **Done button**: Both admin and seller get ✅ Done button on each refill. Inserts completion record and refreshes dashboard
+- **Auto-clear on month rollover**: New month = no completions yet = all reminders reappear naturally
+- **Seller view**: Call + Done buttons side by side on each refill item
+
+## 2026-05-12 — Multi-Item Sales System (sale_items table)
+**What**: Migrated from single-product-per-sale to multi-item bill/invoice architecture with new `sale_items` table.
+**Why**: Client needs sellers to record full orders (multiple products per bill) on the spot, with same-product quantity merging.
+**Impact**: Requires running `migrations/003_multi_item_sales.sql` in Supabase before deploying. `sales` table loses `product_id`, `quantity`, `unit_price` columns — data migrated to `sale_items`. Sellers now have Sales page access (add-only).
+**Files Changed**: `sales.js` (major rewrite), `collections.js` (5 refs updated), `reports.js` (3 refs updated), `main.js` (+1 nav item), `supabase.js` (demo store), `migrations/003_multi_item_sales.sql` (NEW)
+
+- **sale_items table**: `id, sale_id (FK→sales), product_id (FK→products), quantity, unit_price, line_total, created_at`
+- **Sales modal**: Multi-item add flow with party info card (contact, machine, custom rates), running item list, grand total
+- **Same product merging**: Adding same product at same price increments quantity (×2, ×3...) instead of duplicate rows
+- **Party info card**: Shows phone, address, machine type, custom category rates when party selected
+- **Seller access**: Sellers see Sales in nav, can add sales, see only their own sales, no edit/delete
+- **Collections**: Updated 5 `product_id` references to use `sale_items` lookup with `saleProductName()` helper
+- **Reports**: Revenue-by-product and fast/slow movers now iterate `sale_items` instead of `sales.product_id`
+- **Stock deduction**: Consolidated per-product across all line items before deducting, with inventory_transactions per product
+- **Edit modal**: Shows read-only items list, allows payment/date/total edits. Delete restores stock for all items
+
 ## 2026-05-10 — Seller Experience: Dashboard, Parties, Refills
 **What**: Redesigned seller account with dedicated Dashboard (upcoming refills), Parties access (add-only), and kept Collections.
 **Why**: Sellers need to see their daily refill schedule and add new parties on the field without admin involvement.

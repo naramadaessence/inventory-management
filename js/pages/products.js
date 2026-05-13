@@ -170,7 +170,7 @@ function openProductModal(product, categories) {
       </div>
     </div>
     <div class="form-row">
-      <div class="form-group">
+      <div class="form-group">  
         <label class="form-label" id="prod-stock-label">Current Stock *</label>
         <input class="form-input" type="number" id="prod-stock" value="${product?.current_stock || 0}" min="0" step="${product?.type === 'liquid' ? '0.001' : '1'}" required />
       </div>

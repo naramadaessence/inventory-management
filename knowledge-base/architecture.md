@@ -55,18 +55,42 @@
 | is_flagged | boolean | True if consumption > threshold |
 | flag_reason | text | |
 
-### sales
+### sales (bill/invoice header)
 | Column | Type | Notes |
 |--------|------|-------|
 | id | int (PK) | |
 | party_id | int (FK) | Nullable for walk-ins |
-| product_id | int (FK) | |
+| total_amount | decimal | Sum of all line items |
+| payment_status | text | 'paid', 'partial', 'pending' |
+| payment_method | text | 'cash', 'upi', 'bank_transfer', 'cheque' |
+| amount_received | decimal | |
+| expected_payment_date | date | Nullable |
+| sale_date | date | |
+| notes | text | |
+| recorded_by | text (FK→profiles) | |
+
+### sale_items (line items per sale)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | int (PK) | |
+| sale_id | int (FK→sales) | ON DELETE CASCADE |
+| product_id | int (FK→products) | |
 | quantity | decimal | |
 | unit_price | decimal | |
-| total_amount | decimal | |
-| payment_status | text | 'paid', 'partial', 'pending' |
-| sale_date | date | |
-| recorded_by | text (FK→profiles) | |
+| line_total | decimal | quantity × unit_price |
+| created_at | timestamp | |
+
+### refill_completions (monthly refill tracking)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | int (PK) | |
+| party_id | int (FK→parties) | ON DELETE CASCADE |
+| month | int | 1-12 |
+| year | int | e.g. 2026 |
+| completed_by | text | User ID who marked it |
+| completed_at | timestamp | |
+| notes | text | |
+| | | UNIQUE(party_id, month, year) |
 
 ### inventory_transactions (audit trail)
 | Column | Type | Notes |

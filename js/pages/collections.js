@@ -21,10 +21,14 @@ export async function renderCollections(body, header) {
   const { data: profiles } = await db.getAll('profiles');
   const { data: sales } = await db.getAll('sales', { orderBy: ['created_at', 'desc'] });
   const { data: products } = await db.getAll('products');
+  const { data: allSaleItems } = await db.getAll('sale_items');
   const partyMap = Object.fromEntries(parties.map(p => [p.id, p]));
   const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
   const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
   const sellers = profiles.filter(p => p.role === 'seller' && p.is_active);
+  const saleItemsBySale = {};
+  allSaleItems.forEach(si => { if (!saleItemsBySale[si.sale_id]) saleItemsBySale[si.sale_id] = []; saleItemsBySale[si.sale_id].push(si); });
+  function saleProductName(saleId) { const items = saleItemsBySale[saleId] || []; if (items.length === 0) return '—'; const first = prodMap[items[0].product_id]?.name || '?'; return items.length > 1 ? `${first} & ${items.length - 1} more` : first; }
 
   // ── scoping ──
   const followups = isAdmin ? allFollowups : allFollowups.filter(f => f.visited_by === userId);
@@ -198,7 +202,7 @@ export async function renderCollections(body, header) {
       </tr></thead>
       <tbody>${filtered.map(s => {
         const party = partyMap[s.party_id];
-        const prod = prodMap[s.product_id];
+        const prodName = saleProductName(s.id);
         const recorder = profileMap[s.recorded_by];
         const balance = (s.total_amount || 0) - (s.amount_received || 0);
         const isOD = s.expected_payment_date && daysUntil(s.expected_payment_date) < 0;
@@ -208,7 +212,7 @@ export async function renderCollections(body, header) {
 
         return `<tr style="${isOD ? 'background:rgba(220,38,38,0.04);' : ''}">
           <td><strong>${esc(party?.name || 'Walk-in')}</strong></td>
-          <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;">${esc(prod?.name || '—')}</td>
+          <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;">${esc(prodName)}</td>
           ${isAdmin ? `<td><span style="font-size:0.75rem;">${esc(recorder?.full_name || '—')}</span></td>` : ''}
           <td>${formatDate(s.sale_date || s.created_at)}</td>
           <td>${formatCurrency(s.total_amount)}</td>
@@ -311,9 +315,9 @@ export async function renderCollections(body, header) {
           <option value="">— No specific sale —</option>
           ${pendingSales.map(s => {
             const party = partyMap[s.party_id];
-            const prod = prodMap[s.product_id];
+            const pName = saleProductName(s.id);
             const balance = (s.total_amount || 0) - (s.amount_received || 0);
-            return `<option value="${s.id}" data-party="${s.party_id}">${esc(party?.name || 'Walk-in')} — ${esc(prod?.name || '?')} — ${formatCurrency(balance)} pending</option>`;
+            return `<option value="${s.id}" data-party="${s.party_id}">${esc(party?.name || 'Walk-in')} — ${esc(pName)} — ${formatCurrency(balance)} pending</option>`;
           }).join('')}
         </select>
       </div>
@@ -400,7 +404,7 @@ export async function renderCollections(body, header) {
   // ── UPDATE PAYMENT MODAL ──
   function openPaymentUpdateModal(sale) {
     const party = partyMap[sale.party_id];
-    const prod = prodMap[sale.product_id];
+    const prodName = saleProductName(sale.id);
     const balance = (sale.total_amount || 0) - (sale.amount_received || 0);
 
     const content = `
@@ -408,7 +412,7 @@ export async function renderCollections(body, header) {
         <div style="display:flex;justify-content:space-between;align-items:center;">
           <div>
             <strong>${esc(party?.name || 'Walk-in')}</strong>
-            <div style="font-size:0.8rem;color:var(--text-muted);">${esc(prod?.name || '—')} · ${formatDate(sale.sale_date || sale.created_at)}</div>
+            <div style="font-size:0.8rem;color:var(--text-muted);">${esc(prodName)} · ${formatDate(sale.sale_date || sale.created_at)}</div>
           </div>
           <div style="text-align:right;">
             <div style="font-size:0.8rem;color:var(--text-muted);">Balance Due</div>
