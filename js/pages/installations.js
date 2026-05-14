@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatDate, showToast, createModal, esc, dbOp } from '../utils/helpers.js';
+import { formatDate, showToast, createModal, esc, dbOp, withSaving } from '../utils/helpers.js';
 
 export async function renderInstallations(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
@@ -282,7 +282,7 @@ function openInstallModal(inst, parties, machineProducts, body, header) {
   const { close } = createModal(isEdit ? 'Edit Installation' : 'Add Installation', content, { footer });
 
   document.getElementById('inst-cancel').onclick = close;
-  document.getElementById('inst-save').onclick = async () => {
+  document.getElementById('inst-save').onclick = (e) => withSaving(e.currentTarget, async () => {
     const partyId = parseInt(document.getElementById('inst-party').value);
     const productId = parseInt(document.getElementById('inst-product').value);
     const qty = parseInt(document.getElementById('inst-qty').value) || 1;
@@ -307,5 +307,5 @@ function openInstallModal(inst, parties, machineProducts, body, header) {
     showToast(isEdit ? 'Installation updated' : 'Installation recorded', 'success');
     close();
     renderInstallations(body, header);
-  };
+  });
 }

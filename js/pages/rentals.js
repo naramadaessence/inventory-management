@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatDate, formatDateTime, formatCurrency, showToast, createModal, esc, dbOp } from '../utils/helpers.js';
+import { formatDate, formatDateTime, formatCurrency, showToast, createModal, esc, dbOp, withSaving } from '../utils/helpers.js';
 
 export async function renderRentals(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
@@ -118,7 +118,7 @@ function openRentalModal(parties, products, categories, body, header) {
   const { close } = createModal('New Rental', content, { footer });
 
   document.getElementById('rent-cancel').onclick = close;
-  document.getElementById('rent-save').onclick = async () => {
+  document.getElementById('rent-save').onclick = (e) => withSaving(e.currentTarget, async () => {
     const productId = parseInt(document.getElementById('rent-product').value);
     const partyId = parseInt(document.getElementById('rent-party').value);
     const qty = parseInt(document.getElementById('rent-qty').value) || 1;
@@ -142,5 +142,5 @@ function openRentalModal(parties, products, categories, body, header) {
     showToast('Rental created', 'success');
     close();
     renderRentals(body, header);
-  };
+  });
 }

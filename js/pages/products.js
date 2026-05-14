@@ -1,5 +1,5 @@
 import { db, auth, supabase } from '../supabase.js';
-import { formatCurrency, formatStock, formatDate, formatPricePerUnit, showToast, createModal, debounce, escapeHtml, dbOp } from '../utils/helpers.js';
+import { formatCurrency, formatStock, formatDate, formatPricePerUnit, showToast, createModal, debounce, escapeHtml, dbOp, withSaving } from '../utils/helpers.js';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 
@@ -245,7 +245,7 @@ function openProductModal(product, categories) {
   updateStockLabels();
   document.getElementById('prod-category').addEventListener('change', updateStockLabels);
 
-  document.getElementById('prod-save-btn').onclick = async () => {
+  document.getElementById('prod-save-btn').onclick = (e) => withSaving(e.currentTarget, async () => {
     const name = document.getElementById('prod-name').value.trim();
     const model = document.getElementById('prod-model').value.trim();
     const catId = parseInt(document.getElementById('prod-category').value);
@@ -263,10 +263,6 @@ function openProductModal(product, categories) {
     if (isNaN(stock) || stock < 0) { showToast('Valid stock quantity is required', 'error'); return; }
     if (isNaN(threshold) || threshold < 0) { showToast('Valid threshold is required', 'error'); return; }
 
-    const saveBtn = document.getElementById('prod-save-btn');
-    saveBtn.disabled = true;
-    saveBtn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div>';
-
     let imageUrl = product?.image_url || null;
 
     // Upload image if selected
@@ -279,15 +275,11 @@ function openProductModal(product, categories) {
           .upload(fileName, selectedFile, { contentType: selectedFile.type, upsert: false });
         if (uploadError) {
           showToast('Image upload failed: ' + uploadError.message, 'error');
-          saveBtn.disabled = false;
-          saveBtn.innerHTML = `<i class="fas fa-save"></i> ${isEdit ? 'Update' : 'Create'}`;
           return;
         }
         imageUrl = fileName;
       } catch (err) {
         showToast('Image upload error', 'error');
-        saveBtn.disabled = false;
-        saveBtn.innerHTML = `<i class="fas fa-save"></i> ${isEdit ? 'Update' : 'Create'}`;
         return;
       }
     }
@@ -310,7 +302,7 @@ function openProductModal(product, categories) {
     const body = document.getElementById('page-body');
     const hdr = document.getElementById('page-header');
     renderProducts(body, hdr);
-  };
+  });
 
   if (isEdit) {
     document.getElementById('prod-delete-btn').onclick = async () => {

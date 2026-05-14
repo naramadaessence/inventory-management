@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatDate, formatDateTime, showToast, createModal, daysUntil, esc, dbOp } from '../utils/helpers.js';
+import { formatCurrency, formatDate, formatDateTime, showToast, createModal, daysUntil, esc, dbOp, CONFIG, roundCurrency, withSaving } from '../utils/helpers.js';
 
 export async function renderCollections(body, header) {
   const isAdmin = auth.isAdmin();
@@ -41,7 +41,7 @@ export async function renderCollections(body, header) {
 
   // ── stats ──
   const totalPending = pendingSales.reduce((sum, s) => sum + ((s.total_amount || 0) - (s.amount_received || 0)), 0);
-  const dueSoon = pendingSales.filter(s => s.expected_payment_date && daysUntil(s.expected_payment_date) <= 3 && daysUntil(s.expected_payment_date) >= 0);
+  const dueSoon = pendingSales.filter(s => s.expected_payment_date && daysUntil(s.expected_payment_date) <= CONFIG.PAYMENT_URGENT_DAYS && daysUntil(s.expected_payment_date) >= 0);
   const overdue = pendingSales.filter(s => s.expected_payment_date && daysUntil(s.expected_payment_date) < 0);
   const todayFollowups = followups.filter(f => new Date(f.created_at).toDateString() === new Date().toDateString());
   const todayCollected = todayFollowups.reduce((s, f) => s + (f.amount_collected || 0), 0);
@@ -208,7 +208,7 @@ export async function renderCollections(body, header) {
         const recorder = profileMap[s.recorded_by];
         const balance = (s.total_amount || 0) - (s.amount_received || 0);
         const isOD = s.expected_payment_date && daysUntil(s.expected_payment_date) < 0;
-        const isDS = s.expected_payment_date && daysUntil(s.expected_payment_date) <= 3 && daysUntil(s.expected_payment_date) >= 0;
+        const isDS = s.expected_payment_date && daysUntil(s.expected_payment_date) <= CONFIG.PAYMENT_URGENT_DAYS && daysUntil(s.expected_payment_date) >= 0;
         const dueCls = isOD ? 'color:var(--red);font-weight:700;' : isDS ? 'color:var(--accent);font-weight:600;' : '';
         const daysTxt = s.expected_payment_date ? (isOD ? `${Math.abs(daysUntil(s.expected_payment_date))}d overdue` : `${daysUntil(s.expected_payment_date)}d left`) : '';
 
@@ -353,7 +353,7 @@ export async function renderCollections(body, header) {
     });
 
     document.getElementById('visit-cancel').onclick = close;
-    document.getElementById('visit-save').onclick = async () => {
+    document.getElementById('visit-save').onclick = (e) => withSaving(e.currentTarget, async () => {
       const partyId = document.getElementById('visit-party').value;
       const status = document.getElementById('visit-status').value;
       const method = document.getElementById('visit-method').value;
@@ -364,10 +364,6 @@ export async function renderCollections(body, header) {
 
       if (!partyId) { showToast('Please select a party', 'error'); return; }
       if (!notes) { showToast('Please add visit notes', 'error'); return; }
-
-      const saveBtn = document.getElementById('visit-save');
-      saveBtn.disabled = true;
-      saveBtn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div>';
 
       const visitResult = await dbOp(db.insert('payment_followups', {
         sale_id: saleId ? parseInt(saleId) : null,
@@ -380,12 +376,12 @@ export async function renderCollections(body, header) {
         expected_payment_date: dueDate,
         notes
       }), 'Failed to log visit');
-      if (!visitResult) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save"></i> Save Visit'; return; }
+      if (!visitResult) return;
 
       if (saleId) {
         const sale = sales.find(s => s.id == saleId);
         if (sale) {
-          const newReceived = (sale.amount_received || 0) + amount;
+          const newReceived = roundCurrency((sale.amount_received || 0) + amount);
           const newStatus = status === 'paid' || newReceived >= sale.total_amount ? 'paid'
             : (status === 'partial' || newReceived > 0) ? 'partial' : 'pending';
           await dbOp(db.update('sales', sale.id, {
@@ -400,7 +396,7 @@ export async function renderCollections(body, header) {
       showToast(amount > 0 ? `Visit logged! ${formatCurrency(amount)} collected.` : 'Visit logged successfully', 'success');
       close();
       renderCollections(body, header);
-    };
+    });
   }
 
   // ── UPDATE PAYMENT MODAL ──
@@ -466,7 +462,7 @@ export async function renderCollections(body, header) {
     });
 
     document.getElementById('fu-cancel').onclick = close;
-    document.getElementById('fu-save').onclick = async () => {
+    document.getElementById('fu-save').onclick = (e) => withSaving(e.currentTarget, async () => {
       const status = document.getElementById('fu-status').value;
       const method = document.getElementById('fu-method').value;
       const amount = parseFloat(document.getElementById('fu-amount').value) || 0;
@@ -476,19 +472,15 @@ export async function renderCollections(body, header) {
       if (amount < 0) { showToast('Amount cannot be negative', 'error'); return; }
       if (amount > balance) { showToast(`Cannot exceed balance of ${formatCurrency(balance)}`, 'error'); return; }
 
-      const saveBtn = document.getElementById('fu-save');
-      saveBtn.disabled = true;
-      saveBtn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div>';
-
       const fuResult = await dbOp(db.insert('payment_followups', {
         sale_id: sale.id, party_id: sale.party_id, visited_by: userId,
         visit_date: new Date().toISOString(), status_update: status,
         payment_method: method || null, amount_collected: amount,
         expected_payment_date: expectedDate, notes
       }), 'Failed to log followup');
-      if (!fuResult) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save"></i> Save'; return; }
+      if (!fuResult) return;
 
-      const newReceived = (sale.amount_received || 0) + amount;
+      const newReceived = roundCurrency((sale.amount_received || 0) + amount);
       const newStatus = status === 'paid' || newReceived >= sale.total_amount ? 'paid'
         : (status === 'partial' || newReceived > 0) ? 'partial' : 'pending';
 
@@ -500,7 +492,7 @@ export async function renderCollections(body, header) {
       showToast(amount > 0 ? `${formatCurrency(amount)} collected!` : 'Payment status updated', 'success');
       close();
       renderCollections(body, header);
-    };
+    });
   }
 
   renderTab();

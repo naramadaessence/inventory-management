@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatDateTime, formatDate, formatWeight, formatStock, showToast, createModal, daysUntil, esc, dbOp } from '../utils/helpers.js';
+import { formatCurrency, formatDateTime, formatDate, formatWeight, formatStock, showToast, createModal, daysUntil, esc, dbOp, roundCurrency, withSaving } from '../utils/helpers.js';
 
 // Helper: summarize sale items for table display
 function itemsSummary(items, prodMap) {
@@ -216,14 +216,14 @@ function openSaleModal(parties, products, body, header) {
   document.getElementById('sale-payment').addEventListener('change', (e) => { document.getElementById('pending-fields').style.display = (e.target.value === 'pending' || e.target.value === 'partial') ? 'flex' : 'none'; });
   document.getElementById('sale-cancel').onclick = close;
 
-  document.getElementById('sale-save').onclick = async () => {
+  document.getElementById('sale-save').onclick = (e) => withSaving(e.currentTarget, async () => {
     if (lineItems.length === 0) { showToast('Add at least one item', 'error'); return; }
     const partyId = partyHidden.value ? parseInt(partyHidden.value) : null;
     const payStatus = document.getElementById('sale-payment').value;
     const payMethod = document.getElementById('sale-method').value || null;
     const expDate = document.getElementById('sale-expected-date')?.value || null;
-    const grandTotal = lineItems.reduce((s, i) => s + i.line_total, 0);
-    const amtRcvd = payStatus === 'paid' ? grandTotal : parseFloat(document.getElementById('sale-received').value) || 0;
+    const grandTotal = roundCurrency(lineItems.reduce((s, i) => s + i.line_total, 0));
+    const amtRcvd = roundCurrency(payStatus === 'paid' ? grandTotal : parseFloat(document.getElementById('sale-received').value) || 0);
 
     // Client-side stock pre-check for fast UX. The RPC also enforces it
     // atomically, so this is just to fail before sending the request.
@@ -251,7 +251,7 @@ function openSaleModal(parties, products, body, header) {
 
     showToast(`Sale recorded — ${lineItems.length} item${lineItems.length > 1 ? 's' : ''}`, 'success');
     close(); renderSales(body, header);
-  };
+  });
 }
 
 // ============================================
@@ -309,11 +309,11 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
   });
   document.getElementById('edit-sale-cancel').onclick = close;
 
-  document.getElementById('edit-sale-save').onclick = async () => {
-    const totalAmount = parseFloat(document.getElementById('edit-sale-total').value) || 0;
+  document.getElementById('edit-sale-save').onclick = (e) => withSaving(e.currentTarget, async () => {
+    const totalAmount = roundCurrency(parseFloat(document.getElementById('edit-sale-total').value) || 0);
     const paymentStatus = document.getElementById('edit-sale-payment').value;
     const paymentMethod = document.getElementById('edit-sale-method').value || null;
-    const amountReceived = paymentStatus === 'paid' ? totalAmount : parseFloat(document.getElementById('edit-sale-received').value) || 0;
+    const amountReceived = roundCurrency(paymentStatus === 'paid' ? totalAmount : parseFloat(document.getElementById('edit-sale-received').value) || 0);
 
     await dbOp(db.update('sales', sale.id, {
       total_amount: totalAmount, payment_status: paymentStatus, payment_method: paymentMethod,
@@ -323,9 +323,9 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
       notes: document.getElementById('edit-sale-notes').value.trim()
     }), 'Failed to update sale');
     showToast('Sale updated', 'success'); close(); renderSales(body, header);
-  };
+  });
 
-  document.getElementById('edit-sale-delete').onclick = async () => {
+  document.getElementById('edit-sale-delete').onclick = (e) => withSaving(e.currentTarget, async () => {
     if (!confirm('Delete this sale? Stock will be restored for all items.')) return;
     // Atomic delete_sale: restores stock for every line item, logs txns,
     // cascades sale_items, deletes the sale row — all in one transaction.
@@ -335,6 +335,6 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
     }), 'Failed to delete sale');
     if (!result) return;
     showToast('Sale deleted — stock restored', 'success'); close(); renderSales(body, header);
-  };
+  });
 }
 

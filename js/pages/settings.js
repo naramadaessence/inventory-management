@@ -1,5 +1,5 @@
 import { db, auth, supabase } from '../supabase.js';
-import { showToast, createModal, esc, formatWeight, formatStock, dbOp } from '../utils/helpers.js';
+import { showToast, createModal, esc, formatWeight, formatStock, dbOp, withSaving } from '../utils/helpers.js';
 
 export async function renderSettings(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
@@ -117,7 +117,7 @@ function openUserModal(user, container, body) {
   const { close } = createModal(isEdit ? 'Edit User' : 'Create Seller Account', content, { footer });
 
   document.getElementById('user-cancel').onclick = close;
-  document.getElementById('user-save').onclick = async () => {
+  document.getElementById('user-save').onclick = (e) => withSaving(e.currentTarget, async () => {
     const name = document.getElementById('user-name').value.trim();
     const email = document.getElementById('user-email').value.trim().toLowerCase();
     const role = document.getElementById('user-role').value;
@@ -132,10 +132,6 @@ function openUserModal(user, container, body) {
     } else {
       const password = document.getElementById('user-password').value;
       if (!password || password.length < 6) { showToast('Password must be at least 6 characters', 'error'); return; }
-
-      const saveBtn = document.getElementById('user-save');
-      saveBtn.disabled = true;
-      saveBtn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div>';
 
       if (db.isDemoMode) {
         // Demo mode: just insert into local store
@@ -156,8 +152,6 @@ function openUserModal(user, container, body) {
           const result = await res.json();
           if (!res.ok) {
             showToast(result.error || 'Failed to create user', 'error');
-            saveBtn.disabled = false;
-            saveBtn.innerHTML = '<i class="fas fa-save"></i> Create Account';
             return;
           }
           // Update role if not default seller
@@ -167,15 +161,13 @@ function openUserModal(user, container, body) {
           showToast('Seller account created successfully!', 'success');
         } catch (err) {
           showToast('Network error. Please try again.', 'error');
-          saveBtn.disabled = false;
-          saveBtn.innerHTML = '<i class="fas fa-save"></i> Create Account';
           return;
         }
       }
     }
     close();
     renderUsersTab(container, body);
-  };
+  });
 }
 
 async function renderCategoriesTab(container, body) {
@@ -206,14 +198,14 @@ async function renderCategoriesTab(container, body) {
     const footer = `<button class="btn btn-secondary" id="cat-cancel">Cancel</button><button class="btn btn-primary" id="cat-save"><i class="fas fa-save"></i> Create</button>`;
     const { close } = createModal('Add Category', content, { footer });
     document.getElementById('cat-cancel').onclick = close;
-    document.getElementById('cat-save').onclick = async () => {
+    document.getElementById('cat-save').onclick = (e) => withSaving(e.currentTarget, async () => {
       const name = document.getElementById('cat-name').value.trim();
       if (!name) { showToast('Name required', 'error'); return; }
       await db.insert('categories', { name, type: document.getElementById('cat-type').value });
       showToast('Category added', 'success');
       close();
       renderCategoriesTab(container, body);
-    };
+    });
   });
 
   container.querySelectorAll('.edit-cat-btn').forEach(el => {
@@ -228,14 +220,14 @@ async function renderCategoriesTab(container, body) {
       const footer = `<button class="btn btn-secondary" id="cat-cancel">Cancel</button><button class="btn btn-primary" id="cat-save"><i class="fas fa-save"></i> Update</button>`;
       const { close } = createModal('Edit Category', content, { footer });
       document.getElementById('cat-cancel').onclick = close;
-      document.getElementById('cat-save').onclick = async () => {
+      document.getElementById('cat-save').onclick = (e) => withSaving(e.currentTarget, async () => {
         const name = document.getElementById('cat-name').value.trim();
         if (!name) { showToast('Name required', 'error'); return; }
         await db.update('categories', cat.id, { name, type: document.getElementById('cat-type').value });
         showToast('Category updated', 'success');
         close();
         renderCategoriesTab(container, body);
-      };
+      });
     });
   });
 }
@@ -301,7 +293,7 @@ async function renderStockIntakeTab(container, body) {
     document.getElementById('intake-product').addEventListener('change', updateIntakeLabel);
 
     document.getElementById('intake-cancel').onclick = close;
-    document.getElementById('intake-save').onclick = async () => {
+    document.getElementById('intake-save').onclick = (e) => withSaving(e.currentTarget, async () => {
       const productId = parseInt(document.getElementById('intake-product').value);
       const qty = parseFloat(document.getElementById('intake-qty').value);
       if (isNaN(qty) || qty <= 0) { showToast('Valid quantity required', 'error'); return; }
@@ -320,6 +312,6 @@ async function renderStockIntakeTab(container, body) {
       showToast('Stock added successfully', 'success');
       close();
       renderStockIntakeTab(container, body);
-    };
+    });
   });
 }

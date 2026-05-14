@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatStock, formatDateTime, showToast, createModal, esc, dbOp } from '../utils/helpers.js';
+import { formatStock, formatDateTime, showToast, createModal, esc, dbOp, CONFIG } from '../utils/helpers.js';
 
 export async function renderDailyOps(body, header) {
   const isAdmin = auth.isAdmin();
@@ -329,7 +329,7 @@ async function openCheckinModal(sessionId, body, isAdmin) {
       const item = sessionItems.find(i => i.id === itemId);
       const p = prodMap[item.product_id];
       const consumed = (item.checkout_quantity||0) - rq;
-      const flagged = consumed > (p?.max_daily_consumption || 30);
+      const flagged = consumed > (p?.max_daily_consumption || CONFIG.DEFAULT_DAILY_CONSUMPTION);
       if (isNaN(rq)||rq<0) { showToast(`Invalid qty for ${p?.name}`,'error'); return; }
       returnData.push({ itemId, rq, consumed, flagged, item, p });
     });

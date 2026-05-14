@@ -2,6 +2,53 @@
 // UTILITY HELPERS
 // ============================================
 
+// Centralized configuration thresholds.
+// When tuning business rules, adjust here rather than hunting magic numbers.
+export const CONFIG = {
+  // Show "Expiring Soon" warning when within N days of expiry.
+  EXPIRY_WARN_DAYS: 60,
+  // Lookahead window for the dashboard "Upcoming Refills" card.
+  UPCOMING_REFILL_DAYS: 7,
+  // Sales whose expected_payment_date falls within this many days are batched
+  // into the dashboard's "Payment Reminders" card.
+  PAYMENT_DUE_SOON_DAYS: 7,
+  // Sales whose expected_payment_date is within this many days are flagged
+  // urgent (red/amber styling in tables and reminder rows).
+  PAYMENT_URGENT_DAYS: 3,
+  // Fallback for a product without a max_daily_consumption set when deciding
+  // whether a return's consumption should be flagged.
+  DEFAULT_DAILY_CONSUMPTION: 30,
+};
+
+// Round a currency amount to 2 decimal places (matches DECIMAL(12,2) in DB).
+// Apply when computing sums or before sending values to db.rpc / db.update —
+// otherwise float drift accumulates: 0.1 + 0.2 = 0.30000000000000004.
+export function roundCurrency(amount) {
+  return Math.round(Number(amount || 0) * 100) / 100;
+}
+
+// Wrap an async save handler so the button is disabled + spinner-rendered for
+// the duration. Re-enables on completion (success or failure). Idempotent if
+// invoked twice while in flight (returns immediately).
+//   onclick = (e) => withSaving(e.currentTarget, async () => { ... });
+export async function withSaving(btn, fn) {
+  if (!btn || btn.dataset.busy === '1') return;
+  const orig = btn.innerHTML;
+  btn.dataset.busy = '1';
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;margin:0 auto;"></div>';
+  try {
+    return await fn();
+  } finally {
+    // The button may have been removed if fn() closed the modal — guard that.
+    if (btn.isConnected) {
+      btn.disabled = false;
+      btn.innerHTML = orig;
+      btn.dataset.busy = '0';
+    }
+  }
+}
+
 export function esc(s) {
   if (!s) return '';
   const d = document.createElement('div');
@@ -115,14 +162,23 @@ export function showToast(message, type = 'success') {
 // Simple modal helper.
 // `title` is rendered as text (safe). `content` and `options.footer` are rendered as HTML —
 // callers MUST pass user data through esc() before composing those strings.
+//
+// Accessibility:
+//   - Captures previously-focused element on open; restores it on close.
+//   - Autofocuses the first input/textarea/select after open (one-tick delay).
+//   - Traps Tab / Shift+Tab inside the modal.
+//   - Closes on Escape.
+//   - Closes on backdrop click.
 export function createModal(title, content, options = {}) {
+  const previouslyFocused = document.activeElement;
+
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
-    <div class="modal ${options.large ? 'modal-lg' : ''}">
+    <div class="modal ${options.large ? 'modal-lg' : ''}" tabindex="-1" role="dialog" aria-modal="true">
       <div class="modal-header">
         <h2></h2>
-        <button class="modal-close" id="modal-close-btn"><i class="fas fa-times"></i></button>
+        <button class="modal-close" id="modal-close-btn" aria-label="Close"><i class="fas fa-times"></i></button>
       </div>
       <div class="modal-body"></div>
       ${options.footer ? '<div class="modal-footer"></div>' : ''}
@@ -134,9 +190,54 @@ export function createModal(title, content, options = {}) {
     overlay.querySelector('.modal-footer').innerHTML = options.footer;
   }
   document.body.appendChild(overlay);
-  const close = () => { overlay.style.opacity = '0'; setTimeout(() => overlay.remove(), 200); };
+
+  // Focusable elements selector — used for autofocus and Tab containment.
+  const focusableSelector = 'input:not([type=hidden]):not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+  const getFocusable = () => Array.from(overlay.querySelectorAll(focusableSelector))
+    .filter(el => el.offsetParent !== null);
+
+  // Forward-declare close so escHandler can reference it.
+  let close;
+  const escHandler = (e) => { if (e.key === 'Escape') close(); };
+  document.addEventListener('keydown', escHandler);
+
+  close = () => {
+    document.removeEventListener('keydown', escHandler);
+    overlay.style.opacity = '0';
+    setTimeout(() => {
+      overlay.remove();
+      // Return focus to whatever was focused before the modal opened.
+      if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+        try { previouslyFocused.focus(); } catch { /* element may have been removed from DOM */ }
+      }
+    }, 200);
+  };
+
   overlay.querySelector('#modal-close-btn').onclick = close;
   overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+  // Tab containment — keep focus inside the modal while it's open.
+  overlay.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    const list = getFocusable();
+    if (list.length === 0) return;
+    const first = list[0];
+    const last = list[list.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault(); first.focus();
+    }
+  });
+
+  // Autofocus first text-input-like element so the user can start typing immediately.
+  // One-tick delay so the DOM is laid out and the element is visible.
+  setTimeout(() => {
+    const list = getFocusable();
+    const firstInput = list.find(el => ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
+    (firstInput || list[0])?.focus();
+  }, 0);
+
   return { overlay, close };
 }
 

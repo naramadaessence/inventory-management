@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatStock, formatDateTime, daysUntil, showToast, escapeHtml } from '../utils/helpers.js';
+import { formatCurrency, formatStock, formatDateTime, daysUntil, showToast, escapeHtml, CONFIG } from '../utils/helpers.js';
 
 export async function renderDashboard(body, header) {
   const isAdmin = auth.isAdmin();
@@ -32,7 +32,7 @@ export async function renderDashboard(body, header) {
   const pendingReturns = sessions.filter(s => s.status === 'pending_approval').length;
   const pendingTotal = pendingIssues + pendingReturns;
   const lowStockProducts = products.filter(p => p.is_active && p.current_stock <= p.min_stock_threshold);
-  const expiringProducts = products.filter(p => p.is_active && p.expiry_date && daysUntil(p.expiry_date) <= 60 && daysUntil(p.expiry_date) > 0);
+  const expiringProducts = products.filter(p => p.is_active && p.expiry_date && daysUntil(p.expiry_date) <= CONFIG.EXPIRY_WARN_DAYS && daysUntil(p.expiry_date) > 0);
   const expiredProducts = products.filter(p => p.is_active && p.expiry_date && daysUntil(p.expiry_date) <= 0);
   const totalStockValue = products.reduce((sum, p) => sum + (p.current_stock * p.unit_price), 0);
   const activeRentals = rentals.filter(r => r.status === 'active').length;
@@ -55,9 +55,9 @@ export async function renderDashboard(body, header) {
   const overdueRefills = amcEnabled.filter(p => p.amc_day < today && !completedThisMonth.has(p.id));
   // Today: amc_day === today AND not completed
   const todaysRefills = amcEnabled.filter(p => p.amc_day === today && !completedThisMonth.has(p.id));
-  // Upcoming 7 days: amc_day > today, within next 7 calendar days, not completed
+  // Upcoming N days: amc_day > today, within next CONFIG.UPCOMING_REFILL_DAYS calendar days, not completed
   const upcoming7Days = [];
-  for (let d = 1; d <= 7; d++) {
+  for (let d = 1; d <= CONFIG.UPCOMING_REFILL_DAYS; d++) {
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + d);
     const futureDay = futureDate.getDate();
@@ -292,7 +292,7 @@ export async function renderDashboard(body, header) {
   const payRemEl = document.getElementById('payment-reminders');
   const pendingSales = sales.filter(s => s.payment_status === 'pending' || s.payment_status === 'partial');
   const overdueSales = pendingSales.filter(s => s.expected_payment_date && daysUntil(s.expected_payment_date) < 0);
-  const dueSoonSales = pendingSales.filter(s => s.expected_payment_date && daysUntil(s.expected_payment_date) >= 0 && daysUntil(s.expected_payment_date) <= 7);
+  const dueSoonSales = pendingSales.filter(s => s.expected_payment_date && daysUntil(s.expected_payment_date) >= 0 && daysUntil(s.expected_payment_date) <= CONFIG.PAYMENT_DUE_SOON_DAYS);
   const noDateSales = pendingSales.filter(s => !s.expected_payment_date);
   const urgentPayments = [...overdueSales, ...dueSoonSales, ...noDateSales].slice(0, 6);
   const { data: allParties } = await db.getAll('parties');
@@ -306,7 +306,7 @@ export async function renderDashboard(body, header) {
       const pName = partyNameMap[s.party_id] || 'Walk-in';
       const balance = (s.total_amount || 0) - (s.amount_received || 0);
       const isOverdue = s.expected_payment_date && daysUntil(s.expected_payment_date) < 0;
-      const isDueSoon = s.expected_payment_date && daysUntil(s.expected_payment_date) >= 0 && daysUntil(s.expected_payment_date) <= 3;
+      const isDueSoon = s.expected_payment_date && daysUntil(s.expected_payment_date) >= 0 && daysUntil(s.expected_payment_date) <= CONFIG.PAYMENT_URGENT_DAYS;
       const cls = isOverdue ? 'danger' : isDueSoon ? 'warning' : '';
       const dateLabel = s.expected_payment_date
         ? (isOverdue ? `⚠ ${Math.abs(daysUntil(s.expected_payment_date))} days overdue` : `Due: ${s.expected_payment_date}`)
@@ -367,7 +367,7 @@ async function renderSellerView(body) {
   const todaysRefills = amcEnabled.filter(p => p.amc_day === today && !completedThisMonth.has(p.id));
 
   const upcoming7Days = [];
-  for (let d = 1; d <= 7; d++) {
+  for (let d = 1; d <= CONFIG.UPCOMING_REFILL_DAYS; d++) {
     const futureDate = new Date();
     futureDate.setDate(futureDate.getDate() + d);
     const futureDay = futureDate.getDate();

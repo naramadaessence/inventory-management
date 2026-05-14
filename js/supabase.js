@@ -159,7 +159,8 @@ const demoRpc = {
   record_sale({ p_party_id, p_items, p_payment_status, p_payment_method, p_amount_received, p_expected_payment_date, p_sale_date, p_notes, p_recorded_by }) {
     const store = getStore();
     const now = new Date().toISOString();
-    const total = p_items.reduce((s, i) => s + (i.quantity * i.unit_price), 0);
+    // Round to 2 dp to match DECIMAL(12,2) in production.
+    const total = Math.round(p_items.reduce((s, i) => s + (i.quantity * i.unit_price), 0) * 100) / 100;
 
     const saleId = store._nextId.sales || 1;
     store.sales.push({

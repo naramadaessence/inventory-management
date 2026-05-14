@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatDate, formatStock, showToast, createModal, esc, dbOp } from '../utils/helpers.js';
+import { formatDate, formatStock, showToast, createModal, esc, dbOp, withSaving } from '../utils/helpers.js';
 
 export async function renderDamageLoss(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
@@ -70,7 +70,7 @@ export async function renderDamageLoss(body, header) {
     const { close } = createModal('Report Damage / Loss', content, { footer });
 
     document.getElementById('dmg-cancel').onclick = close;
-    document.getElementById('dmg-save').onclick = async () => {
+    document.getElementById('dmg-save').onclick = (e) => withSaving(e.currentTarget, async () => {
       const productId = parseInt(document.getElementById('dmg-product').value);
       const qty = parseFloat(document.getElementById('dmg-qty').value);
       const reason = document.getElementById('dmg-reason').value.trim();
@@ -93,6 +93,6 @@ export async function renderDamageLoss(body, header) {
       showToast('Damage report filed', 'warning');
       close();
       renderDamageLoss(body, header);
-    };
+    });
   });
 }

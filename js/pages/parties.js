@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatDate, formatCurrency, showToast, createModal, esc, dbOp } from '../utils/helpers.js';
+import { formatDate, formatCurrency, showToast, createModal, esc, dbOp, withSaving } from '../utils/helpers.js';
 
 function getOrdinal(n) {
   const s = ['th', 'st', 'nd', 'rd'];
@@ -355,7 +355,7 @@ function openPartyModal(party, body, header, products, categories) {
   }
 
   document.getElementById('party-cancel').onclick = close;
-  document.getElementById('party-save').onclick = async () => {
+  document.getElementById('party-save').onclick = (e) => withSaving(e.currentTarget, async () => {
     const name = document.getElementById('party-name').value.trim();
     if (!name || name.length < 2) { showToast('Name is required', 'error'); return; }
 
@@ -402,5 +402,5 @@ function openPartyModal(party, body, header, products, categories) {
     showToast(isEdit ? 'Party updated' : 'Party added', 'success');
     close();
     renderParties(body, header);
-  };
+  });
 }
