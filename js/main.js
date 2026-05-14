@@ -1,5 +1,6 @@
 import { auth, assertProductionConfig } from './supabase.js';
 import { initErrorTracking, setErrorUser, reportError } from './error-tracking.js';
+import { installKeyboardShortcuts } from './keyboard-shortcuts.js';
 import { renderLogin } from './pages/login.js';
 import { renderDashboard } from './pages/dashboard.js';
 import { renderProducts } from './pages/products.js';
@@ -60,40 +61,41 @@ function renderShell() {
   const initials = user.full_name.split(' ').map(w => w[0]).join('').toUpperCase();
 
   app.innerHTML = `
+    <a href="#main-content" class="skip-to-content">Skip to main content</a>
     <div class="app-shell">
-      <aside class="sidebar" id="sidebar">
+      <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
         <div class="sidebar-header">
           <div class="sidebar-brand">
-            <span class="sidebar-brand-icon">🌿</span>
+            <span class="sidebar-brand-icon" aria-hidden="true">🌿</span>
             <div class="sidebar-brand-text">
               <h2>Narmada Essence</h2>
               <span>Inventory Manager</span>
             </div>
           </div>
         </div>
-        <nav class="sidebar-nav" id="sidebar-nav"></nav>
+        <nav class="sidebar-nav" id="sidebar-nav" role="navigation"></nav>
         <div class="sidebar-footer">
           <div class="sidebar-user">
-            <div class="sidebar-user-avatar">${initials}</div>
+            <div class="sidebar-user-avatar" aria-hidden="true">${initials}</div>
             <div class="sidebar-user-info">
               <div class="name">${user.full_name}</div>
               <div class="role">${user.role}</div>
             </div>
-            <button class="btn-logout" id="btn-logout" title="Logout">
-              <i class="fas fa-sign-out-alt"></i>
+            <button class="btn-logout" id="btn-logout" title="Logout" aria-label="Logout">
+              <i class="fas fa-sign-out-alt" aria-hidden="true"></i>
             </button>
           </div>
         </div>
       </aside>
-      <main class="main-content">
+      <main class="main-content" id="main-content" tabindex="-1">
         <header class="page-header" id="page-header">
           <div>
-            <button class="mobile-toggle" id="mobile-toggle"><i class="fas fa-bars"></i></button>
+            <button class="mobile-toggle" id="mobile-toggle" aria-label="Toggle navigation"><i class="fas fa-bars" aria-hidden="true"></i></button>
           </div>
           <div></div>
         </header>
         <div class="page-body" id="page-body">
-          <div class="loading-overlay"><div class="spinner"></div></div>
+          <div class="loading-overlay"><div class="spinner" role="status" aria-label="Loading"></div></div>
         </div>
       </main>
     </div>
@@ -103,13 +105,13 @@ function renderShell() {
   const navEl = document.getElementById('sidebar-nav');
   nav.forEach(item => {
     if (item.section) {
-      navEl.innerHTML += `<div class="nav-section-title">${item.section}</div>`;
+      navEl.innerHTML += `<div class="nav-section-title" role="presentation">${item.section}</div>`;
     } else {
       navEl.innerHTML += `
-        <div class="nav-item ${item.id === currentPage ? 'active' : ''}" data-page="${item.id}">
-          <i class="fas ${item.icon}"></i>
+        <button type="button" class="nav-item ${item.id === currentPage ? 'active' : ''}" data-page="${item.id}" aria-current="${item.id === currentPage ? 'page' : 'false'}">
+          <i class="fas ${item.icon}" aria-hidden="true"></i>
           <span>${item.label}</span>
-        </div>
+        </button>
       `;
     }
   });
@@ -142,9 +144,11 @@ function renderShell() {
 function navigateTo(page) {
   currentPage = page;
 
-  // Update active nav
+  // Update active nav (visual + ARIA)
   document.querySelectorAll('.nav-item').forEach(el => {
-    el.classList.toggle('active', el.dataset.page === page);
+    const isActive = el.dataset.page === page;
+    el.classList.toggle('active', isActive);
+    el.setAttribute('aria-current', isActive ? 'page' : 'false');
   });
 
   // Close mobile sidebar
@@ -189,6 +193,12 @@ async function init() {
 
   // Lazy-init Sentry if VITE_SENTRY_DSN is set; no-op otherwise.
   initErrorTracking();
+
+  // Global keyboard shortcuts (idempotent — install once).
+  if (!window.__shortcutsInstalled) {
+    installKeyboardShortcuts();
+    window.__shortcutsInstalled = true;
+  }
 
   // Global safety nets — catch what dbOp() doesn't.
   window.addEventListener('error', (e) => {

@@ -51,6 +51,32 @@ export async function withSaving(btn, fn) {
   }
 }
 
+// Render a skeleton placeholder. Use before a long fetch so the user sees
+// content shape immediately instead of a blank screen / generic spinner.
+//   variant: 'card' | 'table' | 'list'
+//   count:   how many skeleton blocks to render
+// Returns an HTML string (so callers can compose into innerHTML).
+export function skeletonHTML(variant = 'card', count = 4) {
+  const card = `<div class="skeleton skeleton-card" aria-hidden="true">
+    <div class="skeleton-shimmer"></div>
+    <div class="skeleton-line skeleton-line--label"></div>
+    <div class="skeleton-line skeleton-line--value"></div>
+    <div class="skeleton-line skeleton-line--meta"></div>
+  </div>`;
+  const row = `<div class="skeleton-row" aria-hidden="true">
+    <div class="skeleton-line skeleton-line--label"></div>
+    <div class="skeleton-line skeleton-line--label" style="width:60%;"></div>
+    <div class="skeleton-line skeleton-line--label" style="width:40%;"></div>
+  </div>`;
+  if (variant === 'card') {
+    return `<div class="stats-grid">${Array(count).fill(card).join('')}</div>`;
+  }
+  if (variant === 'table') {
+    return `<div class="skeleton-table">${Array(count).fill(row).join('')}</div>`;
+  }
+  return `<div class="skeleton-list">${Array(count).fill(row).join('')}</div>`;
+}
+
 export function esc(s) {
   if (!s) return '';
   const d = document.createElement('div');

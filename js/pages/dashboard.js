@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatStock, formatDateTime, daysUntil, showToast, escapeHtml, CONFIG } from '../utils/helpers.js';
+import { formatCurrency, formatStock, formatDateTime, daysUntil, showToast, escapeHtml, CONFIG, skeletonHTML } from '../utils/helpers.js';
 
 export async function renderDashboard(body, header) {
   const isAdmin = auth.isAdmin();
@@ -18,6 +18,9 @@ export async function renderDashboard(body, header) {
     await renderSellerView(body);
     return;
   }
+
+  // Show skeleton while the dashboard's many queries resolve.
+  body.innerHTML = skeletonHTML('card', 4) + '<div style="margin-top:20px;">' + skeletonHTML('table', 5) + '</div>';
 
   const { data: products } = await db.getAll('products');
   const { data: sessions } = await db.fetchAllPaged('checkout_sessions');
