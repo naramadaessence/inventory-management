@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026-05-14 — Code Review Round 2: Atomicity, Pagination, Security
+**What**: Actioned a thorough code review pass. Closed five critical issues spanning security, correctness under concurrency, and silent data truncation.
+**Why**: Pre-scaling hardening — before adding more concurrent users or growing past the Supabase 1000-row REST default.
+**Impact**: Required running `migrations/005_refill_completions_rls.sql` and `migrations/006_atomic_operations.sql` in Supabase (both applied). Stock writes are now race-safe; multi-step sale/approval/return operations commit as a single transaction.
+**Files Changed**: `api/create-user.js`, `js/main.js`, `js/supabase.js`, `js/utils/helpers.js`, `js/pages/{dashboard,sales,collections,inventory-log,reports,daily-operations}.js`, `supabase-schema.sql`, `migrations/005_refill_completions_rls.sql` (NEW), `migrations/006_atomic_operations.sql` (NEW)
+
+### Security
+- **CORS pinned** on `/api/create-user` (was `*`) — allowlist for Vercel prod URL + localhost variants
+- **Hard-fail in production builds** if `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` missing — prevents silent fallback to demo mode with the public README credentials
+- **Toast/modal XSS hardened**: `showToast` and `createModal` now use `textContent` for user-derived strings; `content`/`footer` remain HTML by design (caller responsibility — must `esc()` user data inside)
+- **`refill_completions` RLS scoped** (migration 005): `WITH CHECK (true)` replaced with `completed_by = auth.uid()::text`; delete restricted to admin or row owner
+
+### Atomicity (migration 006)
+- Five Postgres functions added: `adjust_stock`, `record_sale`, `approve_issue`, `approve_return`, `delete_sale`
+- Each runs in a single transaction — partial-write recovery is no longer needed
+- `adjust_stock` enforces non-negative result atomically: TOCTOU races on `current_stock` are eliminated
+- Client now calls `db.rpc(name, params)` which dispatches to `supabase.rpc()` in production or to local `demoRpc` handlers in demo mode (same call sites work in both)
+- Refactored sites: `sales.js` record-sale (was 2N+1 round trips → 1), `sales.js` delete-sale, `daily-operations.js` approve-issue, `daily-operations.js` approve-return
+
+### Reliability / Pagination
+- Added `db.fetchAllPaged(table, options)` — chunked 1000-row fetch for aggregations that span a full table
+- Applied to high-volume reads in `dashboard`, `sales`, `collections`, `inventory-log`, `reports`, `daily-operations`
+- Dashboard recent-activity uses `limit:20` for display (no aggregation involved)
+- `db.getAll` extended with `options.eq` for server-side equality filtering
+- **Inventory Log** rewritten with server-side pagination: 50 rows/page, Prev/Next buttons, type filter via `.eq()`. Works correctly at 100k+ entries.
+
+### Schema
+- `supabase-schema.sql` synced with cumulative state: `image_url` on products, `sales` without dropped legacy `product_id`/`quantity`/`unit_price` columns, `sale_items` + `refill_completions` tables added with indexes, `installations` added to RLS ENABLE block + policy
+- New deployments now succeed by running `supabase-schema.sql` followed by migrations 002→003→004→005→006 in order
+
+---
+
 ## 2026-05-13 — Refill Completion Tracking (refill_completions table)
 **What**: Refill reminders now persist until manually marked "Done". Overdue refills show in a red card above today's list.
 **Why**: Client reported missed refills when sellers are outstation — reminders vanished when the date passed with no way to track.

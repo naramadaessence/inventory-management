@@ -1,27 +1,24 @@
 ## Current Status
-**Last Updated**: 2026-05-13
-**Last Agent Session**: Refill Completion Tracking — manual Done button + overdue bucket
+**Last Updated**: 2026-05-14
+**Last Agent Session**: Code Review Round 2 — atomicity RPCs, pagination, security hardening
 
 ## In Progress
-- [x] Create `refill_completions` table migration SQL
-- [x] Update `supabase.js` demo store
-- [x] Update admin dashboard — overdue card, completion filtering, Done button
-- [x] Update seller dashboard — same logic + Call button alongside Done
-- [x] Verify code integrity (all refs balanced)
-- [ ] **Run `migrations/004_refill_completions.sql` in Supabase** (user action)
-- [ ] **Test in browser** (admin + seller dashboards)
+(No active work-in-progress.)
 
-## Blocked On
-- Migration SQL needs to be run in Supabase SQL Editor before deploying
+## Recently Completed
+- Acted on code review findings: CORS pin on `/api/create-user`, prod env-var hard-fail, toast/modal XSS hardening, schema file resync
+- Migration 005 (`refill_completions` RLS scope) — applied
+- Migration 006 (atomic operation RPCs: `adjust_stock`, `record_sale`, `approve_issue`, `approve_return`, `delete_sale`) — applied
+- Client wired to use `db.rpc()` for sale recording, sale deletion, issue approval, return approval
+- `db.fetchAllPaged()` helper + applied to high-volume aggregation reads across dashboard, sales, collections, reports, daily-operations
+- Inventory Log: server-side pagination (50/page, Prev/Next, type filter via `.eq`)
 
-## Next Steps (for the next agent session)
-1. Run `migrations/004_refill_completions.sql` in Supabase
-2. Test: verify overdue refills appear for parties whose amc_day has passed
-3. Test: click Done → refill disappears from list
-4. Test: seller view shows same behavior with Call + Done buttons
-5. Test: month rollover clears completions naturally
+## Next Steps (suggested follow-ups)
+- Currency rounding helper at boundaries (display + DB write) — JS `Number` accumulates float error on `reduce(...total_amount...)`
+- Save-button consistency across remaining pages — extract a `withSaving(btn, fn)` helper and apply uniformly
+- Modal focus-trap (accessibility) — first input autofocus + tab containment + return focus to trigger on close
+- Hoist hardcoded thresholds (60-day expiry, 7-day upcoming, 3-day due-soon, 30 default daily consumption) to a `CONFIG` object
+- Long-term: convert specific aggregations (revenue-by-product, fast/slow movers) to dedicated Postgres RPCs that return scalars/small result sets, instead of pulling all rows via `fetchAllPaged`
 
 ## Do Not Touch
-- `parties.js` — AMC config unchanged
-- `sales.js`, `collections.js`, `reports.js` — unrelated
-- `migrations/001_*`, `002_*`, `003_*` — already applied
+(Open territory — no active feature branches or in-progress edits.)

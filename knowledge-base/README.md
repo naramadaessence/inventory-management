@@ -50,9 +50,11 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 | 3 | architecture.md | Data model, security, workflows |
 
 ## Critical Rules
-- **Demo mode**: App works fully without Supabase via localStorage. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` env vars for production.
-- **XSS prevention**: All user data rendered via `escapeHtml()` / `esc()` — never raw innerHTML with user strings.
+- **Demo mode**: App works fully without Supabase via localStorage. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` env vars for production. Production builds hard-fail if env vars are missing (no silent fallback).
+- **XSS prevention**: All user data rendered via `escapeHtml()` / `esc()` — never raw innerHTML with user strings. Toasts and modal titles use `textContent`; modal `content`/`footer` are HTML by design (escape inside).
 - **Stock consistency**: Every stock change (checkout, checkin, sale, rental, damage) creates a corresponding `inventory_transactions` entry for full audit trail.
+- **Atomic stock writes (since 2026-05-14)**: All stock-mutating flows go through Postgres RPCs (`record_sale`, `approve_issue`, `approve_return`, `delete_sale`, `adjust_stock`) — never directly UPDATE `current_stock` from the client.
+- **Pagination**: Aggregations over high-volume tables use `db.fetchAllPaged()` to avoid silent 1000-row truncation. Display lists use `limit:N` or true server-side pagination.
 - **Role-based access**: Admin sees all pages. Seller only sees their own checkout history.
 - **Input validation**: All forms validate on client side. Supabase RLS enforces on server side.
 - **Soft deletes**: Products are deactivated (`is_active: false`), never hard-deleted.

@@ -122,3 +122,18 @@ Rental Return → +stock → log transaction
 Damage/Loss → -stock → log transaction
 ```
 Every mutation is logged in `inventory_transactions` for full audit trail.
+
+## Atomicity (since 2026-05-14, migration 006)
+Stock-mutating operations call Postgres functions via `supabase.rpc()` so multi-step writes are transactional and `current_stock` updates are race-safe:
+
+| RPC | Purpose |
+|-----|---------|
+| `adjust_stock(product_id, delta)` | Primitive used by all of the below; raises if result would be negative |
+| `record_sale(party_id, items, ...)` | sale + sale_items + stock deduction + transactions, all in one tx |
+| `approve_issue(session_id, approver_id)` | deduct each issued item + log + flip session status |
+| `approve_return(session_id, approver_id)` | restore each returned item + log + flip session status |
+| `delete_sale(sale_id, performer_id)` | restore stock + cascade-delete sale_items + delete sale |
+
+**Demo mode parity**: `js/supabase.js` defines a `demoRpc` table mirroring each Postgres function, so the same client call (`db.rpc('record_sale', { ... })`) works in both modes without conditional code at call sites.
+
+**TOCTOU resolution**: `adjust_stock` is the only place `current_stock` is mutated. The `UPDATE ... WHERE id = ? AND current_stock + delta >= 0` pattern + transaction isolation eliminates the read-modify-write race that previously affected concurrent stock writes.
