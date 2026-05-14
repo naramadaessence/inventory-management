@@ -1,26 +1,30 @@
 ## Current Status
 **Last Updated**: 2026-05-14
-**Last Agent Session**: Review Round 2 Polish — CONFIG, currency rounding, withSaving, modal focus-trap
+**Last Agent Session**: Operational hardening — tests, error monitoring, dead-code cleanup, future-scope captured
 
 ## In Progress
 (No active work-in-progress.)
 
 ## Recently Completed
-- **Polish batch (this session)**:
-  - `CONFIG` object in `helpers.js` with 5 named thresholds; 7 magic-number sites replaced
-  - `roundCurrency()` helper applied at DB-write boundaries (sale-save, edit-sale-save, visit-save, fu-save)
-  - `withSaving()` helper applied to all 13 save handlers across 8 page files (eliminates double-click duplicate sales)
-  - Modal focus-trap in `createModal`: autofocus, Tab/Shift+Tab containment, Esc-to-close, return-focus-to-trigger
+- **This batch**:
+  - Vitest 3 + happy-dom 20 set up; `tests/demo-rpc.test.js` with 9 passing tests covering record_sale (happy + insufficient stock + multi-item), adjust_stock (positive + negative guard), approve_issue (happy + insufficient), approve_return, delete_sale (cascade + restore + audit). Suite runs in ~11ms. `npm test` and `npm run test:watch` available.
+  - `js/error-tracking.js`: env-gated Sentry integration. Activated by setting `VITE_SENTRY_DSN`; otherwise zero bundle cost (dynamic import). Wired into `dbOp` and `window.error` / `unhandledrejection`. User identified to Sentry on login.
+  - `src/` Vite scaffolding (counter.js + assets) deleted — unused since the real entry is `js/main.js`.
+  - `knowledge-base/future-scope.md` created — single source of truth for deferred items, organized by category (operations, functional, security, tech debt, UX, reporting). Each entry has rationale + trigger condition.
+- **Earlier today (polish batch)**:
+  - `CONFIG` object, `roundCurrency()`, `withSaving()`, modal focus-trap
 - **Earlier today (review batch)**:
-  - Acted on code review findings: CORS pin on `/api/create-user`, prod env-var hard-fail, toast/modal XSS hardening, schema file resync
-  - Migration 005 (`refill_completions` RLS scope) — applied
-  - Migration 006 (atomic operation RPCs: `adjust_stock`, `record_sale`, `approve_issue`, `approve_return`, `delete_sale`) — applied
-  - Client wired to use `db.rpc()` for sale recording, sale deletion, issue approval, return approval
-  - `db.fetchAllPaged()` helper + applied to high-volume aggregation reads across dashboard, sales, collections, reports, daily-operations
-  - Inventory Log: server-side pagination (50/page, Prev/Next, type filter via `.eq`)
+  - CORS pin, prod env hard-fail, toast XSS, schema sync, migration 005 (refill RLS scope), migration 006 (atomic RPCs), client wired to RPCs, pagination, server-side inventory log
 
 ## Next Steps (deferred)
-- **Long-term**: convert specific aggregations (revenue-by-product, fast/slow movers, total revenue) to dedicated Postgres RPCs that return scalars/small result sets instead of pulling all rows via `fetchAllPaged`. Defer until `sales` / `inventory_transactions` tables cross ~10k rows.
+See **`knowledge-base/future-scope.md`** for the full list with rationale + trigger conditions. Headlines:
+- Setup runbook (`SETUP.md`)
+- Mobile UX pass on real Android
+- Invoice / PDF generation + GST compliance
+- Aggregation RPCs (when sales table crosses ~10k rows)
+- Backup strategy doc
+- Offline support
+- Data export (CSV / Excel / Tally)
 
 ## Do Not Touch
 (Open territory — no active feature branches or in-progress edits.)
@@ -32,3 +36,6 @@
 - Aggregations over high-volume tables: use `db.fetchAllPaged()`, not `db.getAll()`, to avoid silent 1000-row truncation.
 - Magic thresholds: extend `CONFIG` in `helpers.js` rather than inlining numbers.
 - User-derived strings in toasts/modal titles: pass through `textContent` (already handled inside the helpers); don't pass HTML.
+- New business logic in demo mode parity: when adding a new RPC to `migrations/006_atomic_operations.sql`, mirror it in `demoRpc` (`js/supabase.js`) and add a test in `tests/demo-rpc.test.js`.
+- Errors that should reach the operator (not just the user): surface via `dbOp` (auto-routes to Sentry) or call `reportError` directly from `error-tracking.js`.
+- Adding deferred items: edit `knowledge-base/future-scope.md` rather than letting them drift in code comments.

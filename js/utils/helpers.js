@@ -2,6 +2,8 @@
 // UTILITY HELPERS
 // ============================================
 
+import { reportError } from '../error-tracking.js';
+
 // Centralized configuration thresholds.
 // When tuning business rules, adjust here rather than hunting magic numbers.
 export const CONFIG = {
@@ -59,18 +61,24 @@ export function esc(s) {
 // Alias for backward compatibility
 export const escapeHtml = esc;
 
-// Safe DB operation wrapper — shows toast on error, returns data or null
+// Safe DB operation wrapper — shows toast on error, returns data or null.
+// Also forwards to error-tracking (Sentry) when configured.
 export async function dbOp(promise, errorMsg = 'Operation failed') {
   try {
     const result = await promise;
     if (result?.error) {
       console.error(errorMsg, result.error);
+      reportError(
+        new Error(`${errorMsg}: ${result.error.message || 'Unknown error'}`),
+        { kind: 'db-error', supabaseError: result.error }
+      );
       showToast(errorMsg + ': ' + (result.error.message || 'Unknown error'), 'error');
       return null;
     }
     return result;
   } catch (err) {
     console.error(errorMsg, err);
+    reportError(err, { kind: 'db-throw', errorMsg });
     showToast(errorMsg + ': ' + (err.message || 'Network error'), 'error');
     return null;
   }

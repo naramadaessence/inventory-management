@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-05-14 — Operational Hardening: Tests, Error Monitoring, Cleanup
+**What**: Set up the missing operational scaffolding identified in the project review — automated tests for the business-logic RPC layer, env-gated Sentry error monitoring, dead-code cleanup, and a structured future-scope document.
+**Why**: Stock-mutation logic was correct but untested; production errors went unnoticed unless reported by users; deferred items were drifting into TODO comments instead of being captured.
+**Impact**: No behavioral changes to the running app. New `npm test` + `npm run test:watch` scripts. Sentry activates only when `VITE_SENTRY_DSN` is set (zero bundle cost otherwise via dynamic import).
+**Files Changed**: `package.json`, `package-lock.json`, `vitest.config.js` (NEW), `tests/demo-rpc.test.js` (NEW), `js/error-tracking.js` (NEW), `js/main.js`, `js/utils/helpers.js`, `knowledge-base/future-scope.md` (NEW), `knowledge-base/active-context.md`. Deleted: `src/` (unused Vite starter scaffolding).
+
+### Testing
+- **Vitest 3.2 + happy-dom 20.9** installed (happy-dom upgraded past `<= 20.8.8` RCE advisory)
+- `tests/demo-rpc.test.js` — 9 passing tests covering record_sale (happy path + insufficient-stock + multi-item), adjust_stock (positive + negative-guard), approve_issue (happy + insufficient), approve_return, delete_sale (cascade + stock restore + audit log). Runs in ~11ms.
+- These tests exercise the same `db.rpc('name', { params })` shape that production uses, so they validate both demo-mode behavior AND the interface contract that the production Postgres functions must satisfy.
+
+### Error Monitoring
+- New module `js/error-tracking.js`: `initErrorTracking()`, `setErrorUser()`, `reportError()`, `reportMessage()`. All no-ops if `VITE_SENTRY_DSN` is unset.
+- Sentry SDK is dynamically imported only when DSN is configured — no bundle cost for default deployments.
+- Wired into:
+  - `main.js` boot — global `error` and `unhandledrejection` listeners
+  - `main.js` post-login — `setErrorUser({id, role})`
+  - `helpers.js:dbOp` — every DB-error or thrown promise reports to Sentry alongside the existing toast/console path
+- Activation: sign up at sentry.io (free tier = 5K events/month), create a Browser-JavaScript project, set `VITE_SENTRY_DSN` in Vercel env vars (Production scope).
+
+### Cleanup
+- `src/main.js`, `src/counter.js`, `src/style.css`, `src/assets/*` — deleted. Real entry is `js/main.js`; the leftover Vite starter scaffolding had been confusing the directory structure.
+
+### Knowledge Base
+- New file: **`knowledge-base/future-scope.md`** — single source of truth for deferred work. Items grouped into Operations, Functional, Security, Tech Debt, UX, and Reporting. Each has rationale + trigger condition.
+- `active-context.md` updated with this batch's completion + a House Style Reminders section extended for tests / error tracking.
+
+---
+
 ## 2026-05-14 — Review Round 2 Polish: CONFIG, currency rounding, withSaving, focus-trap
 **What**: Closed the four near-term follow-ups left in `active-context.md` after the main review batch.
 **Why**: Consistency, double-click protection, accessibility, and removing magic numbers from business logic.

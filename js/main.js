@@ -1,4 +1,5 @@
 import { auth, assertProductionConfig } from './supabase.js';
+import { initErrorTracking, setErrorUser, reportError } from './error-tracking.js';
 import { renderLogin } from './pages/login.js';
 import { renderDashboard } from './pages/dashboard.js';
 import { renderProducts } from './pages/products.js';
@@ -186,8 +187,25 @@ async function init() {
   // so we never silently serve the localStorage demo with public creds.
   assertProductionConfig();
 
+  // Lazy-init Sentry if VITE_SENTRY_DSN is set; no-op otherwise.
+  initErrorTracking();
+
+  // Global safety nets — catch what dbOp() doesn't.
+  window.addEventListener('error', (e) => {
+    reportError(e.error || new Error(e.message), {
+      kind: 'window-error', filename: e.filename, lineno: e.lineno
+    });
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    reportError(
+      e.reason instanceof Error ? e.reason : new Error(String(e.reason)),
+      { kind: 'unhandled-rejection' }
+    );
+  });
+
   const user = await auth.getSession();
   if (user) {
+    setErrorUser(user);
     renderShell();
   } else {
     renderLogin(app, init);
