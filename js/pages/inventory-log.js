@@ -14,7 +14,7 @@ export async function renderInventoryLog(body, header) {
   `;
   document.getElementById('mobile-toggle')?.addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
 
-  const { data: txns } = await db.getAll('inventory_transactions', { orderBy: ['created_at', 'desc'] });
+  const { data: txns } = await db.fetchAllPaged('inventory_transactions', { orderBy: ['created_at', 'desc'] });
   const { data: products } = await db.getAll('products');
   const { data: profiles } = await db.getAll('profiles');
   const prodMap = Object.fromEntries(products.map(p => [p.id, p]));

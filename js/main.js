@@ -1,4 +1,4 @@
-import { auth } from './supabase.js';
+import { auth, assertProductionConfig } from './supabase.js';
 import { renderLogin } from './pages/login.js';
 import { renderDashboard } from './pages/dashboard.js';
 import { renderProducts } from './pages/products.js';
@@ -182,6 +182,10 @@ window.navigateTo = navigateTo;
 // INIT
 // ============================================
 async function init() {
+  // Fail fast in production if Supabase env vars are missing,
+  // so we never silently serve the localStorage demo with public creds.
+  assertProductionConfig();
+
   const user = await auth.getSession();
   if (user) {
     renderShell();

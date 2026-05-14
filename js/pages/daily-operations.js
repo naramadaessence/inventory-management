@@ -17,9 +17,9 @@ export async function renderDailyOps(body, header) {
 }
 
 async function renderSessionsList(body, isAdmin) {
-  const { data: sessions } = await db.getAll('checkout_sessions', { orderBy: ['created_at', 'desc'] });
+  const { data: sessions } = await db.fetchAllPaged('checkout_sessions', { orderBy: ['created_at', 'desc'] });
   const { data: profiles } = await db.getAll('profiles');
-  const { data: items } = await db.getAll('checkout_items');
+  const { data: items } = await db.fetchAllPaged('checkout_items');
   const { data: products } = await db.getAll('products');
   const sellerMap = Object.fromEntries(profiles.map(p => [p.id, p]));
   const prodMap = Object.fromEntries(products.map(p => [p.id, p]));

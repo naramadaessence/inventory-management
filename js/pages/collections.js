@@ -16,12 +16,14 @@ export async function renderCollections(body, header) {
   document.getElementById('mobile-toggle')?.addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
 
   // ── fetch data ──
-  const { data: allFollowups } = await db.getAll('payment_followups', { orderBy: ['created_at', 'desc'] });
+  // Use fetchAllPaged for high-volume tables so totals/aggregations don't silently
+  // truncate at Supabase's 1000-row default limit.
+  const { data: allFollowups } = await db.fetchAllPaged('payment_followups', { orderBy: ['created_at', 'desc'] });
   const { data: parties } = await db.getAll('parties');
   const { data: profiles } = await db.getAll('profiles');
-  const { data: sales } = await db.getAll('sales', { orderBy: ['created_at', 'desc'] });
+  const { data: sales } = await db.fetchAllPaged('sales', { orderBy: ['created_at', 'desc'] });
   const { data: products } = await db.getAll('products');
-  const { data: allSaleItems } = await db.getAll('sale_items');
+  const { data: allSaleItems } = await db.fetchAllPaged('sale_items');
   const partyMap = Object.fromEntries(parties.map(p => [p.id, p]));
   const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
   const prodMap = Object.fromEntries(products.map(p => [p.id, p]));

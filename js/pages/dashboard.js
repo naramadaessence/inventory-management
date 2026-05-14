@@ -20,8 +20,8 @@ export async function renderDashboard(body, header) {
   }
 
   const { data: products } = await db.getAll('products');
-  const { data: sessions } = await db.getAll('checkout_sessions');
-  const { data: sales } = await db.getAll('sales');
+  const { data: sessions } = await db.fetchAllPaged('checkout_sessions');
+  const { data: sales } = await db.fetchAllPaged('sales');
   const { data: rentals } = await db.getAll('rentals');
   const { data: damages } = await db.getAll('damage_reports');
   const { data: amcParties } = await db.getAll('parties');
@@ -323,7 +323,8 @@ export async function renderDashboard(body, header) {
   }
 
   // Recent activity - continued
-  const { data: txns } = await db.getAll('inventory_transactions', { orderBy: ['created_at', 'desc'] });
+  // Only fetch a small recent window — this is a display list, not an aggregation.
+  const { data: txns } = await db.getAll('inventory_transactions', { orderBy: ['created_at', 'desc'], limit: 20 });
   const recent = txns.slice(0, 8);
   if (recent.length === 0) {
     recentEl.innerHTML = '<div class="empty-state" style="padding:20px;"><i class="fas fa-inbox" style="font-size:1.5rem;"></i><p style="color:var(--text-secondary);margin-top:8px;">No activity yet. Start a checkout or record a sale.</p></div>';

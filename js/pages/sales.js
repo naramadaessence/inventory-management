@@ -26,8 +26,8 @@ export async function renderSales(body, header) {
   `;
   document.getElementById('mobile-toggle')?.addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
 
-  const { data: allSales } = await db.getAll('sales', { orderBy: ['created_at', 'desc'] });
-  const { data: allSaleItems } = await db.getAll('sale_items');
+  const { data: allSales } = await db.fetchAllPaged('sales', { orderBy: ['created_at', 'desc'] });
+  const { data: allSaleItems } = await db.fetchAllPaged('sale_items');
   const { data: parties } = await db.getAll('parties');
   const { data: products } = await db.getAll('products');
   const partyMap = Object.fromEntries(parties.map(p => [p.id, p]));

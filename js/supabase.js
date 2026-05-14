@@ -7,6 +7,19 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 const isDemoMode = !SUPABASE_URL || !SUPABASE_ANON_KEY;
 
+// Hard-fail in production if env vars are missing.
+// Called at app init (from main.js) — kept out of module top-level so the
+// bundler doesn't treat the exports below as dead code when statically
+// evaluating the throw.
+export function assertProductionConfig() {
+  if (import.meta.env.PROD && isDemoMode) {
+    throw new Error(
+      'Missing Supabase configuration in production build. ' +
+      'Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY environment variables.'
+    );
+  }
+}
+
 let supabase = null;
 if (!isDemoMode) {
   supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -128,6 +141,15 @@ const demo = {
 export const db = {
   isDemoMode,
 
+  // Single-page read.
+  // options:
+  //   orderBy: [field, 'asc'|'desc']
+  //   filter: (row) => boolean      (demo mode only — Supabase ignores this)
+  //   limit:  number                (caps rows returned)
+  //   offset: number                (skips this many rows; uses .range() in prod)
+  //
+  // NOTE: Supabase REST defaults to a max of 1000 rows per request.
+  // If you need ALL rows for an aggregation, use db.fetchAllPaged(...) instead.
   async getAll(table, options = {}) {
     if (isDemoMode) {
       let data = demo.getAll(table);
@@ -139,11 +161,48 @@ export const db = {
           return a[field] > b[field] ? 1 : -1;
         });
       }
+      const offset = options.offset || 0;
+      const end = options.limit != null ? offset + options.limit : undefined;
+      data = data.slice(offset, end);
       return { data, error: null };
     }
     let q = supabase.from(table).select('*');
     if (options.orderBy) q = q.order(options.orderBy[0], { ascending: options.orderBy[1] !== 'desc' });
+    if (options.limit != null) {
+      const offset = options.offset || 0;
+      q = q.range(offset, offset + options.limit - 1);
+    } else if (options.offset != null) {
+      // offset without limit — use a big range
+      q = q.range(options.offset, options.offset + 999);
+    }
     return await q;
+  },
+
+  // Chunked full-table read for aggregations.
+  // Pages through the table in CHUNK-sized requests so we don't silently
+  // truncate at Supabase's 1000-row default. Use this anywhere code computes
+  // sums, counts, or "all-time" stats over a high-volume table
+  // (sales, inventory_transactions, payment_followups, sale_items).
+  async fetchAllPaged(table, options = {}) {
+    const CHUNK = 1000;
+    if (isDemoMode) {
+      // Demo mode is in-memory, no truncation risk — just delegate.
+      return await this.getAll(table, options);
+    }
+    let all = [];
+    let offset = 0;
+    while (true) {
+      let q = supabase.from(table).select('*');
+      if (options.orderBy) q = q.order(options.orderBy[0], { ascending: options.orderBy[1] !== 'desc' });
+      q = q.range(offset, offset + CHUNK - 1);
+      const { data, error } = await q;
+      if (error) return { data: null, error };
+      if (!data || data.length === 0) break;
+      all = all.concat(data);
+      if (data.length < CHUNK) break;
+      offset += CHUNK;
+    }
+    return { data: all, error: null };
   },
 
   async getById(table, id) {

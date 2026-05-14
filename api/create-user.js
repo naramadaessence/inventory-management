@@ -1,11 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 
+// Allowed origins for CORS. Add additional deployment URLs here if needed.
+const ALLOWED_ORIGINS = [
+  'https://inventory-management-pi-opal.vercel.app',
+  'http://localhost:3000',
+  'http://localhost:5173',
+];
+
 export default async function handler(req, res) {
-  // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // CORS — pinned to known origins only (defense in depth alongside JWT auth)
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   const supabaseUrl = process.env.VITE_SUPABASE_URL;

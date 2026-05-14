@@ -35,6 +35,7 @@ CREATE TABLE products (
   min_stock_threshold DECIMAL(12,2) NOT NULL DEFAULT 10,
   max_daily_consumption DECIMAL(12,2),
   expiry_date DATE,
+  image_url TEXT,
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
@@ -94,13 +95,10 @@ CREATE TABLE checkout_items (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- 7. SALES
+-- 7. SALES (bill / invoice header — line items live in sale_items)
 CREATE TABLE sales (
   id SERIAL PRIMARY KEY,
   party_id INTEGER REFERENCES parties(id),
-  product_id INTEGER REFERENCES products(id),
-  quantity DECIMAL(12,2) NOT NULL,
-  unit_price DECIMAL(10,2) NOT NULL,
   total_amount DECIMAL(12,2) NOT NULL,
   payment_status TEXT DEFAULT 'pending' CHECK (payment_status IN ('paid', 'partial', 'pending')),
   payment_method TEXT CHECK (payment_method IN ('cash', 'upi', 'bank_transfer', 'cheque')),
@@ -111,6 +109,19 @@ CREATE TABLE sales (
   recorded_by UUID REFERENCES profiles(id),
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- 7b. SALE_ITEMS (multi-item line items per sale — added in migration 003)
+CREATE TABLE sale_items (
+  id SERIAL PRIMARY KEY,
+  sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  quantity DECIMAL NOT NULL,
+  unit_price DECIMAL NOT NULL,
+  line_total DECIMAL NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id);
+CREATE INDEX IF NOT EXISTS idx_sale_items_product_id ON sale_items(product_id);
 
 -- 8. RENTALS
 CREATE TABLE rentals (
@@ -178,6 +189,19 @@ CREATE TABLE payment_followups (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 13. REFILL_COMPLETIONS (monthly AMC refill tracking — added in migration 004)
+CREATE TABLE refill_completions (
+  id SERIAL PRIMARY KEY,
+  party_id INTEGER NOT NULL REFERENCES parties(id) ON DELETE CASCADE,
+  month INTEGER NOT NULL CHECK (month >= 1 AND month <= 12),
+  year INTEGER NOT NULL CHECK (year >= 2020),
+  completed_by TEXT,
+  completed_at TIMESTAMPTZ DEFAULT now(),
+  notes TEXT,
+  UNIQUE (party_id, month, year)
+);
+CREATE INDEX IF NOT EXISTS idx_refill_completions_lookup ON refill_completions(party_id, month, year);
+
 -- ============================================
 -- ROW LEVEL SECURITY (RLS)
 -- ============================================
@@ -186,13 +210,17 @@ ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE parties ENABLE ROW LEVEL SECURITY;
+ALTER TABLE installations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE checkout_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE checkout_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sales ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sale_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE rentals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE damage_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE inventory_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stock_intakes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_followups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE refill_completions ENABLE ROW LEVEL SECURITY;
 
 -- Helper: check if current user is admin
 CREATE OR REPLACE FUNCTION is_admin()
@@ -216,6 +244,9 @@ CREATE POLICY "Admins manage products" ON products FOR ALL USING (is_admin());
 CREATE POLICY "Admins manage parties" ON parties FOR ALL USING (is_admin());
 CREATE POLICY "Sellers read parties" ON parties FOR SELECT USING (true);
 
+-- INSTALLATIONS: any authenticated user can read/write (admin-driven page in practice)
+CREATE POLICY "Authenticated manage installations" ON installations FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
 -- CHECKOUT: sellers see own, admins see all
 CREATE POLICY "View own or admin sessions" ON checkout_sessions FOR SELECT USING (seller_id = auth.uid() OR is_admin());
 CREATE POLICY "Admins manage sessions" ON checkout_sessions FOR ALL USING (is_admin());
@@ -236,17 +267,30 @@ CREATE POLICY "Sellers update own items" ON checkout_items FOR UPDATE USING (
 CREATE POLICY "Admins manage sales" ON sales FOR ALL USING (is_admin());
 CREATE POLICY "Sellers read sales" ON sales FOR SELECT USING (true);
 
+-- SALE_ITEMS: read/write by any authenticated user (parent sale row controls actual access)
+CREATE POLICY "Authenticated read sale_items" ON sale_items FOR SELECT USING (true);
+CREATE POLICY "Authenticated insert sale_items" ON sale_items FOR INSERT WITH CHECK (true);
+CREATE POLICY "Authenticated update sale_items" ON sale_items FOR UPDATE USING (true) WITH CHECK (true);
+CREATE POLICY "Authenticated delete sale_items" ON sale_items FOR DELETE USING (true);
+
 -- RENTALS, DAMAGE, TRANSACTIONS, INTAKES: admins only
 CREATE POLICY "Admins manage rentals" ON rentals FOR ALL USING (is_admin());
 CREATE POLICY "Admins manage damage" ON damage_reports FOR ALL USING (is_admin());
 CREATE POLICY "Admins manage transactions" ON inventory_transactions FOR ALL USING (is_admin());
 CREATE POLICY "Admins manage intakes" ON stock_intakes FOR ALL USING (is_admin());
 
--- PAYMENT FOLLOWUPS: admins full access, sellers can read and insert
-ALTER TABLE payment_followups ENABLE ROW LEVEL SECURITY;
+-- PAYMENT FOLLOWUPS: admins full access, sellers can read and insert their own
 CREATE POLICY "Admins manage followups" ON payment_followups FOR ALL USING (is_admin());
 CREATE POLICY "Sellers read followups" ON payment_followups FOR SELECT USING (true);
 CREATE POLICY "Sellers insert followups" ON payment_followups FOR INSERT WITH CHECK (auth.uid() = visited_by);
+
+-- REFILL_COMPLETIONS: any authenticated user can read; insert is scoped to acting user
+-- (See migration 005 for the production-applied scoped policy.)
+CREATE POLICY "Authenticated read refill_completions" ON refill_completions FOR SELECT USING (true);
+CREATE POLICY "Authenticated insert refill_completions" ON refill_completions
+  FOR INSERT WITH CHECK (completed_by IS NULL OR completed_by = auth.uid()::text);
+CREATE POLICY "Authenticated delete refill_completions" ON refill_completions
+  FOR DELETE USING (is_admin() OR completed_by = auth.uid()::text);
 
 -- ============================================
 -- AUTO-CREATE PROFILE ON SIGNUP

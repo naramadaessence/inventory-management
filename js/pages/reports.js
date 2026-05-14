@@ -81,13 +81,13 @@ export async function renderReports(body, header) {
     const container = document.getElementById('report-content');
     container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div></div>';
 
-    const { data: sales } = await db.getAll('sales');
+    const { data: sales } = await db.fetchAllPaged('sales');
     const { data: products } = await db.getAll('products');
     const { data: profiles } = await db.getAll('profiles');
-    const { data: sessions } = await db.getAll('checkout_sessions');
-    const { data: checkoutItems } = await db.getAll('checkout_items');
+    const { data: sessions } = await db.fetchAllPaged('checkout_sessions');
+    const { data: checkoutItems } = await db.fetchAllPaged('checkout_items');
     const { data: categories } = await db.getAll('categories');
-    const { data: allSaleItems } = await db.getAll('sale_items');
+    const { data: allSaleItems } = await db.fetchAllPaged('sale_items');
     const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
     const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
 

@@ -102,25 +102,37 @@ export function showToast(message, type = 'success') {
   const icons = { success: 'fa-check-circle', error: 'fa-times-circle', warning: 'fa-exclamation-triangle' };
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
-  toast.innerHTML = `<i class="fas ${icons[type] || icons.success}"></i> ${message}`;
+  // Build structurally so `message` is treated as text, not HTML.
+  // (Stored values like product names can come from form input — never trust them in innerHTML.)
+  const icon = document.createElement('i');
+  icon.className = `fas ${icons[type] || icons.success}`;
+  toast.appendChild(icon);
+  toast.appendChild(document.createTextNode(' ' + String(message)));
   toastContainer.appendChild(toast);
   setTimeout(() => { toast.style.opacity = '0'; toast.style.transform = 'translateX(100%)'; setTimeout(() => toast.remove(), 300); }, 3000);
 }
 
-// Simple modal helper
+// Simple modal helper.
+// `title` is rendered as text (safe). `content` and `options.footer` are rendered as HTML —
+// callers MUST pass user data through esc() before composing those strings.
 export function createModal(title, content, options = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
   overlay.innerHTML = `
     <div class="modal ${options.large ? 'modal-lg' : ''}">
       <div class="modal-header">
-        <h2>${title}</h2>
+        <h2></h2>
         <button class="modal-close" id="modal-close-btn"><i class="fas fa-times"></i></button>
       </div>
-      <div class="modal-body">${content}</div>
-      ${options.footer ? `<div class="modal-footer">${options.footer}</div>` : ''}
+      <div class="modal-body"></div>
+      ${options.footer ? '<div class="modal-footer"></div>' : ''}
     </div>
   `;
+  overlay.querySelector('.modal-header h2').textContent = String(title);
+  overlay.querySelector('.modal-body').innerHTML = content;
+  if (options.footer) {
+    overlay.querySelector('.modal-footer').innerHTML = options.footer;
+  }
   document.body.appendChild(overlay);
   const close = () => { overlay.style.opacity = '0'; setTimeout(() => overlay.remove(), 200); };
   overlay.querySelector('#modal-close-btn').onclick = close;
