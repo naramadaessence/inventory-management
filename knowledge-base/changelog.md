@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026-05-14 — Review Round 2 Polish: CONFIG, currency rounding, withSaving, focus-trap
+**What**: Closed the four near-term follow-ups left in `active-context.md` after the main review batch.
+**Why**: Consistency, double-click protection, accessibility, and removing magic numbers from business logic.
+**Impact**: No DB changes. No behavioral changes for existing data. Save buttons now disabled while a request is in flight (no more duplicate sales from double-clicks). Modal keyboard navigation now works.
+**Files Changed**: `js/utils/helpers.js`, `js/supabase.js`, `js/pages/{dashboard,collections,daily-operations,sales,settings,damage-loss,installations,parties,rentals,products}.js`
+
+### CONFIG object
+- `helpers.js` exports `CONFIG` with 5 named thresholds:
+  - `EXPIRY_WARN_DAYS` (60), `UPCOMING_REFILL_DAYS` (7),
+  - `PAYMENT_DUE_SOON_DAYS` (7), `PAYMENT_URGENT_DAYS` (3),
+  - `DEFAULT_DAILY_CONSUMPTION` (30)
+- 7 magic-number sites replaced in dashboard, collections, daily-operations
+
+### Currency rounding (`roundCurrency`)
+- New helper: `Math.round(n * 100) / 100` — matches DB `DECIMAL(12,2)`
+- Applied at DB-write boundaries: sale-save (grandTotal + amtRcvd), edit-sale-save (totalAmount + amountReceived), visit-save (newReceived), fu-save (newReceived)
+- `demoRpc.record_sale` rounds the computed total inline so demo + production stay byte-equal
+
+### Save-button consistency (`withSaving`)
+- New helper: disables button + shows spinner for the duration of an async save, then restores. `btn.isConnected` check in `finally` handles the modal-close case cleanly.
+- Applied to **all 13 save handlers** across 8 page files (sales ×2, collections ×2, settings ×4, damage-loss, installations, parties, rentals, products)
+- Removes the double-click → duplicate sale class of bugs entirely
+- Stripped manual `saveBtn.disabled = true` / `saveBtn.innerHTML = ...` reassignment from 4 places that were managing this themselves
+
+### Modal accessibility (focus-trap in `createModal`)
+- Captures previously-focused element on open; restores it on close
+- Autofocuses first text input after a one-tick layout delay
+- Traps Tab / Shift+Tab inside the modal
+- Closes on Escape (document-level listener cleaned up on close)
+- Adds `role="dialog"`, `aria-modal="true"`, `tabindex="-1"` to the modal element
+
+---
+
 ## 2026-05-14 — Code Review Round 2: Atomicity, Pagination, Security
 **What**: Actioned a thorough code review pass. Closed five critical issues spanning security, correctness under concurrency, and silent data truncation.
 **Why**: Pre-scaling hardening — before adding more concurrent users or growing past the Supabase 1000-row REST default.
