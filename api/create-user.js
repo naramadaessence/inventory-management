@@ -7,6 +7,41 @@ const ALLOWED_ORIGINS = [
   'http://localhost:5173',
 ];
 
+// Lightweight in-memory rate limit. Vercel serverless instances are short-lived
+// and there can be multiple warm instances at once, so this is best-effort
+// defense-in-depth — not the primary security control (the admin JWT check
+// below is). For stricter limits use Upstash Redis or Vercel KV.
+const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
+const RATE_LIMIT_MAX = 5;            // requests per IP per window
+const _rateLimitStore = new Map();
+
+function clientIp(req) {
+  const fwd = req.headers['x-forwarded-for'];
+  if (fwd) return String(fwd).split(',')[0].trim();
+  return req.socket?.remoteAddress || 'unknown';
+}
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  // Best-effort cleanup so the map doesn't grow unbounded across warm-instance lifetime.
+  if (_rateLimitStore.size > 1024) {
+    for (const [k, v] of _rateLimitStore.entries()) {
+      if (now - v.windowStart > RATE_LIMIT_WINDOW_MS * 2) _rateLimitStore.delete(k);
+    }
+  }
+  const entry = _rateLimitStore.get(ip);
+  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    _rateLimitStore.set(ip, { count: 1, windowStart: now });
+    return { allowed: true, remaining: RATE_LIMIT_MAX - 1 };
+  }
+  if (entry.count >= RATE_LIMIT_MAX) {
+    const retryAfter = Math.ceil((entry.windowStart + RATE_LIMIT_WINDOW_MS - now) / 1000);
+    return { allowed: false, retryAfter };
+  }
+  entry.count++;
+  return { allowed: true, remaining: RATE_LIMIT_MAX - entry.count };
+}
+
 export default async function handler(req, res) {
   // CORS — pinned to known origins only (defense in depth alongside JWT auth)
   const origin = req.headers.origin;
@@ -18,6 +53,16 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  // Rate limit early — before heavy auth/DB work. Returns 429 if exceeded.
+  const ip = clientIp(req);
+  const rl = checkRateLimit(ip);
+  if (!rl.allowed) {
+    res.setHeader('Retry-After', String(rl.retryAfter));
+    return res.status(429).json({ error: `Too many requests. Try again in ${rl.retryAfter}s.` });
+  }
+  res.setHeader('X-RateLimit-Limit', String(RATE_LIMIT_MAX));
+  res.setHeader('X-RateLimit-Remaining', String(rl.remaining));
 
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

@@ -87,13 +87,49 @@ export function esc(s) {
 // Alias for backward compatibility
 export const escapeHtml = esc;
 
+// Detect a session-expired / not-authenticated error from Supabase.
+// PostgREST returns code 'PGRST301' for expired JWTs; auth-related errors
+// often surface with status 401 or messages containing 'JWT'.
+function isSessionExpiredError(err) {
+  if (!err) return false;
+  const code = String(err.code || '');
+  const status = Number(err.status || 0);
+  if (status === 401) return true;
+  if (code === 'PGRST301') return true;
+  const msg = String(err.message || '').toLowerCase();
+  if (msg.includes('jwt') && (msg.includes('expired') || msg.includes('invalid'))) return true;
+  return false;
+}
+
+// Trigger once per session — prevents a flurry of expired-401s from each
+// piling up a toast or triggering multiple reloads.
+let _sessionExpiredHandled = false;
+async function handleSessionExpired() {
+  if (_sessionExpiredHandled) return;
+  _sessionExpiredHandled = true;
+  showToast('Session expired — please sign in again.', 'warning');
+  // Brief delay so the toast renders before we reload.
+  setTimeout(() => {
+    try {
+      // Clear demo user / supabase session storage; reload picks up unauthenticated state.
+      localStorage.removeItem('narmada_user');
+    } catch { /* swallow */ }
+    window.location.reload();
+  }, 1200);
+}
+
 // Safe DB operation wrapper — shows toast on error, returns data or null.
 // Also forwards to error-tracking (Sentry) when configured.
+// Detects expired-session errors and redirects to login.
 export async function dbOp(promise, errorMsg = 'Operation failed') {
   try {
     const result = await promise;
     if (result?.error) {
       console.error(errorMsg, result.error);
+      if (isSessionExpiredError(result.error)) {
+        handleSessionExpired();
+        return null;
+      }
       reportError(
         new Error(`${errorMsg}: ${result.error.message || 'Unknown error'}`),
         { kind: 'db-error', supabaseError: result.error }
@@ -104,6 +140,10 @@ export async function dbOp(promise, errorMsg = 'Operation failed') {
     return result;
   } catch (err) {
     console.error(errorMsg, err);
+    if (isSessionExpiredError(err)) {
+      handleSessionExpired();
+      return null;
+    }
     reportError(err, { kind: 'db-throw', errorMsg });
     showToast(errorMsg + ': ' + (err.message || 'Network error'), 'error');
     return null;

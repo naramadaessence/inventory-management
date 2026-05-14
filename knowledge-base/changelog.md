@@ -1,5 +1,34 @@
 # Changelog
 
+## 2026-05-14 — Future-Scope Sweep: UX/A11y, Tech Debt, Security
+**What**: Worked through the future-scope.md backlog in three categories, three commits.
+**Why**: Closing the long tail of items that don't individually justify a session but collectively shape the project's polish and operational readiness.
+**Impact**: Two new migrations (007, 008) — user must run both. No behavior changes for existing data. Dashboard is faster (single Promise.all). Save buttons + modals + shortcuts give the app a more polished feel. Session expiry no longer leaves users staring at silent errors.
+**Files Changed**: `api/create-user.js`, `css/styles.css`, `js/main.js`, `js/supabase.js`, `js/utils/helpers.js`, `js/keyboard-shortcuts.js` (NEW), `js/error-tracking.js`, `js/pages/dashboard.js`, `js/pages/products.js`, `migrations/007_decimal_precision.sql` (NEW), `migrations/008_storage_bucket_policy.sql` (NEW), `supabase-schema.sql`.
+
+### UX / Accessibility (commit `338e8b9`)
+- `helpers.js`: `skeletonHTML(variant, count)` returns shimmer placeholders for card / table / list shapes.
+- `styles.css`: skeleton + shimmer animation (respects `prefers-reduced-motion`), `.skip-to-content` link, `.sr-only` utility, `.shortcuts-list` grid.
+- `main.js`: "Skip to main content" link as first focusable element. Sidebar nav uses real `<button>` elements with `aria-current="page"` on the active item. Brand icon / logout get appropriate `aria-hidden` / `aria-label`.
+- `keyboard-shortcuts.js` (NEW): `?` help, `n` new, `/` focus search, `g d/p/s/c/r/i/l` page navigation. Doesn't intercept while typing in inputs or while a modal is open.
+- Deferred: i18n / Hindi-Gujarati translation (multi-day).
+
+### Tech Debt (commit `bba30aa`, requires migration 007)
+- **Migration 007** (NEW): widens quantity columns from `DECIMAL(12,2)` to `DECIMAL(12,3)` on products, checkout_items, stock_intakes, inventory_transactions, damage_reports. Liquid stock now keeps gram precision instead of silently rounding 4.567 kg → 4.57 kg.
+- `helpers.js generateId()`: uses `crypto.randomUUID()` when available; `.slice` fallback replaces deprecated `.substr`. Same fix for image filename in `products.js`.
+- `dashboard.js`: 9 sequential round-trips → single `Promise.all` of 9 parallel fetches; removed duplicate parties / products / completions fetches. ~3-4× faster on typical RTT.
+- `supabase.js saveStore()`: catches `QuotaExceededError`, surfaces a one-time toast + console error. Previously silent.
+- `supabase.js getAll()`: module-level cache (60s TTL) for plain `getAll('categories')` + `getAll('profiles')`. Auto-invalidated on insert/update/delete to those tables.
+- Deferred: TypeScript migration (multi-day, low payoff at current scale).
+
+### Security (this commit, requires migration 008)
+- `helpers.js dbOp()`: detects expired-session errors (`PGRST301`, status 401, JWT-related messages) and triggers a single "Session expired" toast + page reload. Idempotent so a flurry of 401s doesn't stack toasts.
+- `api/create-user.js`: in-memory rate limit (5 requests/IP/minute), returns 429 with `Retry-After` header. Best-effort across warm Vercel instances; defense-in-depth alongside the existing admin JWT check.
+- **Migration 008** (NEW): tightens `product-images` storage bucket — 5 MB file_size_limit + allowed_mime_types restricted to image/png/jpeg/jpg/webp/gif. Was client-side-only validation; now enforced at the Supabase Storage layer.
+- Deferred: Content Security Policy (needs `window.navigateTo` event-delegation refactor first; documented in future-scope).
+
+---
+
 ## 2026-05-14 — Operational Hardening: Tests, Error Monitoring, Cleanup
 **What**: Set up the missing operational scaffolding identified in the project review — automated tests for the business-logic RPC layer, env-gated Sentry error monitoring, dead-code cleanup, and a structured future-scope document.
 **Why**: Stock-mutation logic was correct but untested; production errors went unnoticed unless reported by users; deferred items were drifting into TODO comments instead of being captured.
