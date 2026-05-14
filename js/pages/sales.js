@@ -182,13 +182,20 @@ function openSaleModal(parties, products, body, header) {
   function updPrice() {
     const po = document.getElementById('add-item-product').selectedOptions[0];
     const catId = po?.dataset?.catid;
-    const custom = (catId && selectedCatRates[catId] !== undefined) ? selectedCatRates[catId] : null;
+    // Check both string and numeric key variants for Supabase JSONB compatibility
+    const custom = (catId && (selectedCatRates[catId] !== undefined || selectedCatRates[String(catId)] !== undefined))
+      ? (selectedCatRates[catId] ?? selectedCatRates[String(catId)])
+      : null;
     const def = parseFloat(po?.dataset?.price) || 0;
     const isLiq = po?.dataset?.type === 'liquid';
     const pi = document.getElementById('add-item-price');
     pi.value = (custom !== null ? custom : def).toFixed(2);
     document.getElementById('add-item-qty-label').textContent = isLiq ? 'Qty (kg)' : 'Qty (pcs)';
-    document.getElementById('add-item-qty').step = isLiq ? '0.001' : '1';
+    // Preserve quantity value when changing step (browsers can reset it)
+    const qtyEl = document.getElementById('add-item-qty');
+    const curQty = qtyEl.value;
+    qtyEl.step = isLiq ? '0.001' : '1';
+    qtyEl.value = curQty;
     if (custom !== null) { pi.style.borderColor = 'var(--primary)'; pi.style.background = 'var(--primary-soft)'; }
     else { pi.style.borderColor = ''; pi.style.background = ''; }
   }
