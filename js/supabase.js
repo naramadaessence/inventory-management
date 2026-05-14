@@ -136,6 +136,218 @@ const demo = {
 };
 
 // ============================================
+// DEMO RPC HANDLERS — mirror the Postgres functions in migration 006.
+// Same signatures, same param names, so the same client code path works
+// in both demo (localStorage) and production (supabase.rpc) modes.
+// ============================================
+const demoRpc = {
+  // adjust_stock(product_id, delta) — atomic-ish stock change with negative guard.
+  adjust_stock({ p_product_id, p_delta }) {
+    const store = getStore();
+    const idx = store.products.findIndex(p => p.id === p_product_id);
+    if (idx === -1) throw new Error(`Product ${p_product_id} not found`);
+    const newStock = (store.products[idx].current_stock || 0) + p_delta;
+    if (newStock < 0) throw new Error(`Insufficient stock for ${store.products[idx].name}`);
+    store.products[idx].current_stock = newStock;
+    store.products[idx].updated_at = new Date().toISOString();
+    saveStore(store);
+    return newStock;
+  },
+
+  // record_sale(...) — insert sale + line items + deduct stock + log transactions.
+  // p_items: [{ product_id, quantity, unit_price }, ...]
+  record_sale({ p_party_id, p_items, p_payment_status, p_payment_method, p_amount_received, p_expected_payment_date, p_sale_date, p_notes, p_recorded_by }) {
+    const store = getStore();
+    const now = new Date().toISOString();
+    const total = p_items.reduce((s, i) => s + (i.quantity * i.unit_price), 0);
+
+    const saleId = store._nextId.sales || 1;
+    store.sales.push({
+      id: saleId,
+      party_id: p_party_id,
+      total_amount: total,
+      payment_status: p_payment_status,
+      payment_method: p_payment_method,
+      amount_received: p_amount_received || 0,
+      expected_payment_date: p_expected_payment_date,
+      sale_date: p_sale_date,
+      notes: p_notes,
+      recorded_by: p_recorded_by,
+      created_at: now,
+    });
+    store._nextId.sales = saleId + 1;
+
+    for (const item of p_items) {
+      const lineTotal = item.quantity * item.unit_price;
+      const siId = store._nextId.sale_items || 1;
+      store.sale_items.push({
+        id: siId,
+        sale_id: saleId,
+        product_id: item.product_id,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        line_total: lineTotal,
+        created_at: now,
+      });
+      store._nextId.sale_items = siId + 1;
+
+      const pIdx = store.products.findIndex(p => p.id === item.product_id);
+      if (pIdx === -1) throw new Error(`Product ${item.product_id} not found`);
+      const newStock = (store.products[pIdx].current_stock || 0) - item.quantity;
+      if (newStock < 0) throw new Error(`Insufficient stock for ${store.products[pIdx].name}`);
+      store.products[pIdx].current_stock = newStock;
+      store.products[pIdx].updated_at = now;
+
+      const txnId = store._nextId.inventory_transactions || 1;
+      store.inventory_transactions.push({
+        id: txnId,
+        product_id: item.product_id,
+        type: 'sale',
+        quantity: -item.quantity,
+        reference_type: 'sale',
+        reference_id: saleId,
+        performed_by: p_recorded_by,
+        notes: p_party_id ? 'Sale to party' : 'Sale to walk-in',
+        created_at: now,
+      });
+      store._nextId.inventory_transactions = txnId + 1;
+    }
+
+    saveStore(store);
+    return saleId;
+  },
+
+  // approve_issue(session_id, approver_id) — admin approves a stock issue.
+  approve_issue({ p_session_id, p_approver_id }) {
+    const store = getStore();
+    const sIdx = store.checkout_sessions.findIndex(s => s.id === p_session_id);
+    if (sIdx === -1) throw new Error(`Session ${p_session_id} not found`);
+    const session = store.checkout_sessions[sIdx];
+    if (session.status !== 'pending_issue') throw new Error(`Session ${p_session_id} is not pending_issue`);
+
+    const items = store.checkout_items.filter(i => i.session_id === p_session_id);
+    const now = new Date().toISOString();
+
+    for (const item of items) {
+      const pIdx = store.products.findIndex(p => p.id === item.product_id);
+      if (pIdx === -1) continue;
+      const newStock = (store.products[pIdx].current_stock || 0) - item.checkout_quantity;
+      if (newStock < 0) throw new Error(`Insufficient stock for ${store.products[pIdx].name}`);
+      store.products[pIdx].current_stock = newStock;
+      store.products[pIdx].updated_at = now;
+
+      const txnId = store._nextId.inventory_transactions || 1;
+      store.inventory_transactions.push({
+        id: txnId,
+        product_id: item.product_id,
+        type: 'checkout',
+        quantity: -item.checkout_quantity,
+        reference_type: 'checkout_session',
+        reference_id: p_session_id,
+        performed_by: p_approver_id,
+        notes: 'Approved issue to seller',
+        created_at: now,
+      });
+      store._nextId.inventory_transactions = txnId + 1;
+    }
+
+    store.checkout_sessions[sIdx] = {
+      ...session,
+      status: 'checked_out',
+      approved_by: p_approver_id,
+      approved_at: now,
+      updated_at: now,
+    };
+
+    saveStore(store);
+    return null;
+  },
+
+  // approve_return(session_id, approver_id) — admin approves a return.
+  approve_return({ p_session_id, p_approver_id }) {
+    const store = getStore();
+    const sIdx = store.checkout_sessions.findIndex(s => s.id === p_session_id);
+    if (sIdx === -1) throw new Error(`Session ${p_session_id} not found`);
+    const session = store.checkout_sessions[sIdx];
+    if (session.status !== 'pending_approval') throw new Error(`Session ${p_session_id} is not pending_approval`);
+
+    const items = store.checkout_items.filter(i => i.session_id === p_session_id && (i.checkin_quantity || 0) > 0);
+    const now = new Date().toISOString();
+
+    for (const item of items) {
+      const pIdx = store.products.findIndex(p => p.id === item.product_id);
+      if (pIdx === -1) continue;
+      store.products[pIdx].current_stock = (store.products[pIdx].current_stock || 0) + item.checkin_quantity;
+      store.products[pIdx].updated_at = now;
+
+      const txnId = store._nextId.inventory_transactions || 1;
+      store.inventory_transactions.push({
+        id: txnId,
+        product_id: item.product_id,
+        type: 'checkin',
+        quantity: item.checkin_quantity,
+        reference_type: 'checkout_session',
+        reference_id: p_session_id,
+        performed_by: p_approver_id,
+        notes: 'Approved return — stock restored',
+        created_at: now,
+      });
+      store._nextId.inventory_transactions = txnId + 1;
+    }
+
+    store.checkout_sessions[sIdx] = {
+      ...session,
+      status: 'checked_in',
+      approved_by: p_approver_id,
+      approved_at: now,
+      updated_at: now,
+    };
+
+    saveStore(store);
+    return null;
+  },
+
+  // delete_sale(sale_id, performer_id) — restore stock, cascade-delete the sale.
+  // Also fixes ISSUE-001 (demo had no FK cascade for sale_items).
+  delete_sale({ p_sale_id, p_performer_id }) {
+    const store = getStore();
+    const sale = store.sales.find(s => s.id === p_sale_id);
+    if (!sale) throw new Error(`Sale ${p_sale_id} does not exist`);
+
+    const items = store.sale_items.filter(si => si.sale_id === p_sale_id);
+    const now = new Date().toISOString();
+
+    for (const item of items) {
+      const pIdx = store.products.findIndex(p => p.id === item.product_id);
+      if (pIdx === -1) continue;
+      store.products[pIdx].current_stock = (store.products[pIdx].current_stock || 0) + item.quantity;
+      store.products[pIdx].updated_at = now;
+
+      const txnId = store._nextId.inventory_transactions || 1;
+      store.inventory_transactions.push({
+        id: txnId,
+        product_id: item.product_id,
+        type: 'sale_delete',
+        quantity: item.quantity,
+        reference_type: 'sale',
+        reference_id: p_sale_id,
+        performed_by: p_performer_id,
+        notes: 'Sale deleted — stock restored',
+        created_at: now,
+      });
+      store._nextId.inventory_transactions = txnId + 1;
+    }
+
+    // Cascade delete sale_items, then the sale itself.
+    store.sale_items = store.sale_items.filter(si => si.sale_id !== p_sale_id);
+    store.sales = store.sales.filter(s => s.id !== p_sale_id);
+
+    saveStore(store);
+    return null;
+  },
+};
+
+// ============================================
 // PUBLIC API — works in both demo & production
 // ============================================
 export const db = {
@@ -145,6 +357,7 @@ export const db = {
   // options:
   //   orderBy: [field, 'asc'|'desc']
   //   filter: (row) => boolean      (demo mode only — Supabase ignores this)
+  //   eq:     { col: val, ... }     (server-side equality filter; works in both modes)
   //   limit:  number                (caps rows returned)
   //   offset: number                (skips this many rows; uses .range() in prod)
   //
@@ -154,6 +367,11 @@ export const db = {
     if (isDemoMode) {
       let data = demo.getAll(table);
       if (options.filter) data = data.filter(options.filter);
+      if (options.eq) {
+        for (const [col, val] of Object.entries(options.eq)) {
+          data = data.filter(r => r[col] === val);
+        }
+      }
       if (options.orderBy) {
         const [field, dir] = options.orderBy;
         data.sort((a, b) => {
@@ -167,6 +385,11 @@ export const db = {
       return { data, error: null };
     }
     let q = supabase.from(table).select('*');
+    if (options.eq) {
+      for (const [col, val] of Object.entries(options.eq)) {
+        q = q.eq(col, val);
+      }
+    }
     if (options.orderBy) q = q.order(options.orderBy[0], { ascending: options.orderBy[1] !== 'desc' });
     if (options.limit != null) {
       const offset = options.offset || 0;
@@ -223,6 +446,26 @@ export const db = {
   async delete(table, id) {
     if (isDemoMode) { demo.delete(table, id); return { error: null }; }
     return await supabase.from(table).delete().eq('id', id);
+  },
+
+  // Call a Postgres function (RPC).
+  // In demo mode this dispatches to the local demoRpc handlers, which
+  // mirror the Postgres functions in migration 006. Same call shape:
+  //   await db.rpc('record_sale', { p_party_id: 1, p_items: [...], ... })
+  // Returns { data, error } in both modes.
+  async rpc(fnName, params) {
+    if (isDemoMode) {
+      const handler = demoRpc[fnName];
+      if (!handler) {
+        return { data: null, error: { message: `Unknown RPC in demo mode: ${fnName}` } };
+      }
+      try {
+        return { data: handler(params || {}), error: null };
+      } catch (err) {
+        return { data: null, error: { message: err.message || String(err) } };
+      }
+    }
+    return await supabase.rpc(fnName, params);
   },
 
   async query(table, filterFn) {

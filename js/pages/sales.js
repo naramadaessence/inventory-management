@@ -225,7 +225,8 @@ function openSaleModal(parties, products, body, header) {
     const grandTotal = lineItems.reduce((s, i) => s + i.line_total, 0);
     const amtRcvd = payStatus === 'paid' ? grandTotal : parseFloat(document.getElementById('sale-received').value) || 0;
 
-    // Stock check
+    // Client-side stock pre-check for fast UX. The RPC also enforces it
+    // atomically, so this is just to fail before sending the request.
     const qtyByProd = {};
     lineItems.forEach(i => { qtyByProd[i.product_id] = (qtyByProd[i.product_id] || 0) + i.quantity; });
     for (const [pid, totalQty] of Object.entries(qtyByProd)) {
@@ -233,20 +234,21 @@ function openSaleModal(parties, products, body, header) {
       if (pr && totalQty > pr.current_stock) { showToast(`Insufficient stock for ${pr.name} — only ${formatStock(pr.current_stock, pr.type)} available`, 'error'); return; }
     }
 
-    const saleRes = await dbOp(db.insert('sales', { party_id: partyId, total_amount: grandTotal, payment_status: payStatus, payment_method: payMethod, amount_received: amtRcvd, expected_payment_date: expDate, sale_date: document.getElementById('sale-date').value, notes: document.getElementById('sale-notes').value.trim(), recorded_by: auth.currentUser.id }), 'Failed to record sale');
-    if (!saleRes) return;
-    const saleId = saleRes.data?.id || saleRes.id;
+    // Atomic record_sale: inserts sale + sale_items + deducts stock + logs
+    // inventory_transactions in one transaction (Postgres) or one demoRpc call.
+    const result = await dbOp(db.rpc('record_sale', {
+      p_party_id: partyId,
+      p_items: lineItems.map(i => ({ product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price })),
+      p_payment_status: payStatus,
+      p_payment_method: payMethod,
+      p_amount_received: amtRcvd,
+      p_expected_payment_date: expDate,
+      p_sale_date: document.getElementById('sale-date').value,
+      p_notes: document.getElementById('sale-notes').value.trim(),
+      p_recorded_by: auth.currentUser.id,
+    }), 'Failed to record sale');
+    if (!result) return;
 
-    for (const item of lineItems) {
-      await dbOp(db.insert('sale_items', { sale_id: saleId, product_id: item.product_id, quantity: item.quantity, unit_price: item.unit_price, line_total: item.line_total }), 'Failed to save item');
-    }
-    for (const [pid, totalQty] of Object.entries(qtyByProd)) {
-      const pr = products.find(p => p.id === parseInt(pid));
-      if (pr) {
-        await dbOp(db.update('products', pr.id, { current_stock: pr.current_stock - totalQty }), 'Failed to update stock');
-        await dbOp(db.insert('inventory_transactions', { product_id: pr.id, type: 'sale', quantity: -totalQty, reference_type: 'sale', performed_by: auth.currentUser.id, notes: `Sale to ${partyId ? 'party' : 'walk-in'}` }), 'Failed to log txn');
-      }
-    }
     showToast(`Sale recorded — ${lineItems.length} item${lineItems.length > 1 ? 's' : ''}`, 'success');
     close(); renderSales(body, header);
   };
@@ -325,20 +327,13 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
 
   document.getElementById('edit-sale-delete').onclick = async () => {
     if (!confirm('Delete this sale? Stock will be restored for all items.')) return;
-    // Restore stock for all items
-    for (const si of saleItems) {
-      const prod = products.find(p => p.id === si.product_id);
-      if (prod) {
-        await dbOp(db.update('products', prod.id, { current_stock: (prod.current_stock || 0) + si.quantity }), 'Failed to restore stock');
-        await dbOp(db.insert('inventory_transactions', {
-          product_id: prod.id, type: 'sale_delete', quantity: si.quantity,
-          reference_type: 'sale', performed_by: auth.currentUser.id,
-          notes: `Sale deleted, restored ${si.quantity}`
-        }), 'Failed to log restoration');
-      }
-    }
-    // sale_items cascade-delete via FK
-    await dbOp(db.delete('sales', sale.id), 'Failed to delete sale');
+    // Atomic delete_sale: restores stock for every line item, logs txns,
+    // cascades sale_items, deletes the sale row — all in one transaction.
+    const result = await dbOp(db.rpc('delete_sale', {
+      p_sale_id: sale.id,
+      p_performer_id: auth.currentUser.id,
+    }), 'Failed to delete sale');
+    if (!result) return;
     showToast('Sale deleted — stock restored', 'success'); close(); renderSales(body, header);
   };
 }

@@ -138,24 +138,136 @@ $$;
 
 
 -- --------------------------------------------------------
--- TODO: Future RPCs (same pattern, not yet drafted)
+-- 3. approve_issue(session_id, approver_id) — admin approves a stock issue
 -- --------------------------------------------------------
--- approve_issue(session_id, approver_id)   — deduct stock + flip status
--- approve_return(session_id, approver_id)  — restore stock + flip status
--- delete_sale(sale_id)                     — restore stock + cascade delete
---
--- Each should:
---   1. Update its primary table (checkout_sessions / sales)
---   2. Loop over related items, calling adjust_stock for each
---   3. Insert inventory_transactions for the audit trail
---
--- Since RLS still applies to functions called by the client, these need to
--- run as SECURITY DEFINER or the RLS policies must allow the calling user
--- to make the underlying UPDATEs/INSERTs. The simplest path is to mark
--- these functions SECURITY DEFINER and add explicit role checks inside.
+-- Loops over the session's checkout_items, atomically deducts each product's
+-- stock, logs an inventory_transactions row per product, and flips the
+-- session status to 'checked_out'. Raises if any item has insufficient stock.
+
+CREATE OR REPLACE FUNCTION approve_issue(p_session_id INTEGER, p_approver_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_item RECORD;
+BEGIN
+  -- Verify the session is in the right state.
+  PERFORM 1 FROM checkout_sessions WHERE id = p_session_id AND status = 'pending_issue';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Session % is not pending_issue', p_session_id;
+  END IF;
+
+  -- Atomically deduct stock for each item; adjust_stock raises if insufficient.
+  FOR v_item IN
+    SELECT product_id, checkout_quantity FROM checkout_items WHERE session_id = p_session_id
+  LOOP
+    PERFORM adjust_stock(v_item.product_id, -v_item.checkout_quantity);
+
+    INSERT INTO inventory_transactions (
+      product_id, type, quantity, reference_type, reference_id, performed_by, notes
+    ) VALUES (
+      v_item.product_id, 'checkout', -v_item.checkout_quantity,
+      'checkout_session', p_session_id, p_approver_id, 'Approved issue to seller'
+    );
+  END LOOP;
+
+  UPDATE checkout_sessions
+     SET status = 'checked_out',
+         approved_by = p_approver_id,
+         approved_at = now()
+   WHERE id = p_session_id;
+END;
+$$;
+
+
+-- --------------------------------------------------------
+-- 4. approve_return(session_id, approver_id) — admin approves a return
+-- --------------------------------------------------------
+-- Loops over checkout_items, atomically restores stock for the returned
+-- quantity, logs an inventory_transactions row per product, and flips the
+-- session status to 'checked_in'. Items with NULL or zero checkin_quantity
+-- are skipped.
+
+CREATE OR REPLACE FUNCTION approve_return(p_session_id INTEGER, p_approver_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_item RECORD;
+BEGIN
+  PERFORM 1 FROM checkout_sessions WHERE id = p_session_id AND status = 'pending_approval';
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Session % is not pending_approval', p_session_id;
+  END IF;
+
+  FOR v_item IN
+    SELECT product_id, checkin_quantity FROM checkout_items
+     WHERE session_id = p_session_id AND COALESCE(checkin_quantity, 0) > 0
+  LOOP
+    PERFORM adjust_stock(v_item.product_id, v_item.checkin_quantity);
+
+    INSERT INTO inventory_transactions (
+      product_id, type, quantity, reference_type, reference_id, performed_by, notes
+    ) VALUES (
+      v_item.product_id, 'checkin', v_item.checkin_quantity,
+      'checkout_session', p_session_id, p_approver_id, 'Approved return — stock restored'
+    );
+  END LOOP;
+
+  UPDATE checkout_sessions
+     SET status = 'checked_in',
+         approved_by = p_approver_id,
+         approved_at = now()
+   WHERE id = p_session_id;
+END;
+$$;
+
+
+-- --------------------------------------------------------
+-- 5. delete_sale(sale_id, performer_id) — admin deletes a sale, restores stock
+-- --------------------------------------------------------
+-- Restores stock for every sale_item, logs an inventory_transactions row
+-- per product (type='sale_delete' for traceability), then deletes the sale
+-- row (sale_items cascade via FK). Note: stock is restored as positive
+-- adjust_stock — this never raises, since restore can't go negative.
+
+CREATE OR REPLACE FUNCTION delete_sale(p_sale_id INTEGER, p_performer_id UUID)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  v_item RECORD;
+BEGIN
+  PERFORM 1 FROM sales WHERE id = p_sale_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Sale % does not exist', p_sale_id;
+  END IF;
+
+  FOR v_item IN
+    SELECT product_id, quantity FROM sale_items WHERE sale_id = p_sale_id
+  LOOP
+    PERFORM adjust_stock(v_item.product_id, v_item.quantity);
+
+    INSERT INTO inventory_transactions (
+      product_id, type, quantity, reference_type, reference_id, performed_by, notes
+    ) VALUES (
+      v_item.product_id, 'sale_delete', v_item.quantity,
+      'sale', p_sale_id, p_performer_id,
+      'Sale deleted — stock restored'
+    );
+  END LOOP;
+
+  -- sale_items cascade-delete via FK
+  DELETE FROM sales WHERE id = p_sale_id;
+END;
+$$;
+
 
 -- --------------------------------------------------------
 -- GRANT execute on the new functions to authenticated users.
 -- --------------------------------------------------------
 GRANT EXECUTE ON FUNCTION adjust_stock(INTEGER, NUMERIC) TO authenticated;
 GRANT EXECUTE ON FUNCTION record_sale(INTEGER, JSONB, TEXT, TEXT, NUMERIC, DATE, DATE, TEXT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION approve_issue(INTEGER, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION approve_return(INTEGER, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION delete_sale(INTEGER, UUID) TO authenticated;

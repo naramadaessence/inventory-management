@@ -274,31 +274,19 @@ async function approveIssue(sessionId, body, allItems, prodMap) {
 
   if (canApprove) {
     document.getElementById('ai-approve').onclick = async () => {
-      // Re-check stock at approval time (prevent race conditions)
-      const { data: latestProducts } = await db.getAll('products');
-      const latestMap = Object.fromEntries(latestProducts.map(p => [p.id, p]));
-      for (const item of sItems) {
-        const p = latestMap[item.product_id];
-        if (!p || (p.current_stock || 0) < item.checkout_quantity) {
-          showToast(`Stock changed — ${p?.name || 'Unknown'} now has only ${formatStock(p?.current_stock || 0, p?.type)}. Cannot approve.`, 'error');
-          close();
-          await renderSessionsList(body, true);
-          return;
-        }
+      // Atomic approve_issue: re-checks stock, deducts each item, logs
+      // inventory_transactions, flips session status — all in one transaction.
+      // The pre-flight check above is for UX; the RPC enforces correctness.
+      const result = await dbOp(db.rpc('approve_issue', {
+        p_session_id: sessionId,
+        p_approver_id: auth.currentUser.id,
+      }), 'Failed to approve issue');
+      if (!result) {
+        // Likely insufficient stock changed under us — refresh the list.
+        close();
+        await renderSessionsList(body, true);
+        return;
       }
-      for (const item of sItems) {
-        const p = latestMap[item.product_id];
-        const newStock = (p.current_stock || 0) - item.checkout_quantity;
-        await dbOp(db.update('products', item.product_id, { current_stock: newStock }), 'Failed to deduct stock');
-        await dbOp(db.insert('inventory_transactions', {
-          product_id: item.product_id, type: 'checkout', quantity: -item.checkout_quantity,
-          reference_type: 'checkout_session', reference_id: sessionId,
-          performed_by: auth.currentUser.id, notes: 'Approved issue to seller'
-        }), 'Failed to log transaction');
-      }
-      await dbOp(db.update('checkout_sessions', sessionId, {
-        status: 'checked_out', approved_by: auth.currentUser.id, approved_at: new Date().toISOString()
-      }), 'Failed to approve');
       showToast('Issue approved — stock deducted', 'success');
       close();
       await renderSessionsList(body, true);
@@ -397,20 +385,13 @@ async function openApproveReturnModal(sessionId, body, allItems, prodMap) {
   document.getElementById('ar-cancel').onclick = close;
   document.getElementById('ar-flag').onclick = async () => { close(); await flagSession(sessionId, body, true); };
   document.getElementById('ar-approve').onclick = async () => {
-    for (const item of sItems) {
-      if (item.checkin_quantity > 0) {
-        const p = freshMap[item.product_id];
-        await dbOp(db.update('products', item.product_id, { current_stock: (p?.current_stock||0) + item.checkin_quantity }), 'Failed to restore stock');
-        await dbOp(db.insert('inventory_transactions', {
-          product_id: item.product_id, type: 'checkin', quantity: item.checkin_quantity,
-          reference_type: 'checkout_session', reference_id: sessionId,
-          performed_by: auth.currentUser.id, notes: 'Approved return — stock restored'
-        }), 'Failed to log');
-      }
-    }
-    await dbOp(db.update('checkout_sessions', sessionId, {
-      status: 'checked_in', approved_by: auth.currentUser.id, approved_at: new Date().toISOString()
-    }), 'Failed to approve');
+    // Atomic approve_return: restores stock for each item with a non-zero
+    // checkin_quantity, logs inventory_transactions, flips session status.
+    const result = await dbOp(db.rpc('approve_return', {
+      p_session_id: sessionId,
+      p_approver_id: auth.currentUser.id,
+    }), 'Failed to approve return');
+    if (!result) return;
     showToast('Return approved — stock restored', 'success');
     close();
     await renderSessionsList(body, true);
