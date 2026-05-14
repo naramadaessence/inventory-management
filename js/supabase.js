@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { showToast } from './utils/helpers.js';
 
 // These will be set via environment variables in production
 // For development, we'll use demo mode with localStorage
@@ -41,7 +42,20 @@ function getStore() {
 }
 
 function saveStore(data) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (err) {
+    // localStorage caps at ~5MB — surface the failure so it's not silent.
+    if (err && (err.name === 'QuotaExceededError' || err.code === 22 || err.code === 'QUOTA_EXCEEDED_ERR')) {
+      console.error('[demo-store] localStorage quota exceeded — clear demo data via DevTools > Application > Local Storage.', err);
+      // Warn the user once per session.
+      if (typeof window !== 'undefined' && !window.__demoQuotaWarned) {
+        window.__demoQuotaWarned = true;
+        try { showToast('Demo storage full — clear localStorage to continue.', 'error'); } catch { /* swallow */ }
+      }
+    }
+    throw err;
+  }
 }
 
 function initStore() {
@@ -351,6 +365,20 @@ const demoRpc = {
 // ============================================
 // PUBLIC API — works in both demo & production
 // ============================================
+
+// Tiny module-level cache for stable-ish lookups. Saves repeated full-table
+// fetches of categories + profiles on page navigation.
+//   - Only caches plain `getAll(table)` calls (no eq/filter/limit/offset/orderBy).
+//   - TTL is short (60s) so demo-mode + role changes aren't stuck.
+//   - Invalidated on insert/update/delete to the same table.
+const _lookupCache = new Map();
+const _CACHEABLE = new Set(['categories', 'profiles']);
+const _CACHE_TTL_MS = 60_000;
+function _cacheKey(table) { return table; }
+function _invalidate(table) {
+  if (_CACHEABLE.has(table)) _lookupCache.delete(_cacheKey(table));
+}
+
 export const db = {
   isDemoMode,
 
@@ -365,6 +393,16 @@ export const db = {
   // NOTE: Supabase REST defaults to a max of 1000 rows per request.
   // If you need ALL rows for an aggregation, use db.fetchAllPaged(...) instead.
   async getAll(table, options = {}) {
+    // Cache: only the plain "fetch all" form (no filters / paging / ordering).
+    const isPlain = !options.filter && !options.eq && options.limit == null && options.offset == null && !options.orderBy;
+    if (isPlain && _CACHEABLE.has(table)) {
+      const cached = _lookupCache.get(_cacheKey(table));
+      if (cached && Date.now() - cached.t < _CACHE_TTL_MS) {
+        return { data: cached.data, error: null };
+      }
+    }
+
+    let result;
     if (isDemoMode) {
       let data = demo.getAll(table);
       if (options.filter) data = data.filter(options.filter);
@@ -383,23 +421,28 @@ export const db = {
       const offset = options.offset || 0;
       const end = options.limit != null ? offset + options.limit : undefined;
       data = data.slice(offset, end);
-      return { data, error: null };
-    }
-    let q = supabase.from(table).select('*');
-    if (options.eq) {
-      for (const [col, val] of Object.entries(options.eq)) {
-        q = q.eq(col, val);
+      result = { data, error: null };
+    } else {
+      let q = supabase.from(table).select('*');
+      if (options.eq) {
+        for (const [col, val] of Object.entries(options.eq)) {
+          q = q.eq(col, val);
+        }
       }
+      if (options.orderBy) q = q.order(options.orderBy[0], { ascending: options.orderBy[1] !== 'desc' });
+      if (options.limit != null) {
+        const offset = options.offset || 0;
+        q = q.range(offset, offset + options.limit - 1);
+      } else if (options.offset != null) {
+        q = q.range(options.offset, options.offset + 999);
+      }
+      result = await q;
     }
-    if (options.orderBy) q = q.order(options.orderBy[0], { ascending: options.orderBy[1] !== 'desc' });
-    if (options.limit != null) {
-      const offset = options.offset || 0;
-      q = q.range(offset, offset + options.limit - 1);
-    } else if (options.offset != null) {
-      // offset without limit — use a big range
-      q = q.range(options.offset, options.offset + 999);
+
+    if (isPlain && _CACHEABLE.has(table) && !result.error) {
+      _lookupCache.set(_cacheKey(table), { data: result.data, t: Date.now() });
     }
-    return await q;
+    return result;
   },
 
   // Chunked full-table read for aggregations.
@@ -435,16 +478,19 @@ export const db = {
   },
 
   async insert(table, record) {
+    _invalidate(table);
     if (isDemoMode) return { data: demo.insert(table, record), error: null };
     return await supabase.from(table).insert(record).select().single();
   },
 
   async update(table, id, updates) {
+    _invalidate(table);
     if (isDemoMode) return { data: demo.update(table, id, updates), error: null };
     return await supabase.from(table).update(updates).eq('id', id).select().single();
   },
 
   async delete(table, id) {
+    _invalidate(table);
     if (isDemoMode) { demo.delete(table, id); return { error: null }; }
     return await supabase.from(table).delete().eq('id', id);
   },

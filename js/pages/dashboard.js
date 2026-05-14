@@ -22,12 +22,33 @@ export async function renderDashboard(body, header) {
   // Show skeleton while the dashboard's many queries resolve.
   body.innerHTML = skeletonHTML('card', 4) + '<div style="margin-top:20px;">' + skeletonHTML('table', 5) + '</div>';
 
-  const { data: products } = await db.getAll('products');
-  const { data: sessions } = await db.fetchAllPaged('checkout_sessions');
-  const { data: sales } = await db.fetchAllPaged('sales');
-  const { data: rentals } = await db.getAll('rentals');
-  const { data: damages } = await db.getAll('damage_reports');
-  const { data: amcParties } = await db.getAll('parties');
+  // Batch all initial queries in parallel — drops dashboard load from
+  // ~9 sequential round-trips to one parallel batch (about 3-4x faster
+  // on typical RTT). Order in destructure matches order in Promise.all.
+  const [
+    { data: products },
+    { data: sessions },
+    { data: sales },
+    { data: rentals },
+    { data: damages },
+    { data: amcParties },
+    { data: completions },
+    { data: txns },
+    { data: allProfiles },
+  ] = await Promise.all([
+    db.getAll('products'),
+    db.fetchAllPaged('checkout_sessions'),
+    db.fetchAllPaged('sales'),
+    db.getAll('rentals'),
+    db.getAll('damage_reports'),
+    db.getAll('parties'),
+    db.getAll('refill_completions'),
+    db.getAll('inventory_transactions', { orderBy: ['created_at', 'desc'], limit: 20 }),
+    db.getAll('profiles'),
+  ]);
+  // Reuse `amcParties` and `products` below — no second fetch needed.
+  const allParties = amcParties;
+  const allProducts = products;
 
   const activeCheckouts = sessions.filter(s => s.status === 'checked_out').length;
   const flaggedSessions = sessions.filter(s => s.status === 'flagged').length;
@@ -49,7 +70,6 @@ export async function renderDashboard(body, header) {
   const today = now.getDate();
   const amcEnabled = amcParties.filter(p => p.amc_active && p.amc_day);
 
-  const { data: completions } = await db.getAll('refill_completions');
   const completedThisMonth = new Set(
     completions.filter(c => c.month === curMonth && c.year === curYear).map(c => c.party_id)
   );
@@ -298,13 +318,12 @@ export async function renderDashboard(body, header) {
   const dueSoonSales = pendingSales.filter(s => s.expected_payment_date && daysUntil(s.expected_payment_date) >= 0 && daysUntil(s.expected_payment_date) <= CONFIG.PAYMENT_DUE_SOON_DAYS);
   const noDateSales = pendingSales.filter(s => !s.expected_payment_date);
   const urgentPayments = [...overdueSales, ...dueSoonSales, ...noDateSales].slice(0, 6);
-  const { data: allParties } = await db.getAll('parties');
+  // (allParties was fetched once in the batch above — reuse.)
   const partyNameMap = Object.fromEntries(allParties.map(p => [p.id, p.name]));
 
   if (urgentPayments.length === 0) {
     payRemEl.innerHTML = '<div class="empty-state" style="padding:20px;"><i class="fas fa-check-circle" style="font-size:1.5rem;color:var(--green);"></i><p style="color:var(--text-secondary);margin-top:8px;">All payments collected!</p></div>';
   } else {
-    const { data: allProducts } = await db.getAll('products');
     payRemEl.innerHTML = '<div class="alert-list">' + urgentPayments.map(s => {
       const pName = partyNameMap[s.party_id] || 'Walk-in';
       const balance = (s.total_amount || 0) - (s.amount_received || 0);
@@ -326,14 +345,11 @@ export async function renderDashboard(body, header) {
   }
 
   // Recent activity - continued
-  // Only fetch a small recent window — this is a display list, not an aggregation.
-  const { data: txns } = await db.getAll('inventory_transactions', { orderBy: ['created_at', 'desc'], limit: 20 });
+  // txns + allProducts + allProfiles already fetched in the Promise.all batch above.
   const recent = txns.slice(0, 8);
   if (recent.length === 0) {
     recentEl.innerHTML = '<div class="empty-state" style="padding:20px;"><i class="fas fa-inbox" style="font-size:1.5rem;"></i><p style="color:var(--text-secondary);margin-top:8px;">No activity yet. Start a checkout or record a sale.</p></div>';
   } else {
-    const { data: allProducts } = await db.getAll('products');
-    const { data: allProfiles } = await db.getAll('profiles');
     recentEl.innerHTML = recent.map(t => {
       const prod = allProducts.find(p => p.id === t.product_id);
       const user = allProfiles.find(u => u.id === t.performed_by);

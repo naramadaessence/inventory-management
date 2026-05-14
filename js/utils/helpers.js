@@ -160,7 +160,12 @@ export function daysUntil(dateStr) {
 }
 
 export function generateId() {
-  return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
+  // Prefer the standard crypto.randomUUID where available (modern browsers + Node 19+).
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Fallback for older runtimes — uses .slice instead of deprecated .substr.
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 11);
 }
 
 export function debounce(fn, ms = 300) {

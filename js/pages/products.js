@@ -269,7 +269,7 @@ function openProductModal(product, categories) {
     if (selectedFile && supabase) {
       try {
         const ext = selectedFile.name.split('.').pop().toLowerCase();
-        const fileName = `${Date.now()}_${Math.random().toString(36).substr(2, 8)}.${ext}`;
+        const fileName = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from('product-images')
           .upload(fileName, selectedFile, { contentType: selectedFile.type, upsert: false });
