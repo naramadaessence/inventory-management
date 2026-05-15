@@ -66,7 +66,7 @@ function renderShell() {
       <aside class="sidebar" id="sidebar" aria-label="Primary navigation">
         <div class="sidebar-header">
           <div class="sidebar-brand">
-            <img src="/logo.svg" alt="Narmada Essence — Inventory Manager" class="sidebar-brand-logo" />
+            <img src="/logo.png" alt="Narmada Essence — Inventory Manager" class="sidebar-brand-logo" />
           </div>
         </div>
         <nav class="sidebar-nav" id="sidebar-nav" role="navigation"></nav>
