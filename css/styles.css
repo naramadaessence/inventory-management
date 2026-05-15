@@ -105,10 +105,8 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
   transition: transform 0.3s ease;
 }
 .sidebar-header { padding: 20px 20px 16px; border-bottom: 1px solid var(--border); }
-.sidebar-brand { display: flex; align-items: center; gap: 12px; }
-.sidebar-brand-icon { font-size: 1.8rem; }
-.sidebar-brand-text h2 { font-size: 1.1rem; font-weight: 700; color: var(--accent); line-height: 1.2; }
-.sidebar-brand-text span { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1.5px; }
+.sidebar-brand { display: flex; align-items: center; justify-content: center; }
+.sidebar-brand-logo { width: 100%; max-width: 200px; height: auto; display: block; }
 .sidebar-nav { flex: 1; padding: 12px 10px; overflow-y: auto; }
 .nav-section-title { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); padding: 16px 12px 6px; font-weight: 600; }
 .nav-item {
