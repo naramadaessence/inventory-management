@@ -19,6 +19,24 @@ function productImageHtml(product, size = 'card') {
   return `<div class="product-card-img" style="display:flex;align-items:center;justify-content:center;font-size:2.5rem;color:var(--text-muted);"><i class="fas ${product.type === 'liquid' ? 'fa-flask' : 'fa-box'}"></i></div>`;
 }
 
+function stockSummaryHtml(filtered) {
+  const unitProducts = filtered.filter(p => p.type !== 'liquid');
+  const liquidProducts = filtered.filter(p => p.type === 'liquid');
+  const unitTotal = unitProducts.reduce((sum, p) => sum + Number(p.current_stock || 0), 0);
+  const liquidTotal = liquidProducts.reduce((sum, p) => sum + Number(p.current_stock || 0), 0);
+
+  const chips = [];
+  chips.push(`<span class="stock-summary-chip"><i class="fas fa-boxes-stacked"></i> <strong>${filtered.length}</strong> products</span>`);
+  if (unitProducts.length > 0) {
+    chips.push(`<span class="stock-summary-chip"><i class="fas fa-box"></i> ${formatStock(unitTotal, 'unit')} <small>(${unitProducts.length} items)</small></span>`);
+  }
+  if (liquidProducts.length > 0) {
+    chips.push(`<span class="stock-summary-chip"><i class="fas fa-flask"></i> ${formatStock(liquidTotal, 'liquid')} <small>(${liquidProducts.length} items)</small></span>`);
+  }
+
+  return `<div class="stock-summary-bar">${chips.join('')}</div>`;
+}
+
 export async function renderProducts(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
 
@@ -77,7 +95,7 @@ export async function renderProducts(body, header) {
     }
 
     if (view === 'grid') {
-      container.innerHTML = `<div class="product-grid">${filtered.map(p => {
+      container.innerHTML = stockSummaryHtml(filtered) + `<div class="product-grid">${filtered.map(p => {
         const cat = catMap[p.category_id];
         const isLow = p.current_stock <= p.min_stock_threshold;
         return `<div class="product-card" data-id="${p.id}">
@@ -93,7 +111,7 @@ export async function renderProducts(body, header) {
         </div>`;
       }).join('')}</div>`;
     } else {
-      container.innerHTML = `<div class="table-wrapper"><table class="data-table">
+      container.innerHTML = stockSummaryHtml(filtered) + `<div class="table-wrapper"><table class="data-table">
         <thead><tr><th></th><th>Product</th><th>Category</th><th>Type</th><th>Price</th><th>Stock</th><th>Threshold</th><th>Expiry</th><th>Actions</th></tr></thead>
         <tbody>${filtered.map(p => {
           const cat = catMap[p.category_id];
