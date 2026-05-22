@@ -91,6 +91,8 @@ function openSaleModal(parties, products, body, header) {
   let lineItems = [];
   let selectedCatRates = {};
   let selectedPartyId = null;
+  let isAmcSale = false;
+  let selectedPartyAmcRate = 0;
 
   const content = `
     <div class="form-row">
@@ -111,6 +113,15 @@ function openSaleModal(parties, products, body, header) {
       </div>
     </div>
     <div id="party-info-card" style="display:none;background:var(--bg-secondary);border-radius:8px;padding:12px 16px;margin-bottom:16px;"></div>
+    <div id="amc-toggle-section" style="display:none;background:linear-gradient(135deg,var(--primary-soft),#e8f4fd);border:2px solid var(--primary);border-radius:8px;padding:12px 16px;margin-bottom:16px;">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+        <input type="checkbox" id="sale-amc-toggle" style="width:18px;height:18px;accent-color:var(--primary);" />
+        <div>
+          <strong style="font-size:0.9rem;color:var(--primary);"><i class="fas fa-file-contract"></i> AMC Sale</strong>
+          <div style="font-size:0.75rem;color:var(--text-muted);" id="amc-rate-label">Fixed monthly rate applies</div>
+        </div>
+      </label>
+    </div>
     <div style="background:var(--bg-secondary);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><i class="fas fa-cart-plus" style="color:var(--primary);"></i><strong style="font-size:0.9rem;">Add Item</strong></div>
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
@@ -145,7 +156,14 @@ function openSaleModal(parties, products, body, header) {
       el.innerHTML = `<table class="data-table" style="font-size:0.85rem;"><thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Total</th><th></th></tr></thead><tbody>${lineItems.map((item, i) => `<tr><td>${esc(item.prodName)}</td><td>${item.prodType === 'liquid' ? formatWeight(item.quantity) : item.quantity + ' pcs'}</td><td>${formatCurrency(item.unit_price)}</td><td style="font-weight:600;color:var(--green);">${formatCurrency(item.line_total)}</td><td><button class="btn btn-sm btn-ghost rm-item" data-idx="${i}" style="color:var(--red);"><i class="fas fa-times"></i></button></td></tr>`).join('')}</tbody></table>`;
       el.querySelectorAll('.rm-item').forEach(b => b.addEventListener('click', () => { lineItems.splice(parseInt(b.dataset.idx), 1); renderItems(); }));
     }
-    document.getElementById('sale-grand-total').textContent = `Grand Total: ${formatCurrency(lineItems.reduce((s, i) => s + i.line_total, 0))}`;
+    const calcTotal = lineItems.reduce((s, i) => s + i.line_total, 0);
+    const grandTotal = isAmcSale ? selectedPartyAmcRate : calcTotal;
+    const totalEl = document.getElementById('sale-grand-total');
+    if (isAmcSale) {
+      totalEl.innerHTML = `Grand Total: ${formatCurrency(grandTotal)} <span style="font-size:0.75rem;font-weight:400;color:var(--primary);">(AMC fixed rate)</span>`;
+    } else {
+      totalEl.textContent = `Grand Total: ${formatCurrency(grandTotal)}`;
+    }
   }
   renderItems();
 
@@ -171,12 +189,26 @@ function openSaleModal(parties, products, body, header) {
 
   function showPartyInfo() {
     const card = document.getElementById('party-info-card');
-    if (!selectedPartyId) { card.style.display = 'none'; return; }
+    const amcSection = document.getElementById('amc-toggle-section');
+    const amcToggle = document.getElementById('sale-amc-toggle');
+    if (!selectedPartyId) { card.style.display = 'none'; amcSection.style.display = 'none'; isAmcSale = false; amcToggle.checked = false; renderItems(); return; }
     const p = parties.find(x => x.id === selectedPartyId);
-    if (!p) { card.style.display = 'none'; return; }
+    if (!p) { card.style.display = 'none'; amcSection.style.display = 'none'; isAmcSale = false; amcToggle.checked = false; renderItems(); return; }
     const ml = p.machine_type === 'purchased' ? '🟢 Purchased' : p.machine_type === 'free_to_use' ? '🔵 Free to Use' : 'No Machine';
     card.style.display = 'block';
     card.innerHTML = `<div style="display:flex;gap:16px;flex-wrap:wrap;"><div style="flex:1;min-width:140px;"><div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">Contact</div><div style="font-size:0.85rem;">${esc(p.phone || '—')} · ${esc(p.address || '—')}</div></div><div><div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;">Machine</div><div style="font-size:0.85rem;">${ml}</div></div></div>`;
+    // AMC toggle
+    if (p.amc_active && p.amc_rate > 0) {
+      selectedPartyAmcRate = Number(p.amc_rate);
+      amcSection.style.display = 'block';
+      document.getElementById('amc-rate-label').textContent = `Fixed monthly rate: ${formatCurrency(selectedPartyAmcRate)}`;
+    } else {
+      amcSection.style.display = 'none';
+      isAmcSale = false;
+      amcToggle.checked = false;
+      selectedPartyAmcRate = 0;
+    }
+    renderItems();
   }
 
   function updPrice() {
@@ -202,6 +234,12 @@ function openSaleModal(parties, products, body, header) {
   document.getElementById('add-item-product').addEventListener('change', updPrice);
   updPrice();
 
+  // AMC toggle
+  document.getElementById('sale-amc-toggle').addEventListener('change', (e) => {
+    isAmcSale = e.target.checked;
+    renderItems();
+  });
+
   // Add item
   document.getElementById('btn-add-item').addEventListener('click', () => {
     const po = document.getElementById('add-item-product').selectedOptions[0];
@@ -222,7 +260,8 @@ function openSaleModal(parties, products, body, header) {
     const payStatus = document.getElementById('sale-payment').value;
     const payMethod = document.getElementById('sale-method').value || null;
     const expDate = document.getElementById('sale-expected-date')?.value || null;
-    const grandTotal = roundCurrency(lineItems.reduce((s, i) => s + i.line_total, 0));
+    const calcTotal = lineItems.reduce((s, i) => s + i.line_total, 0);
+    const grandTotal = roundCurrency(isAmcSale ? selectedPartyAmcRate : calcTotal);
     const amtRcvd = roundCurrency(payStatus === 'paid' ? grandTotal : parseFloat(document.getElementById('sale-received').value) || 0);
 
     // Client-side stock pre-check for fast UX. The RPC also enforces it
