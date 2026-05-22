@@ -1,19 +1,17 @@
 ## Current Status
-**Last Updated**: 2026-05-14
-**Last Agent Session**: Future-scope sweep — UX/A11y, Tech Debt, Security (3 commits, 2 new migrations)
+**Last Updated**: 2026-05-22
+**Last Agent Session**: Sidebar logo swap + category stock summary bar on Products page
 
 ## In Progress
 (No active work-in-progress.)
 
 ## Pending User Action
-- **Run `migrations/007_decimal_precision.sql`** in Supabase SQL Editor (widens quantity columns to DECIMAL(12,3) so liquid stock keeps gram precision).
-- **Run `migrations/008_storage_bucket_policy.sql`** in Supabase SQL Editor (locks down product-images bucket to 5MB + image MIME types only).
+(None — migrations 007 and 008 already executed.)
 
 ## Recently Completed
-- **Security batch**: session-expiry detection in `dbOp` (toast + reload), rate limit on `/api/create-user` (5/IP/min), migration 008 for storage bucket policy. Deferred: CSP (needs window.navigateTo refactor).
-- **Tech debt batch**: migration 007 (DECIMAL precision), `generateId` uses `crypto.randomUUID`, dashboard one-shot `Promise.all` batching, localStorage quota warning, lookup cache for categories + profiles. Deferred: TypeScript.
-- **UX/A11y batch**: skeleton loading helper + dashboard usage, skip-to-content link, sidebar buttons with `aria-current`, keyboard shortcuts (`?` help, `n` new, `/` search, `g X` navigation). Deferred: i18n.
-- **Earlier today**: Vitest setup with 9 demoRpc tests, env-gated Sentry integration, src/ scaffolding deleted, future-scope.md created, polish batch (CONFIG/roundCurrency/withSaving/focus-trap), main review batch (atomic RPCs, pagination, schema sync, security fixes).
+- **Sidebar logo**: Replaced emoji+text branding with company `logo.png` (3:1 aspect ratio, served from `public/`).
+- **Category stock summary**: Products page now shows a summary bar with total unit stock (pcs) and total liquid stock (kg) above the grid/table. Updates dynamically on category filter change. Client-requested feature.
+- **Previous session**: Future-scope sweep — UX/A11y (skeletons, keyboard shortcuts, a11y), Tech Debt (DECIMAL precision, dashboard batching, cache), Security (session expiry, rate limit, storage bucket policy).
 
 ## Next Steps (deferred)
 See **`knowledge-base/future-scope.md`** — items remaining there are now genuinely "later":

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-05-22 — Sidebar Logo + Category Stock Summary
+**What**: Replaced sidebar emoji+text branding with company logo PNG. Added stock summary bar to Products page.
+**Why**: Client requested total stock visibility per category without manual row-summing. Logo swap for proper branding.
+**Impact**: No migrations needed. Products page now shows aggregate unit stock (pcs) and liquid stock (kg) above the grid/table. Updates dynamically when category filter changes.
+**Files Changed**: `js/main.js`, `js/pages/products.js`, `css/styles.css`, `public/logo.png` (NEW), `public/logo.svg` (DELETED).
+**Tests**: No automated test added — UI-only change with no new business logic. Manually verified summary totals match individual product stocks.
+**Commits**: `d1df94b`, `5351598`, `8da72b3`, `7ea27e9`
+
+- Sidebar brand: replaced `🌿` emoji + "Narmada Essence" / "Inventory Manager" text with `<img src="/logo.png">`. Logo served from `public/` (Vite static asset).
+- Products page: `stockSummaryHtml()` computes unit vs liquid totals from filtered list, renders pill-shaped chips in a summary bar above grid/table views.
+- CSS: `.stock-summary-bar` + `.stock-summary-chip` styles — card-bg container with rounded pill chips.
+
+---
+
 ## 2026-05-14 — Future-Scope Sweep: UX/A11y, Tech Debt, Security
 **What**: Worked through the future-scope.md backlog in three categories, three commits.
 **Why**: Closing the long tail of items that don't individually justify a session but collectively shape the project's polish and operational readiness.
