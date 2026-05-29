@@ -24,6 +24,8 @@ Sales is the bill/invoice workflow for Narmada Essence. Sellers/admins can recor
 ## Known Gotchas
 - Production must have migration 009 applied before the deployed UI calls `update_sale`; otherwise Edit Bill will fail with an unknown RPC error.
 - Production delete errors before migration 009 are likely caused by `inventory_transactions.type` rejecting `sale_delete`.
+- Even after migration 009, app Delete Bill can fail for bills with linked `payment_followups` because the FK does not cascade and `delete_sale` does not delete/detach those followups yet.
+- Production `record_sale` in migration 006 needs stronger server-side validation; the demo RPC currently rejects some bad item shapes that the SQL RPC still trusts.
 - If the client wants a removed sale to restore stock, use the app's Delete Bill option. If they want sales data removed while stock stays as-is, use the one-off cleanup script pattern.
 - Live read-only QA on 2026-05-29 showed production Sales total as 18070 across 7 transactions; confirm whether cleanup should target exact 18000 rows or all current sales data.
 - The bill total is calculated from line items. Payment received cannot exceed the computed bill total.

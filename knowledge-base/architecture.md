@@ -140,3 +140,5 @@ Sales edits/deletes also add audit transaction types: `sale_edit_restore`, `sale
 **Demo mode parity**: `js/supabase.js` defines a `demoRpc` table mirroring each Postgres function, so the same client call (`db.rpc('record_sale', { ... })`) works in both modes without conditional code at call sites.
 
 **TOCTOU resolution**: `adjust_stock` is the only place `current_stock` is mutated. The `UPDATE ... WHERE id = ? AND current_stock + delta >= 0` pattern + transaction isolation eliminates the read-modify-write race that previously affected concurrent stock writes.
+
+> ⚠️ Current implementation gap (2026-05-29 review): Sales create/edit/delete and checkout approvals use RPCs, but some older stock flows still update `products.current_stock` directly from the browser. See `known-issues.md` ISSUE-005 before assuming the atomicity rule is fully enforced everywhere.

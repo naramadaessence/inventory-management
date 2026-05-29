@@ -1,16 +1,21 @@
 ## Current Status
 **Last Updated**: 2026-05-29
-**Last Agent Session**: Live verification showed exact-18000 cleanup did not remove the current 7 sales
-**Test Suite Status**: Pass - `npm test` passed 11/11 and `npm run build` passed on 2026-05-29; not re-run for this SQL handoff-only update
+**Last Agent Session**: Detailed data-consistency code review documented open risks in sales delete, stock flows, sales RPC validation, collections, and error handling
+**Test Suite Status**: Pass - `npm test` passed 11/11 and `npm run build` passed on 2026-05-29 during review
 
 ## In Progress
-(No active work-in-progress.)
+- [ ] Fix `delete_sale` / FK handling for `payment_followups.sale_id` before relying on app Delete Bill for bills with collection history.
+- [ ] Move remaining stock-mutating browser flows to transactional RPCs.
+- [ ] Harden production `record_sale` validation to match/beat demo RPC validation.
+- [ ] Replace collection followup + sale payment updates with one atomic RPC.
+- [ ] Wrap remaining direct `db.insert` / `db.update` admin handlers in `dbOp` or server-side RPCs.
 
 ## Pending User Action
 - Run `migrations/009_edit_bill_and_delete_fix.sql` in the live Supabase project before deploying the updated UI.
 - Run `supabase-scripts/clear-all-sales-data-preserve-stock.sql` after previewing its rows. User verified after `clear-18000-sales-data.sql` that live sales still show `sales_count = 7` and `sales_total = 18070`, so no exact-18000 bill was removed.
 
 ## Recently Completed
+- **Code review**: Ran full tests/build and reviewed sales edit/delete, cleanup scripts, stock-mutating flows, RLS/schema constraints, and error handling. Findings logged as ISSUE-004 through ISSUE-008 in `known-issues.md`.
 - **Edit Bill**: Admin Sales table now has visible Edit Bill buttons. Modal edits party/date/items/qty/price/payment/notes and saves via `update_sale`.
 - **Delete Bill fix**: Added migration 009 to allow `sale_delete` audit rows and recreate `delete_sale`.
 - **Sales cleanup**: Added one-off SQL scripts for exact-18000 cleanup and all-sales cleanup, both preserving product stock.

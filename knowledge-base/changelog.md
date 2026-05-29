@@ -1,5 +1,18 @@
 # Changelog
 
+## 2026-05-29 - Data Consistency Code Review
+**What**: Reviewed sales billing, stock mutation, cleanup, RLS/schema, collection, and admin-save consistency risks.
+**Why**: User requested a detailed review with emphasis on data consistency after Edit Bill/Delete Bill and sales cleanup work.
+**Impact**: No source code behavior changed; KB now records open risks that should be fixed before treating all stock/payment flows as fully atomic.
+**Files Changed**: `knowledge-base/known-issues.md`, `knowledge-base/active-context.md`, `knowledge-base/architecture.md`, `knowledge-base/sales-billing.md`, `knowledge-base/changelog.md`
+**Tests**: `npm test` passed 11/11; `npm run build` passed.
+**Commit**: Pending
+
+- Logged ISSUE-004 through ISSUE-008 covering delete-with-followups, direct stock writes, production `record_sale` validation, collection atomicity, and ignored Supabase error objects.
+- Marked architecture atomicity documentation as partially aspirational until all legacy direct stock flows move to RPCs.
+
+---
+
 ## 2026-05-29 - Edit Bill, Delete Bill Fix, and 18000 Sales Cleanup Script
 **What**: Added admin Edit Bill UI, bill delete actions, atomic `update_sale` RPC support, delete-sale schema fix, and one-off SQL cleanup scripts for sales-data reset.
 **Why**: Client requested editing bills after creation, deleting bills without errors, and clearing previous 18000 sales entries without changing stock/party data.
