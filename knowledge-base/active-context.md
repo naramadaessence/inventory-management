@@ -1,14 +1,14 @@
 ## Current Status
 **Last Updated**: 2026-05-29
-**Last Agent Session**: Client sales request - Edit Bill, Delete Bill fix, and 18000 sales cleanup script
-**Test Suite Status**: Pass - `npm test` passed 11/11 and `npm run build` passed on 2026-05-29
+**Last Agent Session**: User reported `clear-18000-sales-data.sql` ran successfully in live Supabase
+**Test Suite Status**: Pass - `npm test` passed 11/11 and `npm run build` passed on 2026-05-29; not re-run for this SQL handoff-only update
 
 ## In Progress
 (No active work-in-progress.)
 
 ## Pending User Action
 - Run `migrations/009_edit_bill_and_delete_fix.sql` in the live Supabase project before deploying the updated UI.
-- Review and run either `supabase-scripts/clear-18000-sales-data.sql` for exact 18000-total bills or `supabase-scripts/clear-all-sales-data-preserve-stock.sql` for all current sales data. Live read-only QA showed total sales as 18070 across 7 transactions.
+- Verify live sales totals after running `supabase-scripts/clear-18000-sales-data.sql`. That script only removes bills where `sales.total_amount = 18000`; if the client expects all current sales data to be cleared, run `supabase-scripts/clear-all-sales-data-preserve-stock.sql` after previewing its rows. Live read-only QA before cleanup showed total sales as 18070 across 7 transactions.
 
 ## Recently Completed
 - **Edit Bill**: Admin Sales table now has visible Edit Bill buttons. Modal edits party/date/items/qty/price/payment/notes and saves via `update_sale`.
