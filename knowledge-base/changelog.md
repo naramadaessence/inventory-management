@@ -1,5 +1,21 @@
 # Changelog
 
+## 2026-05-29 - Data Consistency Hardening
+**What**: Hardened bill edit/delete, sales validation, payment collections, stock workflows, RLS, schema constraints, demo parity, and tests.
+**Why**: The detailed review found remaining ways for stock, sales, sale_items, payment followups, and audit rows to diverge under bad input, partial failures, or concurrent admin actions.
+**Impact**: Requires running `migrations/010_data_consistency_hardening.sql` in live Supabase before relying on the deployed UI. Migration 010 supersedes 009 for consistency hardening but is safe to run after 009.
+**Files Changed**: `migrations/010_data_consistency_hardening.sql`, `supabase-schema.sql`, `js/supabase.js`, `js/pages/sales.js`, `js/pages/collections.js`, `js/pages/daily-operations.js`, `js/pages/products.js`, `js/pages/settings.js`, `js/pages/damage-loss.js`, `js/pages/rentals.js`, `js/pages/dashboard.js`, `tests/demo-rpc.test.js`, `knowledge-base/*`
+**Tests**: `npm test` passed 21/21; `npm run build` passed.
+**Commit**: Pending
+
+- Added hardened production RPCs for sales, bill edits/deletes, payment followups, stock intake, damage/loss, rentals, admin immediate checkout, and product stock adjustment.
+- Locked direct `sale_items` writes behind RPCs, detached `payment_followups` during sale deletion, and added non-negative/positive-value database guard constraints.
+- Moved remaining browser stock writes and non-atomic collection updates to transactional RPC calls.
+- Expanded demo RPC parity and Vitest coverage for invalid sale shapes, collection validation, linked-sale party mismatch rejection, stock intake, damage/loss, rentals, admin issue, stock adjustment, and followup-safe delete.
+- Documented the new stock workflow subsystem and updated architecture/decision notes.
+
+---
+
 ## 2026-05-29 - Data Consistency Code Review
 **What**: Reviewed sales billing, stock mutation, cleanup, RLS/schema, collection, and admin-save consistency risks.
 **Why**: User requested a detailed review with emphasis on data consistency after Edit Bill/Delete Bill and sales cleanup work.

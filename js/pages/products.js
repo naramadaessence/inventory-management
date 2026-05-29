@@ -304,16 +304,36 @@ function openProductModal(product, categories) {
 
     const record = {
       name, model_number: model || null, category_id: catId, type: cat?.type || 'unit',
-      unit_price: price, current_stock: stock, min_stock_threshold: threshold,
+      unit_price: price, min_stock_threshold: threshold,
       max_daily_consumption: maxDaily, expiry_date: expiry, is_active: true,
       image_url: imageUrl
     };
 
     if (isEdit) {
-      await db.update('products', product.id, record);
+      const updateResult = await dbOp(db.update('products', product.id, record), 'Failed to update product');
+      if (!updateResult) return;
+      if (stock !== Number(product.current_stock || 0)) {
+        const stockResult = await dbOp(db.rpc('set_product_stock', {
+          p_product_id: product.id,
+          p_new_stock: stock,
+          p_performer_id: auth.currentUser.id,
+          p_notes: 'Product edit stock adjustment',
+        }), 'Failed to update product stock');
+        if (!stockResult) return;
+      }
       showToast('Product updated', 'success');
     } else {
-      await db.insert('products', record);
+      const createResult = await dbOp(db.insert('products', { ...record, current_stock: 0 }), 'Failed to create product');
+      if (!createResult) return;
+      if (stock > 0) {
+        const stockResult = await dbOp(db.rpc('set_product_stock', {
+          p_product_id: createResult.data.id,
+          p_new_stock: stock,
+          p_performer_id: auth.currentUser.id,
+          p_notes: 'Initial product stock',
+        }), 'Failed to set initial stock');
+        if (!stockResult) return;
+      }
       showToast('Product created', 'success');
     }
     close();
@@ -325,7 +345,8 @@ function openProductModal(product, categories) {
   if (isEdit) {
     document.getElementById('prod-delete-btn').onclick = async () => {
       if (confirm(`Delete "${product.name}"? This cannot be undone.`)) {
-        await db.update('products', product.id, { is_active: false });
+        const result = await dbOp(db.update('products', product.id, { is_active: false }), 'Failed to deactivate product');
+        if (!result) return;
         showToast('Product deactivated', 'warning');
         close();
         const body = document.getElementById('page-body');

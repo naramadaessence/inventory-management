@@ -33,12 +33,14 @@
 
 ## Current Coverage
 - `tests/demo-rpc.test.js` covers:
-  - `record_sale` happy path, insufficient stock path, and multi-item sale stock deduction
+  - `record_sale` happy path, insufficient stock path, multi-item sale stock deduction, empty item rejection, negative quantity rejection, and overpayment rejection
   - `update_sale` edited bill replacement, stock rebalancing, audit rows, and insufficient-stock rollback
   - `adjust_stock` positive delta and negative-stock guard
   - `approve_issue` happy path and insufficient stock path
   - `approve_return`
-  - `delete_sale` stock restore, sale item cascade, and audit transaction logging
+  - `delete_sale` stock restore, sale item cascade, followup detachment, and audit transaction logging
+  - `record_payment_followup` atomic followup insert + sale payment update, invalid collection rejection, and linked-sale party mismatch rejection
+  - `record_stock_intake`, `record_damage_loss`, `create_rental`, `return_rental`, `admin_issue_stock`, and `set_product_stock` demo RPC parity
 
 ## Known Flaky Tests
 None - keep it that way.

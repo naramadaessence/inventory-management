@@ -364,34 +364,25 @@ export async function renderCollections(body, header) {
 
       if (!partyId) { showToast('Please select a party', 'error'); return; }
       if (!notes) { showToast('Please add visit notes', 'error'); return; }
+      const selectedSale = saleId ? sales.find(s => s.id == saleId) : null;
+      if (selectedSale) {
+        const balance = roundCurrency((selectedSale.total_amount || 0) - (selectedSale.amount_received || 0));
+        if (amount < 0) { showToast('Amount cannot be negative', 'error'); return; }
+        if (amount > balance) { showToast(`Cannot exceed balance of ${formatCurrency(balance)}`, 'error'); return; }
+        if (status === 'paid' && amount < balance) { showToast('Fully paid requires collecting the remaining balance', 'error'); return; }
+      }
 
-      const visitResult = await dbOp(db.insert('payment_followups', {
-        sale_id: saleId ? parseInt(saleId) : null,
-        party_id: parseInt(partyId),
-        visited_by: userId,
-        visit_date: new Date().toISOString(),
-        status_update: status,
-        payment_method: method || null,
-        amount_collected: amount,
-        expected_payment_date: dueDate,
-        notes
+      const visitResult = await dbOp(db.rpc('record_payment_followup', {
+        p_sale_id: saleId ? parseInt(saleId) : null,
+        p_party_id: parseInt(partyId),
+        p_status_update: status,
+        p_payment_method: method || null,
+        p_amount_collected: amount,
+        p_expected_payment_date: dueDate,
+        p_notes: notes,
+        p_visited_by: userId,
       }), 'Failed to log visit');
       if (!visitResult) return;
-
-      if (saleId) {
-        const sale = sales.find(s => s.id == saleId);
-        if (sale) {
-          const newReceived = roundCurrency((sale.amount_received || 0) + amount);
-          const newStatus = status === 'paid' || newReceived >= sale.total_amount ? 'paid'
-            : (status === 'partial' || newReceived > 0) ? 'partial' : 'pending';
-          await dbOp(db.update('sales', sale.id, {
-            payment_status: newStatus,
-            payment_method: method || sale.payment_method,
-            amount_received: newReceived,
-            expected_payment_date: dueDate || sale.expected_payment_date
-          }), 'Failed to update sale status');
-        }
-      }
 
       showToast(amount > 0 ? `Visit logged! ${formatCurrency(amount)} collected.` : 'Visit logged successfully', 'success');
       close();
@@ -471,23 +462,19 @@ export async function renderCollections(body, header) {
 
       if (amount < 0) { showToast('Amount cannot be negative', 'error'); return; }
       if (amount > balance) { showToast(`Cannot exceed balance of ${formatCurrency(balance)}`, 'error'); return; }
+      if (status === 'paid' && amount < balance) { showToast('Fully paid requires collecting the remaining balance', 'error'); return; }
 
-      const fuResult = await dbOp(db.insert('payment_followups', {
-        sale_id: sale.id, party_id: sale.party_id, visited_by: userId,
-        visit_date: new Date().toISOString(), status_update: status,
-        payment_method: method || null, amount_collected: amount,
-        expected_payment_date: expectedDate, notes
-      }), 'Failed to log followup');
+      const fuResult = await dbOp(db.rpc('record_payment_followup', {
+        p_sale_id: sale.id,
+        p_party_id: sale.party_id,
+        p_status_update: status,
+        p_payment_method: method || null,
+        p_amount_collected: amount,
+        p_expected_payment_date: expectedDate,
+        p_notes: notes,
+        p_visited_by: userId,
+      }), 'Failed to update payment');
       if (!fuResult) return;
-
-      const newReceived = roundCurrency((sale.amount_received || 0) + amount);
-      const newStatus = status === 'paid' || newReceived >= sale.total_amount ? 'paid'
-        : (status === 'partial' || newReceived > 0) ? 'partial' : 'pending';
-
-      await dbOp(db.update('sales', sale.id, {
-        payment_status: newStatus, payment_method: method || sale.payment_method,
-        amount_received: newReceived, expected_payment_date: expectedDate || sale.expected_payment_date
-      }), 'Failed to update sale');
 
       showToast(amount > 0 ? `${formatCurrency(amount)} collected!` : 'Payment status updated', 'success');
       close();

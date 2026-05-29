@@ -36,6 +36,18 @@
 - Demo mode required a parallel implementation — `demoRpc` table in `supabase.js` mirrors each Postgres function so the same call sites work in both modes.
 - Future RPC additions need the same dual implementation; documented in `migrations/006_atomic_operations.sql` header.
 
+## Decision: Business Mutations Through Intent-Specific RPCs
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: A data-consistency review found remaining browser-side multi-step writes for stock intake, damage/loss, rentals, admin immediate checkout, product stock adjustment, and collection followups. These flows could leave product stock, audit rows, followups, or sale payment totals out of sync under partial failures or concurrent use.
+**Decision**: Extend the migration 006 RPC pattern with migration 010. Browser code now calls intent-specific business RPCs (`record_stock_intake`, `record_damage_loss`, `create_rental`, `return_rental`, `admin_issue_stock`, `set_product_stock`, and `record_payment_followup`) instead of updating related tables directly. `adjust_stock` remains an internal primitive, direct `sale_items` writes are removed from authenticated RLS policies, and business RPC execution is explicitly revoked from `PUBLIC`/`anon` before being granted to `authenticated`.
+**Alternatives Considered**:
+- Keep direct browser writes and add more `dbOp` wrapping: rejected because it improves error reporting but does not make multi-table writes transactional.
+- Expose `adjust_stock` to the browser for all callers: rejected because business validation and audit semantics belong with each workflow.
+- Move everything to Edge Functions: rejected for current scale because Postgres RPCs are simpler, transactional, and already established in this project.
+**Consequences**: Data consistency is stronger and future stock/payment workflows have a clear pattern. Production must run migration 010 before deployed UI depends on the new RPCs. Demo mode must mirror every new RPC and tests must cover the public `db.rpc(...)` call shape.
+**Superseded By**:
+
 ## Decision: Server-Side Pagination for Aggregations
 **Date**: 2026-05-14
 **Status**: Accepted

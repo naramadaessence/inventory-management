@@ -20,6 +20,8 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 ├── vite.config.js            # Vite configuration
 ├── package.json
 ├── catalog_data.json          # Product seed data (48+ SKUs)
+├── migrations/                # Ordered Supabase SQL migrations
+├── supabase-scripts/          # Manual one-off operational SQL scripts
 ├── css/
 │   └── styles.css            # Full design system
 ├── js/
@@ -54,13 +56,14 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 | 6 | changelog.md | Chronological history of changes |
 | 7 | architecture.md | Data model, security, workflows |
 | 8 | future-scope.md | Explicitly deferred work and trigger conditions |
-| 9 | sales-billing.md | Sales, bills, sale_items, edit/delete behavior |
+| 9 | stock-workflows.md | Stock-changing RPCs, audit flow, concurrency rules |
+| 10 | sales-billing.md | Sales, bills, sale_items, edit/delete behavior |
 
 ## Critical Rules
 - **Demo mode**: App works fully without Supabase via localStorage. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` env vars for production. Production builds hard-fail if env vars are missing (no silent fallback).
 - **XSS prevention**: All user data rendered via `escapeHtml()` / `esc()` — never raw innerHTML with user strings. Toasts and modal titles use `textContent`; modal `content`/`footer` are HTML by design (escape inside).
-- **Stock consistency**: Every stock change (checkout, checkin, sale, rental, damage) creates a corresponding `inventory_transactions` entry for full audit trail.
-- **Atomic stock writes (since 2026-05-14)**: All stock-mutating flows go through Postgres RPCs (`record_sale`, `approve_issue`, `approve_return`, `delete_sale`, `adjust_stock`) — never directly UPDATE `current_stock` from the client.
+- **Stock consistency**: Every stock change (checkout, checkin, sale, rental, damage, stock intake, product adjustment) creates a corresponding `inventory_transactions` entry for full audit trail.
+- **Atomic stock writes**: All stock-mutating flows go through intent-specific Postgres RPCs (`record_sale`, `update_sale`, `delete_sale`, `approve_issue`, `approve_return`, `admin_issue_stock`, `record_stock_intake`, `record_damage_loss`, `create_rental`, `return_rental`, `set_product_stock`). Never update `products.current_stock` directly from browser code.
 - **Pagination**: Aggregations over high-volume tables use `db.fetchAllPaged()` to avoid silent 1000-row truncation. Display lists use `limit:N` or true server-side pagination.
 - **Role-based access**: Admin sees all pages. Seller only sees their own checkout history.
 - **Input validation**: All forms validate on client side. Supabase RLS enforces on server side.

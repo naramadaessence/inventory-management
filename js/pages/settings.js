@@ -75,7 +75,8 @@ async function renderUsersTab(container, body) {
   container.querySelectorAll('.toggle-user-btn').forEach(el => {
     el.addEventListener('click', async () => {
       const isActive = el.dataset.active === 'true';
-      await db.update('profiles', el.dataset.id, { is_active: !isActive });
+      const result = await dbOp(db.update('profiles', el.dataset.id, { is_active: !isActive }), 'Failed to update user status');
+      if (!result) return;
       showToast(`User ${isActive ? 'deactivated' : 'activated'}`, isActive ? 'warning' : 'success');
       renderUsersTab(container, body);
     });
@@ -127,7 +128,8 @@ function openUserModal(user, container, body) {
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('Valid email is required', 'error'); return; }
 
     if (isEdit) {
-      await db.update('profiles', user.id, { full_name: name, role, phone });
+      const result = await dbOp(db.update('profiles', user.id, { full_name: name, role, phone }), 'Failed to update user');
+      if (!result) return;
       showToast('User updated', 'success');
     } else {
       const password = document.getElementById('user-password').value;
@@ -135,7 +137,8 @@ function openUserModal(user, container, body) {
 
       if (db.isDemoMode) {
         // Demo mode: just insert into local store
-        await db.insert('profiles', { full_name: name, email, role, phone, is_active: true, id: 'user-' + Date.now() });
+        const result = await dbOp(db.insert('profiles', { full_name: name, email, role, phone, is_active: true, id: 'user-' + Date.now() }), 'Failed to create user');
+        if (!result) return;
         showToast('User created (demo mode)', 'success');
       } else {
         // Production: call serverless API
@@ -156,7 +159,8 @@ function openUserModal(user, container, body) {
           }
           // Update role if not default seller
           if (role === 'admin') {
-            await db.update('profiles', result.user_id, { role: 'admin' });
+            const roleResult = await dbOp(db.update('profiles', result.user_id, { role: 'admin' }), 'Failed to update user role');
+            if (!roleResult) return;
           }
           showToast('Seller account created successfully!', 'success');
         } catch (err) {
@@ -201,7 +205,8 @@ async function renderCategoriesTab(container, body) {
     document.getElementById('cat-save').onclick = (e) => withSaving(e.currentTarget, async () => {
       const name = document.getElementById('cat-name').value.trim();
       if (!name) { showToast('Name required', 'error'); return; }
-      await db.insert('categories', { name, type: document.getElementById('cat-type').value });
+      const result = await dbOp(db.insert('categories', { name, type: document.getElementById('cat-type').value }), 'Failed to add category');
+      if (!result) return;
       showToast('Category added', 'success');
       close();
       renderCategoriesTab(container, body);
@@ -223,7 +228,8 @@ async function renderCategoriesTab(container, body) {
       document.getElementById('cat-save').onclick = (e) => withSaving(e.currentTarget, async () => {
         const name = document.getElementById('cat-name').value.trim();
         if (!name) { showToast('Name required', 'error'); return; }
-        await db.update('categories', cat.id, { name, type: document.getElementById('cat-type').value });
+        const result = await dbOp(db.update('categories', cat.id, { name, type: document.getElementById('cat-type').value }), 'Failed to update category');
+        if (!result) return;
         showToast('Category updated', 'success');
         close();
         renderCategoriesTab(container, body);
@@ -298,16 +304,14 @@ async function renderStockIntakeTab(container, body) {
       const qty = parseFloat(document.getElementById('intake-qty').value);
       if (isNaN(qty) || qty <= 0) { showToast('Valid quantity required', 'error'); return; }
 
-      const prod = products.find(p => p.id === productId);
-      await db.insert('stock_intakes', {
-        product_id: productId,
-        quantity: qty,
-        supplier: document.getElementById('intake-supplier').value.trim(),
-        notes: document.getElementById('intake-notes').value.trim(),
-        received_by: auth.currentUser.id
-      });
-      await db.update('products', productId, { current_stock: (prod.current_stock || 0) + qty });
-      await db.insert('inventory_transactions', { product_id: productId, type: 'stock_in', quantity: qty, reference_type: 'stock_intake', performed_by: auth.currentUser.id, notes: 'Stock intake' });
+      const result = await dbOp(db.rpc('record_stock_intake', {
+        p_product_id: productId,
+        p_quantity: qty,
+        p_supplier: document.getElementById('intake-supplier').value.trim(),
+        p_notes: document.getElementById('intake-notes').value.trim(),
+        p_received_by: auth.currentUser.id,
+      }), 'Failed to add stock');
+      if (!result) return;
 
       showToast('Stock added successfully', 'success');
       close();

@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatDateTime, formatDate, formatWeight, formatStock, showToast, createModal, daysUntil, esc, dbOp, roundCurrency, withSaving } from '../utils/helpers.js';
+import { formatCurrency, formatDate, formatWeight, formatStock, showToast, createModal, daysUntil, esc, dbOp, roundCurrency, withSaving } from '../utils/helpers.js';
 
 // Helper: summarize sale items for table display
 function itemsSummary(items, prodMap) {
@@ -302,8 +302,8 @@ function openSaleModal(parties, products, body, header) {
     const pid = parseInt(po.value), qty = parseFloat(document.getElementById('add-item-qty').value), price = parseFloat(document.getElementById('add-item-price').value);
     if (!pid || isNaN(qty) || qty <= 0 || isNaN(price) || price < 0) { showToast('Invalid product, quantity or price', 'error'); return; }
     const ex = lineItems.find(i => i.product_id === pid && i.unit_price === price);
-    if (ex) { ex.quantity += qty; ex.line_total = ex.quantity * ex.unit_price; }
-    else { const pr = products.find(p => p.id === pid); lineItems.push({ product_id: pid, quantity: qty, unit_price: price, line_total: qty * price, prodName: pr?.name || '?', prodType: pr?.type || 'unit' }); }
+    if (ex) { ex.quantity += qty; ex.line_total = roundCurrency(ex.quantity * ex.unit_price); }
+    else { const pr = products.find(p => p.id === pid); lineItems.push({ product_id: pid, quantity: qty, unit_price: price, line_total: roundCurrency(qty * price), prodName: pr?.name || '?', prodType: pr?.type || 'unit' }); }
     document.getElementById('add-item-qty').value = 1; renderItems();
   });
 
@@ -319,6 +319,21 @@ function openSaleModal(parties, products, body, header) {
     const calcTotal = lineItems.reduce((s, i) => s + i.line_total, 0);
     const grandTotal = roundCurrency(isAmcSale ? selectedPartyAmcRate : calcTotal);
     const amtRcvd = roundCurrency(payStatus === 'paid' ? grandTotal : parseFloat(document.getElementById('sale-received').value) || 0);
+    if (amtRcvd > grandTotal) { showToast('Amount received cannot be greater than bill total', 'error'); return; }
+
+    const rpcItems = (() => {
+      if (!isAmcSale || calcTotal <= 0) {
+        return lineItems.map(i => ({ product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price }));
+      }
+      let remaining = grandTotal;
+      return lineItems.map((i, idx) => {
+        const lineTarget = idx === lineItems.length - 1
+          ? remaining
+          : roundCurrency((i.line_total / calcTotal) * grandTotal);
+        remaining = roundCurrency(remaining - lineTarget);
+        return { product_id: i.product_id, quantity: i.quantity, unit_price: lineTarget / i.quantity };
+      });
+    })();
 
     // Client-side stock pre-check for fast UX. The RPC also enforces it
     // atomically, so this is just to fail before sending the request.
@@ -333,7 +348,7 @@ function openSaleModal(parties, products, body, header) {
     // inventory_transactions in one transaction (Postgres) or one demoRpc call.
     const result = await dbOp(db.rpc('record_sale', {
       p_party_id: partyId,
-      p_items: lineItems.map(i => ({ product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price })),
+      p_items: rpcItems,
       p_payment_status: payStatus,
       p_payment_method: payMethod,
       p_amount_received: amtRcvd,
@@ -346,90 +361,6 @@ function openSaleModal(parties, products, body, header) {
 
     showToast(`Sale recorded — ${lineItems.length} item${lineItems.length > 1 ? 's' : ''}`, 'success');
     close(); renderSales(body, header);
-  });
-}
-
-// ============================================
-// EDIT SALE MODAL (admin only, reads from sale_items)
-// ============================================
-function openLegacyEditSaleModal(sale, saleItems, parties, products, body, header) {
-  const party = parties.find(p => p.id === sale.party_id);
-  const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
-
-  const itemsHtml = saleItems.length > 0 ? `<table class="data-table" style="font-size:0.85rem;margin-bottom:12px;"><thead><tr><th>Product</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead><tbody>${saleItems.map(si => {
-    const p = prodMap[si.product_id];
-    return `<tr><td>${esc(p?.name || '?')}</td><td>${p?.type === 'liquid' ? formatWeight(si.quantity) : si.quantity + ' pcs'}</td><td>${formatCurrency(si.unit_price)}</td><td style="font-weight:600;color:var(--green);">${formatCurrency(si.line_total)}</td></tr>`;
-  }).join('')}</tbody></table>` : '<p style="color:var(--text-muted);">No items (legacy sale)</p>';
-
-  const content = `
-    <div style="background:var(--bg-secondary);border-radius:8px;padding:12px 16px;margin-bottom:16px;">
-      <strong>${esc(party?.name || 'Walk-in')}</strong>
-      <div style="font-size:0.8rem;color:var(--text-muted);">Sale Date: ${formatDate(sale.sale_date || sale.created_at)} · Total: ${formatCurrency(sale.total_amount)}</div>
-    </div>
-    <div style="margin-bottom:16px;"><strong style="font-size:0.85rem;">Items</strong>${itemsHtml}</div>
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Sale Date *</label><input class="form-input" type="date" id="edit-sale-date" value="${sale.sale_date || ''}" required /></div>
-      <div class="form-group"><label class="form-label">Grand Total (₹)</label><input class="form-input" type="number" id="edit-sale-total" value="${sale.total_amount}" min="0" step="0.01" /></div>
-    </div>
-    <div class="form-row">
-      <div class="form-group"><label class="form-label">Payment Status</label>
-        <select class="form-select" id="edit-sale-payment">
-          <option value="paid" ${sale.payment_status === 'paid' ? 'selected' : ''}>Paid</option>
-          <option value="partial" ${sale.payment_status === 'partial' ? 'selected' : ''}>Partial</option>
-          <option value="pending" ${sale.payment_status === 'pending' ? 'selected' : ''}>Pending</option>
-        </select>
-      </div>
-      <div class="form-group"><label class="form-label">Payment Method</label>
-        <select class="form-select" id="edit-sale-method">
-          <option value="">— Select —</option>
-          <option value="cash" ${sale.payment_method === 'cash' ? 'selected' : ''}>Cash</option>
-          <option value="upi" ${sale.payment_method === 'upi' ? 'selected' : ''}>UPI / Online</option>
-          <option value="bank_transfer" ${sale.payment_method === 'bank_transfer' ? 'selected' : ''}>Bank Transfer</option>
-          <option value="cheque" ${sale.payment_method === 'cheque' ? 'selected' : ''}>Cheque</option>
-        </select>
-      </div>
-    </div>
-    <div class="form-row" id="edit-pending-fields" style="display:${sale.payment_status === 'pending' || sale.payment_status === 'partial' ? 'flex' : 'none'};">
-      <div class="form-group"><label class="form-label">Amount Received (₹)</label><input class="form-input" type="number" id="edit-sale-received" value="${sale.amount_received || 0}" min="0" step="0.01" /></div>
-      <div class="form-group"><label class="form-label">Expected Payment Date</label><input class="form-input" type="date" id="edit-sale-expected" value="${sale.expected_payment_date || ''}" /></div>
-    </div>
-    <div class="form-group"><label class="form-label">Notes</label><textarea class="form-textarea" id="edit-sale-notes" maxlength="500">${esc(sale.notes || '')}</textarea></div>
-  `;
-
-  const footer = `<button class="btn btn-danger" id="edit-sale-delete"><i class="fas fa-trash"></i> Delete</button><div style="flex:1;"></div><button class="btn btn-secondary" id="edit-sale-cancel">Cancel</button><button class="btn btn-primary" id="edit-sale-save"><i class="fas fa-save"></i> Update Sale</button>`;
-  const { close } = createModal('Edit Sale', content, { footer });
-
-  document.getElementById('edit-sale-payment').addEventListener('change', (e) => {
-    document.getElementById('edit-pending-fields').style.display = (e.target.value === 'pending' || e.target.value === 'partial') ? 'flex' : 'none';
-  });
-  document.getElementById('edit-sale-cancel').onclick = close;
-
-  document.getElementById('edit-sale-save').onclick = (e) => withSaving(e.currentTarget, async () => {
-    const totalAmount = roundCurrency(parseFloat(document.getElementById('edit-sale-total').value) || 0);
-    const paymentStatus = document.getElementById('edit-sale-payment').value;
-    const paymentMethod = document.getElementById('edit-sale-method').value || null;
-    const amountReceived = roundCurrency(paymentStatus === 'paid' ? totalAmount : parseFloat(document.getElementById('edit-sale-received').value) || 0);
-
-    await dbOp(db.update('sales', sale.id, {
-      total_amount: totalAmount, payment_status: paymentStatus, payment_method: paymentMethod,
-      amount_received: amountReceived,
-      expected_payment_date: document.getElementById('edit-sale-expected')?.value || null,
-      sale_date: document.getElementById('edit-sale-date').value,
-      notes: document.getElementById('edit-sale-notes').value.trim()
-    }), 'Failed to update sale');
-    showToast('Sale updated', 'success'); close(); renderSales(body, header);
-  });
-
-  document.getElementById('edit-sale-delete').onclick = (e) => withSaving(e.currentTarget, async () => {
-    if (!confirm('Delete this sale? Stock will be restored for all items.')) return;
-    // Atomic delete_sale: restores stock for every line item, logs txns,
-    // cascades sale_items, deletes the sale row — all in one transaction.
-    const result = await dbOp(db.rpc('delete_sale', {
-      p_sale_id: sale.id,
-      p_performer_id: auth.currentUser.id,
-    }), 'Failed to delete sale');
-    if (!result) return;
-    showToast('Sale deleted — stock restored', 'success'); close(); renderSales(body, header);
   });
 }
 

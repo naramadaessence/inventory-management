@@ -1,58 +1,46 @@
 ## Current Status
 **Last Updated**: 2026-05-29
-**Last Agent Session**: Detailed data-consistency code review documented open risks in sales delete, stock flows, sales RPC validation, collections, and error handling
-**Test Suite Status**: Pass - `npm test` passed 11/11 and `npm run build` passed on 2026-05-29 during review
+**Last Agent Session**: Implemented the data-consistency hardening found during review: bill delete followup handling, stronger sale validation, RPC-backed stock workflows, atomic payment collections, tighter RLS/schema constraints, demo parity, and expanded tests.
+**Test Suite Status**: Pass - `npm test` passed 21/21 and `npm run build` passed on 2026-05-29 after the hardening changes.
 
 ## In Progress
-- [ ] Fix `delete_sale` / FK handling for `payment_followups.sale_id` before relying on app Delete Bill for bills with collection history.
-- [ ] Move remaining stock-mutating browser flows to transactional RPCs.
-- [ ] Harden production `record_sale` validation to match/beat demo RPC validation.
-- [ ] Replace collection followup + sale payment updates with one atomic RPC.
-- [ ] Wrap remaining direct `db.insert` / `db.update` admin handlers in `dbOp` or server-side RPCs.
+- None.
 
 ## Pending User Action
-- Run `migrations/009_edit_bill_and_delete_fix.sql` in the live Supabase project before deploying the updated UI.
-- Run `supabase-scripts/clear-all-sales-data-preserve-stock.sql` after previewing its rows. User verified after `clear-18000-sales-data.sql` that live sales still show `sales_count = 7` and `sales_total = 18070`, so no exact-18000 bill was removed.
+- Run `migrations/010_data_consistency_hardening.sql` in the live Supabase project before relying on the deployed UI. If migration 009 was already run, still run 010; it supersedes 009 for the full consistency fix.
+- If live Sales still shows the 7 rows totaling 18070 and the client wants all current sales data removed while preserving stock/party data, run `supabase-scripts/clear-all-sales-data-preserve-stock.sql` after previewing the rows.
+- After Vercel deploys the pushed commit and migration 010 is applied, smoke test production with admin login: create a small sale, edit it, delete it, and confirm totals/stock behave as expected.
 
 ## Recently Completed
-- **Code review**: Ran full tests/build and reviewed sales edit/delete, cleanup scripts, stock-mutating flows, RLS/schema constraints, and error handling. Findings logged as ISSUE-004 through ISSUE-008 in `known-issues.md`.
-- **Edit Bill**: Admin Sales table now has visible Edit Bill buttons. Modal edits party/date/items/qty/price/payment/notes and saves via `update_sale`.
-- **Delete Bill fix**: Added migration 009 to allow `sale_delete` audit rows and recreate `delete_sale`.
-- **Sales cleanup**: Added one-off SQL scripts for exact-18000 cleanup and all-sales cleanup, both preserving product stock.
-- **Knowledge-base review**: Read README, active context, decisions, known issues, architecture, future scope, and changelog to establish current project understanding.
-- **Testing documentation**: Added `knowledge-base/testing.md`, linked it from README, and recorded the Vitest + happy-dom testing decision.
-- **Known issue documentation**: Logged demo-mode `record_sale` rollback caveat as ISSUE-002; production Supabase RPC remains transactional.
-- **Sidebar logo**: Replaced emoji+text branding with company `logo.png` (3:1 aspect ratio, served from `public/`).
-- **Category stock summary**: Products page now shows a summary bar with total unit stock (pcs) and total liquid stock (kg) above the grid/table. Updates dynamically on category filter change. Client-requested feature.
-- **Previous session**: Future-scope sweep — UX/A11y (skeletons, keyboard shortcuts, a11y), Tech Debt (DECIMAL precision, dashboard batching, cache), Security (session expiry, rate limit, storage bucket policy).
+- **Data consistency hardening**: Added migration 010 with validated sales/edit/delete RPCs, followup-safe delete, business RPCs for stock workflows, payment followup atomicity, RLS tightening, and data guard constraints.
+- **UI stock-flow cleanup**: Moved product stock adjustment, stock intake, damage/loss, rentals, returns, and admin immediate checkout away from direct browser stock writes.
+- **Collections atomicity**: Replaced browser-side followup insert plus sale update with `record_payment_followup`.
+- **Error handling**: Wrapped remaining admin save handlers in `dbOp` or RPC calls before showing success.
+- **AMC fixed-rate bills**: Sales now sends adjusted line prices so the database-computed sale total matches the AMC fixed total.
+- **Tests**: Expanded `tests/demo-rpc.test.js` from 11 to 21 tests covering invalid sales, followup-safe delete, payment followups, payment/sale party mismatch rejection, stock intake, damage/loss, rentals, admin issue, and stock adjustment.
+- **Knowledge base**: Added `stock-workflows.md` and updated architecture, sales-billing, testing, decisions, known issues, README, changelog, and this active context.
 
-## Next Steps (deferred)
-See **`knowledge-base/future-scope.md`** — items remaining there are now genuinely "later":
-- Setup runbook (`SETUP.md`)
-- Mobile UX pass on real Android
-- Invoice / PDF generation + GST compliance
-- Aggregation RPCs (when tables cross ~10k rows)
-- Backup strategy doc
-- Offline support
-- Data export
-- TypeScript migration
-- i18n (Hindi / Gujarati)
-- Content Security Policy (needs event-delegation refactor first)
+## Next Steps
+1. Apply migration 010 in live Supabase.
+2. Re-run the sales cleanup script if the client still wants all old sales removed.
+3. Smoke test the deployed app after Vercel finishes deploying the pushed commit.
 
 ## Do Not Touch
-(Open territory — no active feature branches or in-progress edits.)
+- Do not manually edit `products.current_stock` from browser code; use intent-specific RPCs.
+- Do not re-enable direct authenticated writes to `sale_items`; sale item changes belong in `record_sale` and `update_sale`.
+- Do not run sales cleanup scripts without previewing the rows first.
 
 ## House Style Reminders (for future agents)
 - New save handlers: use `withSaving(e.currentTarget, async () => { ... })` from `helpers.js`.
-- Currency math: round at DB-write boundaries via `roundCurrency()`. Display via `formatCurrency()` (already 2dp).
-- Stock mutations: never `db.update('products', ..., { current_stock: ... })` directly — use `db.rpc('adjust_stock', ...)` or one of the higher-level RPCs.
-- Aggregations over high-volume tables: use `db.fetchAllPaged()` (or query a Postgres aggregate when one exists).
+- Currency math: round at DB-write boundaries via `roundCurrency()`. Display via `formatCurrency()`.
+- Stock mutations: never `db.update('products', ..., { current_stock: ... })` directly. Use one of the higher-level RPCs documented in `stock-workflows.md`.
+- Aggregations over high-volume tables: use `db.fetchAllPaged()` or a Postgres aggregate RPC when one exists.
 - Magic thresholds: extend `CONFIG` in `helpers.js` rather than inlining.
-- User-derived strings in toasts/modal titles: use `textContent` (the helpers handle this for you).
-- New business logic in demo mode parity: when adding a new RPC to migration 006, mirror it in `demoRpc` and add a test in `tests/demo-rpc.test.js`.
-- Errors that should reach the operator: surface via `dbOp` (auto-routes to Sentry) or call `reportError` directly.
-- Stable lookups (categories, profiles): `db.getAll(table)` is cached for 60s; mutating writes auto-invalidate. Don't pass options if you want the cache.
+- User-derived strings in toasts/modal titles: use `textContent`; helper utilities handle this.
+- New business logic in demo mode parity: mirror production RPCs in `demoRpc` and add tests in `tests/demo-rpc.test.js`.
+- Errors that should reach the operator: surface via `dbOp` or call `reportError` directly.
+- Stable lookups (categories, profiles): `db.getAll(table)` is cached for 60s; mutating writes auto-invalidate. Do not pass options if you want the cache.
 - Deferred items: edit `knowledge-base/future-scope.md` rather than letting them drift.
-- New page render: show `skeletonHTML(...)` while data loads — no blank screens.
-- New keyboard shortcut: extend `js/keyboard-shortcuts.js` (don't add ad-hoc keydown listeners).
+- New page render: show `skeletonHTML(...)` while data loads.
+- New keyboard shortcut: extend `js/keyboard-shortcuts.js`; avoid ad-hoc keydown listeners.
 - Sales bill edits: use `db.rpc('update_sale', ...)`; do not update `sales`, `sale_items`, or `products.current_stock` directly from the client.

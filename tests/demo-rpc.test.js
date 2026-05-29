@@ -101,6 +101,45 @@ describe('demoRpc.record_sale', () => {
     expect(items).toHaveLength(0);
   });
 
+  it('rejects invalid item and payment shapes before writing rows', async () => {
+    const invalidCalls = [
+      {
+        p_items: [],
+        p_payment_status: 'paid',
+        p_amount_received: 0,
+      },
+      {
+        p_items: [{ product_id: 7, quantity: -1, unit_price: 450 }],
+        p_payment_status: 'paid',
+        p_amount_received: 0,
+      },
+      {
+        p_items: [{ product_id: 7, quantity: 1, unit_price: 450 }],
+        p_payment_status: 'partial',
+        p_amount_received: 500,
+      },
+    ];
+
+    for (const call of invalidCalls) {
+      const { error } = await db.rpc('record_sale', {
+        p_party_id: 1,
+        p_payment_method: 'cash',
+        p_expected_payment_date: null,
+        p_sale_date: '2026-05-14',
+        p_notes: '',
+        p_recorded_by: 'admin-1',
+        ...call,
+      });
+      expect(error).not.toBeNull();
+    }
+
+    const { data: sales } = await db.getAll('sales');
+    const { data: items } = await db.getAll('sale_items');
+    expect(sales).toHaveLength(0);
+    expect(items).toHaveLength(0);
+    expect((await getProduct(7)).current_stock).toBe(40);
+  });
+
   it('multi-item sale deducts each line item from stock', async () => {
     const { data: saleId } = await db.rpc('record_sale', {
       p_party_id: 1,
@@ -406,5 +445,250 @@ describe('demoRpc.delete_sale', () => {
     const restoreTxns = allTxns.filter(t => t.type === 'sale_delete');
     expect(restoreTxns).toHaveLength(2);
     expect(restoreTxns.every(t => t.quantity > 0)).toBe(true);
+  });
+
+  it('detaches payment followups before deleting the sale', async () => {
+    const { data: saleId } = await db.rpc('record_sale', {
+      p_party_id: 1,
+      p_items: [{ product_id: 7, quantity: 2, unit_price: 450 }],
+      p_payment_status: 'partial',
+      p_payment_method: 'cash',
+      p_amount_received: 100,
+      p_expected_payment_date: '2026-05-20',
+      p_sale_date: '2026-05-14',
+      p_notes: '',
+      p_recorded_by: 'admin-1',
+    });
+
+    const { error: followupError } = await db.rpc('record_payment_followup', {
+      p_sale_id: saleId,
+      p_party_id: 1,
+      p_status_update: 'partial',
+      p_payment_method: 'cash',
+      p_amount_collected: 200,
+      p_expected_payment_date: '2026-05-21',
+      p_notes: 'partial collection',
+      p_visited_by: 'admin-1',
+    });
+    expect(followupError).toBeNull();
+
+    const { error } = await db.rpc('delete_sale', {
+      p_sale_id: saleId,
+      p_performer_id: 'admin-1',
+    });
+    expect(error).toBeNull();
+
+    const { data: followups } = await db.getAll('payment_followups');
+    expect(followups).toHaveLength(1);
+    expect(followups[0].sale_id).toBeNull();
+  });
+});
+
+describe('demoRpc.record_payment_followup', () => {
+  beforeEach(freshStore);
+
+  it('updates sale payment fields and inserts the followup atomically', async () => {
+    const { data: saleId } = await db.rpc('record_sale', {
+      p_party_id: 1,
+      p_items: [{ product_id: 7, quantity: 2, unit_price: 450 }],
+      p_payment_status: 'pending',
+      p_payment_method: null,
+      p_amount_received: 0,
+      p_expected_payment_date: '2026-05-20',
+      p_sale_date: '2026-05-14',
+      p_notes: '',
+      p_recorded_by: 'seller-1',
+    });
+
+    const { error } = await db.rpc('record_payment_followup', {
+      p_sale_id: saleId,
+      p_party_id: 1,
+      p_status_update: 'partial',
+      p_payment_method: 'upi',
+      p_amount_collected: 300,
+      p_expected_payment_date: '2026-05-25',
+      p_notes: 'collected part payment',
+      p_visited_by: 'seller-1',
+    });
+    expect(error).toBeNull();
+
+    const { data: sale } = await db.getById('sales', saleId);
+    expect(sale.amount_received).toBe(300);
+    expect(sale.payment_status).toBe('partial');
+    expect(sale.payment_method).toBe('upi');
+
+    const { data: followups } = await db.getAll('payment_followups');
+    expect(followups).toHaveLength(1);
+    expect(followups[0].amount_collected).toBe(300);
+  });
+
+  it('rejects over-collection and paid status without full balance', async () => {
+    const { data: saleId } = await db.rpc('record_sale', {
+      p_party_id: 1,
+      p_items: [{ product_id: 7, quantity: 1, unit_price: 450 }],
+      p_payment_status: 'pending',
+      p_payment_method: null,
+      p_amount_received: 0,
+      p_expected_payment_date: null,
+      p_sale_date: '2026-05-14',
+      p_notes: '',
+      p_recorded_by: 'seller-1',
+    });
+
+    const overpay = await db.rpc('record_payment_followup', {
+      p_sale_id: saleId,
+      p_party_id: 1,
+      p_status_update: 'partial',
+      p_payment_method: 'cash',
+      p_amount_collected: 500,
+      p_expected_payment_date: null,
+      p_notes: 'too much',
+      p_visited_by: 'seller-1',
+    });
+    expect(overpay.error).not.toBeNull();
+
+    const fakePaid = await db.rpc('record_payment_followup', {
+      p_sale_id: saleId,
+      p_party_id: 1,
+      p_status_update: 'paid',
+      p_payment_method: 'cash',
+      p_amount_collected: 100,
+      p_expected_payment_date: null,
+      p_notes: 'not full',
+      p_visited_by: 'seller-1',
+    });
+    expect(fakePaid.error).not.toBeNull();
+
+    const { data: sale } = await db.getById('sales', saleId);
+    const { data: followups } = await db.getAll('payment_followups');
+    expect(sale.amount_received).toBe(0);
+    expect(sale.payment_status).toBe('pending');
+    expect(followups).toHaveLength(0);
+  });
+
+  it('rejects a followup party that does not match the linked sale party', async () => {
+    const { data: saleId } = await db.rpc('record_sale', {
+      p_party_id: 1,
+      p_items: [{ product_id: 7, quantity: 1, unit_price: 450 }],
+      p_payment_status: 'pending',
+      p_payment_method: null,
+      p_amount_received: 0,
+      p_expected_payment_date: null,
+      p_sale_date: '2026-05-14',
+      p_notes: '',
+      p_recorded_by: 'seller-1',
+    });
+
+    const mismatch = await db.rpc('record_payment_followup', {
+      p_sale_id: saleId,
+      p_party_id: 2,
+      p_status_update: 'partial',
+      p_payment_method: 'cash',
+      p_amount_collected: 100,
+      p_expected_payment_date: null,
+      p_notes: 'wrong party',
+      p_visited_by: 'seller-1',
+    });
+    expect(mismatch.error).not.toBeNull();
+
+    const { data: sale } = await db.getById('sales', saleId);
+    const { data: followups } = await db.getAll('payment_followups');
+    expect(sale.amount_received).toBe(0);
+    expect(followups).toHaveLength(0);
+  });
+});
+
+describe('demoRpc stock workflow RPCs', () => {
+  beforeEach(freshStore);
+
+  it('records stock intake with a matching stock_in transaction', async () => {
+    const { error } = await db.rpc('record_stock_intake', {
+      p_product_id: 7,
+      p_quantity: 5,
+      p_supplier: 'test supplier',
+      p_notes: 'new stock',
+      p_received_by: 'admin-1',
+    });
+    expect(error).toBeNull();
+    expect((await getProduct(7)).current_stock).toBe(45);
+    const txns = await getStockChangeTxns(7);
+    expect(txns.some(t => t.type === 'stock_in' && t.quantity === 5)).toBe(true);
+  });
+
+  it('rejects damage/loss that exceeds stock without persisting report or transaction', async () => {
+    const { error } = await db.rpc('record_damage_loss', {
+      p_product_id: 10,
+      p_damage_type: 'lost',
+      p_quantity: 10,
+      p_reason: 'bad count',
+      p_report_date: '2026-05-14',
+      p_reported_by: 'admin-1',
+    });
+    expect(error).not.toBeNull();
+    expect((await getProduct(10)).current_stock).toBe(3);
+    const { data: reports } = await db.getAll('damage_reports');
+    expect(reports).toHaveLength(0);
+    const txns = await getStockChangeTxns(10);
+    expect(txns).toHaveLength(0);
+  });
+
+  it('creates and returns rentals through atomic stock/audit updates', async () => {
+    const { data: rentalId, error } = await db.rpc('create_rental', {
+      p_product_id: 1,
+      p_party_id: 1,
+      p_quantity: 2,
+      p_rental_date: '2026-05-14',
+      p_expected_return_date: '2026-05-20',
+      p_rent_amount: 1000,
+      p_notes: 'test rental',
+      p_performer_id: 'admin-1',
+    });
+    expect(error).toBeNull();
+    expect((await getProduct(1)).current_stock).toBe(23);
+
+    const returned = await db.rpc('return_rental', {
+      p_rental_id: rentalId,
+      p_performer_id: 'admin-1',
+    });
+    expect(returned.error).toBeNull();
+    expect((await getProduct(1)).current_stock).toBe(25);
+
+    const txns = await getStockChangeTxns(1);
+    expect(txns.map(t => t.type)).toEqual(['rental_out', 'rental_return']);
+  });
+
+  it('issues admin checkout stock in one call', async () => {
+    const { data: sessionId, error } = await db.rpc('admin_issue_stock', {
+      p_seller_id: 'seller-1',
+      p_items: [
+        { product_id: 7, quantity: 2 },
+        { product_id: 8, quantity: 1 },
+      ],
+      p_approver_id: 'admin-1',
+    });
+    expect(error).toBeNull();
+    expect(sessionId).toBeGreaterThan(0);
+    expect((await getProduct(7)).current_stock).toBe(38);
+    expect((await getProduct(8)).current_stock).toBe(34);
+
+    const { data: sessions } = await db.getAll('checkout_sessions');
+    const { data: items } = await db.getAll('checkout_items');
+    expect(sessions[0].status).toBe('checked_out');
+    expect(items.filter(i => i.session_id === sessionId)).toHaveLength(2);
+  });
+
+  it('sets product stock via adjustment transaction', async () => {
+    const { error } = await db.rpc('set_product_stock', {
+      p_product_id: 7,
+      p_new_stock: 42,
+      p_performer_id: 'admin-1',
+      p_notes: 'count correction',
+    });
+    expect(error).toBeNull();
+    expect((await getProduct(7)).current_stock).toBe(42);
+    const txns = await getStockChangeTxns(7);
+    expect(txns).toHaveLength(1);
+    expect(txns[0].type).toBe('adjustment');
+    expect(txns[0].quantity).toBe(2);
   });
 });

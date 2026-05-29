@@ -31,7 +31,7 @@ CREATE TABLE products (
   type TEXT NOT NULL CHECK (type IN ('unit', 'liquid')),
   model_number TEXT,
   unit_price DECIMAL(10,2) NOT NULL DEFAULT 0,
-  current_stock DECIMAL(12,3) NOT NULL DEFAULT 0,
+  current_stock DECIMAL(12,3) NOT NULL DEFAULT 0 CHECK (current_stock >= 0),
   min_stock_threshold DECIMAL(12,3) NOT NULL DEFAULT 10,
   max_daily_consumption DECIMAL(12,3),
   expiry_date DATE,
@@ -99,10 +99,11 @@ CREATE TABLE checkout_items (
 CREATE TABLE sales (
   id SERIAL PRIMARY KEY,
   party_id INTEGER REFERENCES parties(id),
-  total_amount DECIMAL(12,2) NOT NULL,
+  total_amount DECIMAL(12,2) NOT NULL CHECK (total_amount >= 0),
   payment_status TEXT DEFAULT 'pending' CHECK (payment_status IN ('paid', 'partial', 'pending')),
   payment_method TEXT CHECK (payment_method IN ('cash', 'upi', 'bank_transfer', 'cheque')),
-  amount_received DECIMAL(12,2) DEFAULT 0,
+  amount_received DECIMAL(12,2) DEFAULT 0 CHECK (amount_received >= 0),
+  CONSTRAINT sales_amount_received_lte_total CHECK (amount_received <= total_amount),
   expected_payment_date DATE,
   sale_date DATE NOT NULL DEFAULT CURRENT_DATE,
   notes TEXT,
@@ -115,9 +116,9 @@ CREATE TABLE sale_items (
   id SERIAL PRIMARY KEY,
   sale_id INTEGER NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
   product_id INTEGER NOT NULL REFERENCES products(id),
-  quantity DECIMAL NOT NULL,
-  unit_price DECIMAL NOT NULL,
-  line_total DECIMAL NOT NULL,
+  quantity DECIMAL NOT NULL CHECK (quantity > 0),
+  unit_price DECIMAL NOT NULL CHECK (unit_price >= 0),
+  line_total DECIMAL NOT NULL CHECK (line_total >= 0),
   created_at TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items(sale_id);
@@ -143,7 +144,7 @@ CREATE TABLE damage_reports (
   id SERIAL PRIMARY KEY,
   product_id INTEGER REFERENCES products(id),
   damage_type TEXT DEFAULT 'damaged' CHECK (damage_type IN ('damaged', 'lost', 'expired')),
-  quantity DECIMAL(12,3) NOT NULL,
+  quantity DECIMAL(12,3) NOT NULL CHECK (quantity > 0),
   reason TEXT,
   report_date DATE DEFAULT CURRENT_DATE,
   reported_by UUID REFERENCES profiles(id),
@@ -155,7 +156,7 @@ CREATE TABLE inventory_transactions (
   id SERIAL PRIMARY KEY,
   product_id INTEGER REFERENCES products(id),
   type TEXT NOT NULL CHECK (type IN ('checkout','checkin','sale','sale_edit','sale_edit_restore','sale_delete','rental_out','rental_return','damage','stock_in','adjustment')),
-  quantity DECIMAL(12,3) NOT NULL,
+  quantity DECIMAL(12,3) NOT NULL CHECK (quantity > 0),
   reference_type TEXT,
   reference_id INTEGER,
   performed_by UUID REFERENCES profiles(id),
@@ -167,7 +168,7 @@ CREATE TABLE inventory_transactions (
 CREATE TABLE stock_intakes (
   id SERIAL PRIMARY KEY,
   product_id INTEGER REFERENCES products(id),
-  quantity DECIMAL(12,3) NOT NULL,
+  quantity DECIMAL(12,3) NOT NULL CHECK (quantity > 0),
   supplier TEXT,
   notes TEXT,
   received_by UUID REFERENCES profiles(id),
@@ -177,13 +178,13 @@ CREATE TABLE stock_intakes (
 -- 12. PAYMENT FOLLOWUPS (seller visit logs for collections)
 CREATE TABLE payment_followups (
   id SERIAL PRIMARY KEY,
-  sale_id INTEGER REFERENCES sales(id),
+  sale_id INTEGER REFERENCES sales(id) ON DELETE SET NULL,
   party_id INTEGER REFERENCES parties(id),
   visited_by UUID REFERENCES profiles(id),
   visit_date TIMESTAMPTZ DEFAULT now(),
   status_update TEXT,
   payment_method TEXT,
-  amount_collected DECIMAL(12,2) DEFAULT 0,
+  amount_collected DECIMAL(12,2) DEFAULT 0 CHECK (amount_collected >= 0),
   expected_payment_date DATE,
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
@@ -263,15 +264,18 @@ CREATE POLICY "Sellers update own items" ON checkout_items FOR UPDATE USING (
   EXISTS (SELECT 1 FROM checkout_sessions WHERE id = checkout_items.session_id AND seller_id = auth.uid())
 );
 
--- SALES: admins full access, sellers can read
+-- SALES: admins full access, sellers read their own sales. Write paths go through RPCs.
 CREATE POLICY "Admins manage sales" ON sales FOR ALL USING (is_admin());
-CREATE POLICY "Sellers read sales" ON sales FOR SELECT USING (true);
+CREATE POLICY "Sellers read own sales" ON sales FOR SELECT USING (recorded_by = auth.uid());
 
--- SALE_ITEMS: read/write by any authenticated user (parent sale row controls actual access)
-CREATE POLICY "Authenticated read sale_items" ON sale_items FOR SELECT USING (true);
-CREATE POLICY "Authenticated insert sale_items" ON sale_items FOR INSERT WITH CHECK (true);
-CREATE POLICY "Authenticated update sale_items" ON sale_items FOR UPDATE USING (true) WITH CHECK (true);
-CREATE POLICY "Authenticated delete sale_items" ON sale_items FOR DELETE USING (true);
+-- SALE_ITEMS: visible through parent sale; writes are owned by SECURITY DEFINER RPCs.
+CREATE POLICY "Read visible sale_items" ON sale_items FOR SELECT USING (
+  EXISTS (
+    SELECT 1 FROM sales
+    WHERE sales.id = sale_items.sale_id
+      AND (is_admin() OR sales.recorded_by = auth.uid())
+  )
+);
 
 -- RENTALS, DAMAGE, TRANSACTIONS, INTAKES: admins only
 CREATE POLICY "Admins manage rentals" ON rentals FOR ALL USING (is_admin());
@@ -279,10 +283,9 @@ CREATE POLICY "Admins manage damage" ON damage_reports FOR ALL USING (is_admin()
 CREATE POLICY "Admins manage transactions" ON inventory_transactions FOR ALL USING (is_admin());
 CREATE POLICY "Admins manage intakes" ON stock_intakes FOR ALL USING (is_admin());
 
--- PAYMENT FOLLOWUPS: admins full access, sellers can read and insert their own
-CREATE POLICY "Admins manage followups" ON payment_followups FOR ALL USING (is_admin());
-CREATE POLICY "Sellers read followups" ON payment_followups FOR SELECT USING (true);
-CREATE POLICY "Sellers insert followups" ON payment_followups FOR INSERT WITH CHECK (auth.uid() = visited_by);
+-- PAYMENT FOLLOWUPS: writes go through `record_payment_followup` RPC.
+CREATE POLICY "Admins manage followups" ON payment_followups FOR ALL USING (is_admin()) WITH CHECK (is_admin());
+CREATE POLICY "Users read own followups" ON payment_followups FOR SELECT USING (is_admin() OR visited_by = auth.uid());
 
 -- REFILL_COMPLETIONS: any authenticated user can read; insert is scoped to acting user
 -- (See migration 005 for the production-applied scoped policy.)

@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatStock, formatDateTime, daysUntil, showToast, escapeHtml, CONFIG, skeletonHTML } from '../utils/helpers.js';
+import { formatCurrency, formatStock, formatDateTime, daysUntil, showToast, escapeHtml, CONFIG, skeletonHTML, dbOp } from '../utils/helpers.js';
 
 export async function renderDashboard(body, header) {
   const isAdmin = auth.isAdmin();
@@ -258,11 +258,10 @@ export async function renderDashboard(body, header) {
       e.stopPropagation();
       const partyId = parseInt(btn.dataset.partyId);
       btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-      try {
-        await db.insert('refill_completions', { party_id: partyId, month: curMonth, year: curYear, completed_by: auth.currentUser.id });
-        showToast('Refill marked as done ✓', 'success');
-        renderDashboard(body, header);
-      } catch(err) { showToast('Failed to mark complete', 'error'); btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Done'; }
+      const result = await dbOp(db.insert('refill_completions', { party_id: partyId, month: curMonth, year: curYear, completed_by: auth.currentUser.id }), 'Failed to mark complete');
+      if (!result) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Done'; return; }
+      showToast('Refill marked as done ✓', 'success');
+      renderDashboard(body, header);
     });
   });
 
@@ -487,11 +486,10 @@ async function renderSellerView(body) {
       e.stopPropagation();
       const partyId = parseInt(btn.dataset.partyId);
       btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-      try {
-        await db.insert('refill_completions', { party_id: partyId, month: curMonth, year: curYear, completed_by: auth.currentUser.id });
-        showToast('Refill marked as done ✓', 'success');
-        renderSellerView(body);
-      } catch(err) { showToast('Failed to mark complete', 'error'); btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Done'; }
+      const result = await dbOp(db.insert('refill_completions', { party_id: partyId, month: curMonth, year: curYear, completed_by: auth.currentUser.id }), 'Failed to mark complete');
+      if (!result) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Done'; return; }
+      showToast('Refill marked as done ✓', 'success');
+      renderSellerView(body);
     });
   });
 }

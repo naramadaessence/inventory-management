@@ -198,7 +198,21 @@ async function openCheckoutModal(body, isAdmin) {
       }
     }
 
-    const status = isSeller ? 'pending_issue' : 'checked_out';
+    if (isAdmin) {
+      const result = await dbOp(db.rpc('admin_issue_stock', {
+        p_seller_id: sellerId,
+        p_items: checkoutItems.map(item => ({ product_id: item.product_id, quantity: item.quantity })),
+        p_approver_id: auth.currentUser.id,
+      }), 'Failed to issue stock');
+      if (!result) return;
+
+      showToast('Stock issued successfully', 'success');
+      close();
+      await renderSessionsList(body, isAdmin);
+      return;
+    }
+
+    const status = 'pending_issue';
     const session = await dbOp(db.insert('checkout_sessions', {
       seller_id: sellerId, checkout_time: new Date().toISOString(), checkin_time: null, status, notes: ''
     }), 'Failed to create session');
@@ -209,20 +223,9 @@ async function openCheckoutModal(body, isAdmin) {
         session_id: session.data.id, product_id: item.product_id,
         checkout_quantity: item.quantity, checkin_quantity: null, is_flagged: false, flag_reason: null
       }), 'Failed to add item');
-
-      // Only deduct stock if admin is creating (immediate approval)
-      if (isAdmin) {
-        const newStock = item.product.current_stock - item.quantity;
-        await dbOp(db.update('products', item.product_id, { current_stock: Math.max(0, newStock) }), 'Failed to update stock');
-        await dbOp(db.insert('inventory_transactions', {
-          product_id: item.product_id, type: 'checkout', quantity: -item.quantity,
-          reference_type: 'checkout_session', reference_id: session.data.id,
-          performed_by: auth.currentUser.id, notes: 'Issued to seller'
-        }), 'Failed to log transaction');
-      }
     }
 
-    showToast(isSeller ? 'Stock request submitted — waiting for admin approval' : 'Stock issued successfully', 'success');
+    showToast('Stock request submitted — waiting for admin approval', 'success');
     close();
     await renderSessionsList(body, isAdmin);
   };

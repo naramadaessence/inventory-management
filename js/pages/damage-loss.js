@@ -77,18 +77,15 @@ export async function renderDamageLoss(body, header) {
       if (!reason || reason.length < 3) { showToast('Please provide a reason', 'error'); return; }
       if (isNaN(qty) || qty <= 0) { showToast('Valid quantity required', 'error'); return; }
 
-      const prod = products.find(p => p.id === productId);
-      const dmgResult = await dbOp(db.insert('damage_reports', {
-        product_id: productId,
-        damage_type: document.getElementById('dmg-type').value,
-        quantity: qty,
-        reason,
-        report_date: document.getElementById('dmg-date').value,
-        reported_by: auth.currentUser.id
+      const dmgResult = await dbOp(db.rpc('record_damage_loss', {
+        p_product_id: productId,
+        p_damage_type: document.getElementById('dmg-type').value,
+        p_quantity: qty,
+        p_reason: reason,
+        p_report_date: document.getElementById('dmg-date').value,
+        p_reported_by: auth.currentUser.id,
       }), 'Failed to file report');
       if (!dmgResult) return;
-      await dbOp(db.update('products', productId, { current_stock: Math.max(0, (prod.current_stock || 0) - qty) }), 'Failed to update stock');
-      await dbOp(db.insert('inventory_transactions', { product_id: productId, type: 'damage', quantity: -qty, reference_type: 'damage_report', performed_by: auth.currentUser.id, notes: `${document.getElementById('dmg-type').value}: ${reason}` }), 'Failed to log transaction');
 
       showToast('Damage report filed', 'warning');
       close();

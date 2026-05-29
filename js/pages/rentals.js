@@ -60,10 +60,11 @@ export async function renderRentals(body, header) {
     el.addEventListener('click', async () => {
       const rental = rentals.find(r => r.id == el.dataset.id);
       if (confirm('Mark this rental as returned?')) {
-        await dbOp(db.update('rentals', rental.id, { status: 'returned', actual_return_date: new Date().toISOString() }), 'Failed to update rental');
-        const prod = prodMap[rental.product_id];
-        if (prod) await dbOp(db.update('products', prod.id, { current_stock: (prod.current_stock || 0) + (rental.quantity || 1) }), 'Failed to update stock');
-        await dbOp(db.insert('inventory_transactions', { product_id: rental.product_id, type: 'rental_return', quantity: rental.quantity || 1, reference_type: 'rental', reference_id: rental.id, performed_by: auth.currentUser.id, notes: 'Rental returned' }), 'Failed to log transaction');
+        const result = await dbOp(db.rpc('return_rental', {
+          p_rental_id: rental.id,
+          p_performer_id: auth.currentUser.id,
+        }), 'Failed to return rental');
+        if (!result) return;
         showToast('Rental marked as returned', 'success');
         renderRentals(body, header);
       }
@@ -126,18 +127,17 @@ function openRentalModal(parties, products, categories, body, header) {
 
     if (qty > prod.current_stock) { showToast('Insufficient stock', 'error'); return; }
 
-    const rentalResult = await dbOp(db.insert('rentals', {
-      product_id: productId, party_id: partyId, quantity: qty,
-      rental_date: document.getElementById('rent-date').value,
-      expected_return_date: document.getElementById('rent-return').value || null,
-      actual_return_date: null,
-      rent_amount: parseFloat(document.getElementById('rent-amount').value) || 0,
-      status: 'active',
-      notes: document.getElementById('rent-notes').value.trim()
+    const rentalResult = await dbOp(db.rpc('create_rental', {
+      p_product_id: productId,
+      p_party_id: partyId,
+      p_quantity: qty,
+      p_rental_date: document.getElementById('rent-date').value,
+      p_expected_return_date: document.getElementById('rent-return').value || null,
+      p_rent_amount: parseFloat(document.getElementById('rent-amount').value) || 0,
+      p_notes: document.getElementById('rent-notes').value.trim(),
+      p_performer_id: auth.currentUser.id,
     }), 'Failed to create rental');
     if (!rentalResult) return;
-    await dbOp(db.update('products', productId, { current_stock: prod.current_stock - qty }), 'Failed to update stock');
-    await dbOp(db.insert('inventory_transactions', { product_id: productId, type: 'rental_out', quantity: -qty, reference_type: 'rental', performed_by: auth.currentUser.id, notes: 'Rental out' }), 'Failed to log transaction');
 
     showToast('Rental created', 'success');
     close();
