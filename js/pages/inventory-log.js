@@ -35,6 +35,8 @@ export async function renderInventoryLog(body, header) {
           <option value="checkout">Checkout</option>
           <option value="checkin">Check-in</option>
           <option value="sale">Sale</option>
+          <option value="sale_edit">Sale Edited</option>
+          <option value="sale_edit_restore">Sale Edit Restore</option>
           <option value="sale_delete">Sale Deleted</option>
           <option value="rental_out">Rental Out</option>
           <option value="rental_return">Rental Return</option>
@@ -80,7 +82,7 @@ export async function renderInventoryLog(body, header) {
       return;
     }
 
-    const typeColors = { checkout: 'amber', checkin: 'green', sale: 'green', sale_delete: 'red', rental_out: 'purple', rental_return: 'blue', damage: 'red', stock_in: 'blue', adjustment: 'amber' };
+    const typeColors = { checkout: 'amber', checkin: 'green', sale: 'green', sale_edit: 'amber', sale_edit_restore: 'blue', sale_delete: 'red', rental_out: 'purple', rental_return: 'blue', damage: 'red', stock_in: 'blue', adjustment: 'amber' };
     tableEl.innerHTML = `<div class="table-wrapper"><table class="data-table">
       <thead><tr><th>Timestamp</th><th>Type</th><th>Product</th><th>Quantity</th><th>Performed By</th><th>Notes</th></tr></thead>
       <tbody>${txns.map(t => {

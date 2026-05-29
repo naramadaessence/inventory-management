@@ -10,6 +10,7 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 | Styling | Custom CSS design system (light theme, amber accents) |
 | Backend | Supabase (PostgreSQL + Auth + RLS) |
 | Charts | Chart.js |
+| Test Runner | Vitest + happy-dom |
 | Hosting | Vercel (Hobby tier) |
 | Repo | github.com/naramadaessence/inventory-management |
 
@@ -46,8 +47,14 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 | # | File | Purpose |
 |---|------|---------|
 | 1 | README.md | This file — project overview |
-| 2 | changelog.md | Chronological history of changes |
-| 3 | architecture.md | Data model, security, workflows |
+| 2 | active-context.md | Current status, handoff notes, test status |
+| 3 | decisions.md | Architectural and testing decisions |
+| 4 | known-issues.md | Active bugs, accepted risks, sharp edges |
+| 5 | testing.md | Test framework, commands, coverage rules |
+| 6 | changelog.md | Chronological history of changes |
+| 7 | architecture.md | Data model, security, workflows |
+| 8 | future-scope.md | Explicitly deferred work and trigger conditions |
+| 9 | sales-billing.md | Sales, bills, sale_items, edit/delete behavior |
 
 ## Critical Rules
 - **Demo mode**: App works fully without Supabase via localStorage. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` env vars for production. Production builds hard-fail if env vars are missing (no silent fallback).
@@ -58,6 +65,7 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 - **Role-based access**: Admin sees all pages. Seller only sees their own checkout history.
 - **Input validation**: All forms validate on client side. Supabase RLS enforces on server side.
 - **Soft deletes**: Products are deactivated (`is_active: false`), never hard-deleted.
+- **Tests/build**: Run `npm test` for the full Vitest suite. Run `npm run build` for production bundle verification.
 
 ## Quick Facts
 | Key | Value |
@@ -69,3 +77,4 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 | Tracking Types | Unit (pieces) and Liquid (grams) |
 | Demo Login | admin@narmadaessence.com / admin123 |
 | Seller Login | seller1@narmadaessence.com / seller123 |
+| Test Command | `npm test` |

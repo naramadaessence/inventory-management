@@ -1,5 +1,35 @@
 # Changelog
 
+## 2026-05-29 - Edit Bill, Delete Bill Fix, and 18000 Sales Cleanup Script
+**What**: Added admin Edit Bill UI, bill delete actions, atomic `update_sale` RPC support, delete-sale schema fix, and a one-off SQL cleanup script for 18000-total sales.
+**Why**: Client requested editing bills after creation, deleting bills without errors, and clearing previous 18000 sales entries without changing stock/party data.
+**Impact**: Requires running `migrations/009_edit_bill_and_delete_fix.sql` in the live Supabase project before deploying the UI. The one-off `supabase-scripts/clear-18000-sales-data.sql` script is destructive and should be run manually only after previewing the matching rows.
+**Files Changed**: `js/pages/sales.js`, `js/pages/inventory-log.js`, `js/supabase.js`, `tests/demo-rpc.test.js`, `migrations/009_edit_bill_and_delete_fix.sql`, `supabase-scripts/clear-18000-sales-data.sql`, `supabase-schema.sql`, `knowledge-base/*`
+**Tests**: `npm test` passed (11 tests). `npm run build` passed. Browser smoke tested local Sales record/edit flow on `http://127.0.0.1:5173`.
+**Commit**: N/A
+
+- Sales table now shows explicit `Edit Bill` and delete buttons for admins.
+- Edit Bill can change party, sale date, line items, quantities, prices, payment status, amount received, due date, and notes.
+- `update_sale` restores old item stock, replaces line items, deducts edited items, updates the sale header, and writes `sale_edit_restore` / `sale_edit` audit rows atomically.
+- Delete fix allows `sale_delete` audit rows and keeps delete stock restoration transactional.
+- Added manual Supabase cleanup script for deleting sales with `total_amount = 18000` without touching product stock.
+
+---
+
+## 2026-05-29 - Knowledge Base Testing Documentation
+**What**: Added the missing testing guide and updated KB navigation/status for the current test setup.
+**Why**: Tests already exist, so the required `knowledge-base/testing.md` file and test-framework decision needed to be documented for future sessions.
+**Impact**: Documentation-only. Future agents now have explicit commands, coverage expectations, and a recorded demo-mode caveat.
+**Files Changed**: `knowledge-base/testing.md`, `knowledge-base/README.md`, `knowledge-base/decisions.md`, `knowledge-base/known-issues.md`, `knowledge-base/changelog.md`, `knowledge-base/active-context.md`
+**Tests**: `npm test` passed (9 tests). `npm run build` passed.
+**Commit**: N/A
+
+- Documented Vitest + happy-dom test conventions and current demo RPC coverage.
+- Added `testing.md` to the README reading order and Quick Facts.
+- Logged the existing demo-mode `record_sale` rollback caveat as ISSUE-002.
+
+---
+
 ## 2026-05-22 — Sidebar Logo + Category Stock Summary
 **What**: Replaced sidebar emoji+text branding with company logo PNG. Added stock summary bar to Products page.
 **Why**: Client requested total stock visibility per category without manual row-summing. Logo swap for proper branding.

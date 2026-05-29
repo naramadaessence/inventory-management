@@ -132,7 +132,10 @@ Stock-mutating operations call Postgres functions via `supabase.rpc()` so multi-
 | `record_sale(party_id, items, ...)` | sale + sale_items + stock deduction + transactions, all in one tx |
 | `approve_issue(session_id, approver_id)` | deduct each issued item + log + flip session status |
 | `approve_return(session_id, approver_id)` | restore each returned item + log + flip session status |
+| `update_sale(sale_id, items, ...)` | restore old sale stock + replace sale_items + deduct edited items + update header |
 | `delete_sale(sale_id, performer_id)` | restore stock + cascade-delete sale_items + delete sale |
+
+Sales edits/deletes also add audit transaction types: `sale_edit_restore`, `sale_edit`, and `sale_delete`.
 
 **Demo mode parity**: `js/supabase.js` defines a `demoRpc` table mirroring each Postgres function, so the same client call (`db.rpc('record_sale', { ... })`) works in both modes without conditional code at call sites.
 

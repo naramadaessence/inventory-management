@@ -51,3 +51,21 @@
 - Aggregations stay correct as data grows.
 - Bandwidth scales linearly with table size — fine for current single-warehouse load; revisit when `sales`/`inventory_transactions` cross ~10k rows.
 - Future improvement: convert specific aggregations (revenue-by-product, fast/slow movers) to Postgres RPCs that return scalars/small result sets.
+
+## Decision: Vitest + happy-dom for Demo RPC Contract Tests
+**Date**: 2026-05-14
+**Status**: Accepted
+**Context**: Stock-mutating business logic moved into production Postgres RPCs, while demo mode mirrors those RPCs in localStorage. The project needed fast tests that can exercise the same `db.rpc(name, params)` shape without needing a live Supabase project.
+**Decision**: Use Vitest with the happy-dom environment. Tests run against the public `db` and `auth` APIs, initialize the demo store via `auth.getSession()`, and verify demo RPC behavior as a contract proxy for production RPC call shapes.
+**Alternatives Considered**: Browser E2E tests were deferred because they are heavier than needed for the current business-logic layer. Direct unit tests of private helpers were rejected because they would couple tests to implementation details instead of the app-facing DB contract.
+**Consequences**: `npm test` is fast enough to run every session. New stock-mutating RPCs must be mirrored in demo mode and tested through the same public `db.rpc(...)` path. UI and real Supabase RLS behavior are not fully covered by this suite yet.
+**Superseded By**:
+
+## Decision: Edit Bills Through update_sale RPC
+**Date**: 2026-05-29
+**Status**: Accepted
+**Context**: Client needs to edit bills after creation and delete bills reliably. Editing line items affects stock, sale_items, sale totals, payment state, and inventory audit rows, so a client-side multi-step update would reintroduce partial-write and race-condition risks.
+**Decision**: Add a Postgres `update_sale` RPC and matching demo-mode handler. The RPC restores old sale-item stock, replaces line items, deducts edited quantities, updates the sale header, and writes audit rows in one transaction.
+**Alternatives Considered**: Direct client updates to `sales`, `sale_items`, and `products.current_stock` were rejected because they bypass the atomic stock-write rule. Delete-and-recreate was rejected because it changes bill IDs and matches the client complaint.
+**Consequences**: Production must run migration 009 before deploying the UI. Future bill-edit behavior belongs in `update_sale`, and each new stock-impacting edit path needs demo RPC parity plus tests.
+**Superseded By**:

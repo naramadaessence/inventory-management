@@ -12,6 +12,44 @@ function itemsSummary(items, prodMap) {
   return txt;
 }
 
+function makeLineItem(product, quantity, unitPrice) {
+  const qty = Number(quantity);
+  const price = Number(unitPrice);
+  return {
+    product_id: product.id,
+    quantity: qty,
+    unit_price: price,
+    line_total: roundCurrency(qty * price),
+    prodName: product.name,
+    prodType: product.type,
+  };
+}
+
+function getPartyRates(parties, partyId) {
+  const party = parties.find(p => p.id === partyId);
+  return party?.custom_category_rates || {};
+}
+
+function priceForProduct(product, rates = {}) {
+  const catId = product?.category_id;
+  const custom = catId && (rates[catId] !== undefined || rates[String(catId)] !== undefined)
+    ? (rates[catId] ?? rates[String(catId)])
+    : null;
+  return custom !== null ? Number(custom) : Number(product?.unit_price || 0);
+}
+
+async function deleteSale(sale, body, header) {
+  if (!confirm('Delete this bill? Stock will be restored for all items.')) return false;
+  const result = await dbOp(db.rpc('delete_sale', {
+    p_sale_id: sale.id,
+    p_performer_id: auth.currentUser.id,
+  }), 'Failed to delete bill');
+  if (!result) return false;
+  showToast('Bill deleted - stock restored', 'success');
+  renderSales(body, header);
+  return true;
+}
+
 export async function renderSales(body, header) {
   const isAdmin = auth.isAdmin();
   const userId = auth.currentUser.id;
@@ -55,7 +93,7 @@ export async function renderSales(body, header) {
     </div>` : ''}
     ${sales.length === 0 ? '<div class="empty-state"><i class="fas fa-receipt"></i><h3>No sales recorded</h3><p>Click "Record Sale" to add your first sale.</p></div>' : `
     <div class="table-wrapper"><table class="data-table">
-      <thead><tr><th>Date</th><th>Party</th><th>Items</th><th>Amount</th><th>Received</th><th>Payment</th><th>Due Date</th></tr></thead>
+      <thead><tr><th>Date</th><th>Party</th><th>Items</th><th>Amount</th><th>Received</th><th>Payment</th><th>Due Date</th>${isAdmin ? '<th>Actions</th>' : ''}</tr></thead>
       <tbody>${sales.map(s => {
         const party = partyMap[s.party_id];
         const sItems = itemsBySale[s.id] || [];
@@ -69,6 +107,10 @@ export async function renderSales(body, header) {
           <td>${s.amount_received ? formatCurrency(s.amount_received) : '—'}</td>
           <td><span class="badge-status ${s.payment_status === 'paid' ? 'green' : s.payment_status === 'partial' ? 'amber' : 'red'}">${esc(s.payment_status || 'pending')}</span></td>
           <td style="${isOverdue ? 'color:var(--red);font-weight:600;' : ''}">${s.expected_payment_date ? formatDate(s.expected_payment_date) : '—'}${isOverdue ? ' ⚠' : ''}</td>
+          ${isAdmin ? `<td style="white-space:nowrap;">
+            <button class="btn btn-sm btn-secondary edit-sale-btn" data-id="${s.id}"><i class="fas fa-pen"></i> Edit Bill</button>
+            <button class="btn btn-sm btn-ghost delete-sale-btn" data-id="${s.id}" title="Delete bill" aria-label="Delete bill" style="color:var(--red);"><i class="fas fa-trash"></i></button>
+          </td>` : ''}
         </tr>`;
       }).join('')}</tbody>
     </table></div>`}
@@ -81,6 +123,20 @@ export async function renderSales(body, header) {
       row.addEventListener('click', () => {
         const sale = allSales.find(s => s.id == row.dataset.id);
         if (sale) openEditSaleModal(sale, itemsBySale[sale.id] || [], parties, products, body, header);
+      });
+    });
+    document.querySelectorAll('.edit-sale-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const sale = allSales.find(s => s.id == btn.dataset.id);
+        if (sale) openEditSaleModal(sale, itemsBySale[sale.id] || [], parties, products, body, header);
+      });
+    });
+    document.querySelectorAll('.delete-sale-btn').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const sale = allSales.find(s => s.id == btn.dataset.id);
+        if (sale) await deleteSale(sale, body, header);
       });
     });
   }
@@ -296,7 +352,7 @@ function openSaleModal(parties, products, body, header) {
 // ============================================
 // EDIT SALE MODAL (admin only, reads from sale_items)
 // ============================================
-function openEditSaleModal(sale, saleItems, parties, products, body, header) {
+function openLegacyEditSaleModal(sale, saleItems, parties, products, body, header) {
   const party = parties.find(p => p.id === sale.party_id);
   const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
 
@@ -375,5 +431,273 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
     if (!result) return;
     showToast('Sale deleted — stock restored', 'success'); close(); renderSales(body, header);
   });
+}
+
+function openEditSaleModal(sale, saleItems, parties, products, body, header) {
+  const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
+  const oldQtyByProd = {};
+  saleItems.forEach(item => {
+    oldQtyByProd[item.product_id] = (oldQtyByProd[item.product_id] || 0) + Number(item.quantity || 0);
+  });
+
+  const activeProducts = products.filter(p => p.is_active || oldQtyByProd[p.id]);
+  let selectedPartyId = sale.party_id ? Number(sale.party_id) : null;
+  let selectedRates = getPartyRates(parties, selectedPartyId);
+  let lineItems = saleItems.map(item => {
+    const product = prodMap[item.product_id] || { id: item.product_id, name: 'Unknown product', type: 'unit' };
+    return makeLineItem(product, item.quantity, item.unit_price);
+  });
+
+  const partyOptions = [
+    '<option value="">Walk-in customer</option>',
+    ...parties.map(p => `<option value="${p.id}" ${p.id === selectedPartyId ? 'selected' : ''}>${esc(p.name)}</option>`)
+  ].join('');
+  const productOptions = activeProducts.map(p => `<option value="${p.id}" data-type="${p.type}">${esc(p.name)}</option>`).join('');
+
+  const content = `
+    <div style="background:var(--bg-secondary);border-radius:8px;padding:12px 16px;margin-bottom:16px;">
+      <strong>Bill #${sale.id}</strong>
+      <div style="font-size:0.8rem;color:var(--text-muted);">Edit products, quantities, prices, payment, and customer details.</div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Party / Customer</label>
+        <select class="form-select" id="edit-sale-party">${partyOptions}</select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Sale Date *</label>
+        <input class="form-input" type="date" id="edit-sale-date" value="${sale.sale_date || ''}" required />
+      </div>
+    </div>
+    <div style="background:var(--bg-secondary);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><i class="fas fa-cart-plus" style="color:var(--primary);"></i><strong style="font-size:0.9rem;">Add / Change Items</strong></div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+        <div style="flex:2;min-width:180px;">
+          <label style="font-size:0.7rem;color:var(--text-muted);display:block;margin-bottom:4px;">Product</label>
+          <select class="form-select" id="edit-add-item-product" style="font-size:0.85rem;">${productOptions}</select>
+        </div>
+        <div style="width:80px;">
+          <label style="font-size:0.7rem;color:var(--text-muted);display:block;margin-bottom:4px;" id="edit-add-item-qty-label">Qty</label>
+          <input class="form-input" type="number" id="edit-add-item-qty" value="1" min="0.001" step="1" style="font-size:0.85rem;" />
+        </div>
+        <div style="width:100px;">
+          <label style="font-size:0.7rem;color:var(--text-muted);display:block;margin-bottom:4px;">Price</label>
+          <input class="form-input" type="number" id="edit-add-item-price" value="0" min="0" step="0.01" style="font-size:0.85rem;" />
+        </div>
+        <button class="btn btn-primary btn-sm" id="edit-btn-add-item" style="height:38px;"><i class="fas fa-plus"></i> Add</button>
+      </div>
+    </div>
+    <div id="edit-items-list" style="margin-bottom:16px;"></div>
+    <div id="edit-sale-grand-total" style="text-align:right;font-size:1.1rem;font-weight:700;color:var(--green);margin-bottom:16px;">Grand Total: ${formatCurrency(sale.total_amount)}</div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">Payment Status</label>
+        <select class="form-select" id="edit-sale-payment">
+          <option value="paid" ${sale.payment_status === 'paid' ? 'selected' : ''}>Paid</option>
+          <option value="partial" ${sale.payment_status === 'partial' ? 'selected' : ''}>Partial</option>
+          <option value="pending" ${sale.payment_status === 'pending' ? 'selected' : ''}>Pending</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Payment Method</label>
+        <select class="form-select" id="edit-sale-method">
+          <option value="">Select</option>
+          <option value="cash" ${sale.payment_method === 'cash' ? 'selected' : ''}>Cash</option>
+          <option value="upi" ${sale.payment_method === 'upi' ? 'selected' : ''}>UPI / Online</option>
+          <option value="bank_transfer" ${sale.payment_method === 'bank_transfer' ? 'selected' : ''}>Bank Transfer</option>
+          <option value="cheque" ${sale.payment_method === 'cheque' ? 'selected' : ''}>Cheque</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row" id="edit-pending-fields" style="display:${sale.payment_status === 'pending' || sale.payment_status === 'partial' ? 'flex' : 'none'};">
+      <div class="form-group"><label class="form-label">Amount Received</label><input class="form-input" type="number" id="edit-sale-received" value="${sale.amount_received || 0}" min="0" step="0.01" /></div>
+      <div class="form-group"><label class="form-label">Expected Payment Date</label><input class="form-input" type="date" id="edit-sale-expected" value="${sale.expected_payment_date || ''}" /></div>
+    </div>
+    <div class="form-group"><label class="form-label">Notes</label><textarea class="form-textarea" id="edit-sale-notes" maxlength="500">${esc(sale.notes || '')}</textarea></div>
+  `;
+
+  const footer = `<button class="btn btn-danger" id="edit-sale-delete"><i class="fas fa-trash"></i> Delete Bill</button><div style="flex:1;"></div><button class="btn btn-secondary" id="edit-sale-cancel">Cancel</button><button class="btn btn-primary" id="edit-sale-save"><i class="fas fa-save"></i> Save Bill</button>`;
+  const { close } = createModal('Edit Bill', content, { footer, large: true });
+
+  function totalAmount() {
+    return roundCurrency(lineItems.reduce((sum, item) => sum + item.line_total, 0));
+  }
+
+  function renderItems() {
+    const el = document.getElementById('edit-items-list');
+    if (lineItems.length === 0) {
+      el.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-muted);font-size:0.85rem;"><i class="fas fa-inbox" style="font-size:1.2rem;margin-bottom:6px;display:block;"></i>No items in this bill</div>';
+    } else {
+      el.innerHTML = `<table class="data-table" style="font-size:0.85rem;">
+        <thead><tr><th>Product</th><th style="width:110px;">Qty</th><th style="width:120px;">Price</th><th>Total</th><th></th></tr></thead>
+        <tbody>${lineItems.map((item, i) => `<tr>
+          <td>${esc(item.prodName)}</td>
+          <td><input class="form-input edit-item-qty" data-idx="${i}" type="number" min="0.001" step="${item.prodType === 'liquid' ? '0.001' : '1'}" value="${item.quantity}" style="font-size:0.85rem;" /></td>
+          <td><input class="form-input edit-item-price" data-idx="${i}" type="number" min="0" step="0.01" value="${item.unit_price}" style="font-size:0.85rem;" /></td>
+          <td style="font-weight:600;color:var(--green);">${formatCurrency(item.line_total)}</td>
+          <td><button class="btn btn-sm btn-ghost edit-rm-item" data-idx="${i}" style="color:var(--red);"><i class="fas fa-times"></i></button></td>
+        </tr>`).join('')}</tbody>
+      </table>`;
+    }
+
+    document.getElementById('edit-sale-grand-total').textContent = `Grand Total: ${formatCurrency(totalAmount())}`;
+    document.querySelectorAll('.edit-item-qty').forEach(input => {
+      input.addEventListener('change', () => {
+        const idx = Number(input.dataset.idx);
+        const qty = Number(input.value);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          showToast('Quantity must be greater than zero', 'error');
+          input.value = lineItems[idx].quantity;
+          return;
+        }
+        lineItems[idx].quantity = qty;
+        lineItems[idx].line_total = roundCurrency(qty * lineItems[idx].unit_price);
+        renderItems();
+      });
+    });
+    document.querySelectorAll('.edit-item-price').forEach(input => {
+      input.addEventListener('change', () => {
+        const idx = Number(input.dataset.idx);
+        const price = Number(input.value);
+        if (!Number.isFinite(price) || price < 0) {
+          showToast('Price cannot be negative', 'error');
+          input.value = lineItems[idx].unit_price;
+          return;
+        }
+        lineItems[idx].unit_price = price;
+        lineItems[idx].line_total = roundCurrency(lineItems[idx].quantity * price);
+        renderItems();
+      });
+    });
+    document.querySelectorAll('.edit-rm-item').forEach(btn => {
+      btn.addEventListener('click', () => {
+        lineItems.splice(Number(btn.dataset.idx), 1);
+        renderItems();
+      });
+    });
+  }
+
+  function syncLineItemsFromInputs() {
+    let ok = true;
+    document.querySelectorAll('.edit-item-qty').forEach(input => {
+      const idx = Number(input.dataset.idx);
+      const qty = Number(input.value);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        showToast('Quantity must be greater than zero', 'error');
+        ok = false;
+        return;
+      }
+      lineItems[idx].quantity = qty;
+    });
+    document.querySelectorAll('.edit-item-price').forEach(input => {
+      const idx = Number(input.dataset.idx);
+      const price = Number(input.value);
+      if (!Number.isFinite(price) || price < 0) {
+        showToast('Price cannot be negative', 'error');
+        ok = false;
+        return;
+      }
+      lineItems[idx].unit_price = price;
+    });
+    lineItems.forEach(item => {
+      item.line_total = roundCurrency(item.quantity * item.unit_price);
+    });
+    return ok;
+  }
+
+  function updateAddPrice() {
+    const select = document.getElementById('edit-add-item-product');
+    const product = activeProducts.find(p => p.id === Number(select.value));
+    if (!product) return;
+    document.getElementById('edit-add-item-price').value = priceForProduct(product, selectedRates).toFixed(2);
+    const qtyEl = document.getElementById('edit-add-item-qty');
+    qtyEl.step = product.type === 'liquid' ? '0.001' : '1';
+    document.getElementById('edit-add-item-qty-label').textContent = product.type === 'liquid' ? 'Qty (kg)' : 'Qty (pcs)';
+  }
+
+  function assertEditedStockAvailable() {
+    const qtyByProd = {};
+    lineItems.forEach(item => {
+      qtyByProd[item.product_id] = (qtyByProd[item.product_id] || 0) + item.quantity;
+    });
+    for (const [pid, qty] of Object.entries(qtyByProd)) {
+      const productId = Number(pid);
+      const product = prodMap[productId];
+      const available = Number(product?.current_stock || 0) + Number(oldQtyByProd[productId] || 0);
+      if (qty > available) {
+        showToast(`Insufficient stock for ${product?.name || 'product'} - only ${formatStock(available, product?.type)} available after restoring this bill`, 'error');
+        return false;
+      }
+    }
+    return true;
+  }
+
+  document.getElementById('edit-sale-party').addEventListener('change', (e) => {
+    selectedPartyId = e.target.value ? Number(e.target.value) : null;
+    selectedRates = getPartyRates(parties, selectedPartyId);
+    updateAddPrice();
+  });
+  document.getElementById('edit-add-item-product').addEventListener('change', updateAddPrice);
+  document.getElementById('edit-btn-add-item').addEventListener('click', () => {
+    const product = activeProducts.find(p => p.id === Number(document.getElementById('edit-add-item-product').value));
+    const qty = Number(document.getElementById('edit-add-item-qty').value);
+    const price = Number(document.getElementById('edit-add-item-price').value);
+    if (!product || !Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price < 0) {
+      showToast('Invalid product, quantity or price', 'error');
+      return;
+    }
+    const existing = lineItems.find(item => item.product_id === product.id && item.unit_price === price);
+    if (existing) {
+      existing.quantity += qty;
+      existing.line_total = roundCurrency(existing.quantity * existing.unit_price);
+    } else {
+      lineItems.push(makeLineItem(product, qty, price));
+    }
+    document.getElementById('edit-add-item-qty').value = 1;
+    renderItems();
+  });
+  document.getElementById('edit-sale-payment').addEventListener('change', (e) => {
+    document.getElementById('edit-pending-fields').style.display = (e.target.value === 'pending' || e.target.value === 'partial') ? 'flex' : 'none';
+  });
+  document.getElementById('edit-sale-cancel').onclick = close;
+  document.getElementById('edit-sale-delete').onclick = (e) => withSaving(e.currentTarget, async () => {
+    const deleted = await deleteSale(sale, body, header);
+    if (deleted) close();
+  });
+  document.getElementById('edit-sale-save').onclick = (e) => withSaving(e.currentTarget, async () => {
+    if (!syncLineItemsFromInputs()) return;
+    if (lineItems.length === 0) {
+      showToast('Add at least one item', 'error');
+      return;
+    }
+    if (!assertEditedStockAvailable()) return;
+
+    const total = totalAmount();
+    const paymentStatus = document.getElementById('edit-sale-payment').value;
+    const amountReceived = roundCurrency(paymentStatus === 'paid' ? total : Number(document.getElementById('edit-sale-received').value) || 0);
+    if (amountReceived > total) {
+      showToast('Amount received cannot be greater than bill total', 'error');
+      return;
+    }
+
+    const result = await dbOp(db.rpc('update_sale', {
+      p_sale_id: sale.id,
+      p_party_id: selectedPartyId,
+      p_items: lineItems.map(item => ({ product_id: item.product_id, quantity: item.quantity, unit_price: item.unit_price })),
+      p_payment_status: paymentStatus,
+      p_payment_method: document.getElementById('edit-sale-method').value || null,
+      p_amount_received: amountReceived,
+      p_expected_payment_date: document.getElementById('edit-sale-expected')?.value || null,
+      p_sale_date: document.getElementById('edit-sale-date').value,
+      p_notes: document.getElementById('edit-sale-notes').value.trim(),
+      p_performer_id: auth.currentUser.id,
+    }), 'Failed to update bill');
+    if (!result) return;
+
+    showToast('Bill updated', 'success');
+    close();
+    renderSales(body, header);
+  });
+
+  renderItems();
+  updateAddPrice();
 }
 

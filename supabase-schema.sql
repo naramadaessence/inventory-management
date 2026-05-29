@@ -154,7 +154,7 @@ CREATE TABLE damage_reports (
 CREATE TABLE inventory_transactions (
   id SERIAL PRIMARY KEY,
   product_id INTEGER REFERENCES products(id),
-  type TEXT NOT NULL CHECK (type IN ('checkout','checkin','sale','rental_out','rental_return','damage','stock_in','adjustment')),
+  type TEXT NOT NULL CHECK (type IN ('checkout','checkin','sale','sale_edit','sale_edit_restore','sale_delete','rental_out','rental_return','damage','stock_in','adjustment')),
   quantity DECIMAL(12,3) NOT NULL,
   reference_type TEXT,
   reference_id INTEGER,

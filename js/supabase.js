@@ -149,6 +149,64 @@ const demo = {
   }
 };
 
+function roundMoney(amount) {
+  return Math.round(Number(amount || 0) * 100) / 100;
+}
+
+function normalizeSaleItems(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('Sale must have at least one item');
+  }
+  return items.map(item => {
+    const productId = Number(item.product_id);
+    const quantity = Number(item.quantity);
+    const unitPrice = Number(item.unit_price);
+    if (!productId || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) {
+      throw new Error('Invalid sale item');
+    }
+    return {
+      product_id: productId,
+      quantity,
+      unit_price: unitPrice,
+      line_total: roundMoney(quantity * unitPrice),
+    };
+  });
+}
+
+function assertStockAvailableForSale(store, newItems, restoreByProduct = {}) {
+  const qtyByProduct = {};
+  for (const item of newItems) {
+    const product = store.products.find(p => p.id === item.product_id);
+    if (!product) throw new Error(`Product ${item.product_id} not found`);
+    qtyByProduct[item.product_id] = (qtyByProduct[item.product_id] || 0) + item.quantity;
+  }
+
+  for (const [rawProductId, quantity] of Object.entries(qtyByProduct)) {
+    const productId = Number(rawProductId);
+    const product = store.products.find(p => p.id === productId);
+    const available = Number(product?.current_stock || 0) + Number(restoreByProduct[productId] || 0);
+    if (available - quantity < 0) {
+      throw new Error(`Insufficient stock for ${product?.name || `product ${productId}`}`);
+    }
+  }
+}
+
+function addInventoryTransaction(store, { product_id, type, quantity, reference_type, reference_id, performed_by, notes, created_at }) {
+  const txnId = store._nextId.inventory_transactions || 1;
+  store.inventory_transactions.push({
+    id: txnId,
+    product_id,
+    type,
+    quantity,
+    reference_type,
+    reference_id,
+    performed_by,
+    notes,
+    created_at,
+  });
+  store._nextId.inventory_transactions = txnId + 1;
+}
+
 // ============================================
 // DEMO RPC HANDLERS — mirror the Postgres functions in migration 006.
 // Same signatures, same param names, so the same client code path works
@@ -173,8 +231,11 @@ const demoRpc = {
   record_sale({ p_party_id, p_items, p_payment_status, p_payment_method, p_amount_received, p_expected_payment_date, p_sale_date, p_notes, p_recorded_by }) {
     const store = getStore();
     const now = new Date().toISOString();
+    const items = normalizeSaleItems(p_items);
+    assertStockAvailableForSale(store, items);
+
     // Round to 2 dp to match DECIMAL(12,2) in production.
-    const total = Math.round(p_items.reduce((s, i) => s + (i.quantity * i.unit_price), 0) * 100) / 100;
+    const total = roundMoney(items.reduce((s, i) => s + i.line_total, 0));
 
     const saleId = store._nextId.sales || 1;
     store.sales.push({
@@ -192,8 +253,7 @@ const demoRpc = {
     });
     store._nextId.sales = saleId + 1;
 
-    for (const item of p_items) {
-      const lineTotal = item.quantity * item.unit_price;
+    for (const item of items) {
       const siId = store._nextId.sale_items || 1;
       store.sale_items.push({
         id: siId,
@@ -201,21 +261,16 @@ const demoRpc = {
         product_id: item.product_id,
         quantity: item.quantity,
         unit_price: item.unit_price,
-        line_total: lineTotal,
+        line_total: item.line_total,
         created_at: now,
       });
       store._nextId.sale_items = siId + 1;
 
       const pIdx = store.products.findIndex(p => p.id === item.product_id);
-      if (pIdx === -1) throw new Error(`Product ${item.product_id} not found`);
-      const newStock = (store.products[pIdx].current_stock || 0) - item.quantity;
-      if (newStock < 0) throw new Error(`Insufficient stock for ${store.products[pIdx].name}`);
-      store.products[pIdx].current_stock = newStock;
+      store.products[pIdx].current_stock = (store.products[pIdx].current_stock || 0) - item.quantity;
       store.products[pIdx].updated_at = now;
 
-      const txnId = store._nextId.inventory_transactions || 1;
-      store.inventory_transactions.push({
-        id: txnId,
+      addInventoryTransaction(store, {
         product_id: item.product_id,
         type: 'sale',
         quantity: -item.quantity,
@@ -225,11 +280,88 @@ const demoRpc = {
         notes: p_party_id ? 'Sale to party' : 'Sale to walk-in',
         created_at: now,
       });
-      store._nextId.inventory_transactions = txnId + 1;
     }
 
     saveStore(store);
     return saleId;
+  },
+
+  // update_sale(...) — replace bill line items, re-balance stock, update payment metadata.
+  update_sale({ p_sale_id, p_party_id, p_items, p_payment_status, p_payment_method, p_amount_received, p_expected_payment_date, p_sale_date, p_notes, p_performer_id }) {
+    const store = getStore();
+    const saleIdx = store.sales.findIndex(s => s.id === p_sale_id);
+    if (saleIdx === -1) throw new Error(`Sale ${p_sale_id} does not exist`);
+
+    const now = new Date().toISOString();
+    const newItems = normalizeSaleItems(p_items);
+    const oldItems = store.sale_items.filter(si => si.sale_id === p_sale_id);
+    const restoreByProduct = {};
+    for (const item of oldItems) {
+      restoreByProduct[item.product_id] = (restoreByProduct[item.product_id] || 0) + item.quantity;
+    }
+    assertStockAvailableForSale(store, newItems, restoreByProduct);
+
+    for (const item of oldItems) {
+      const pIdx = store.products.findIndex(p => p.id === item.product_id);
+      if (pIdx === -1) throw new Error(`Product ${item.product_id} not found`);
+      store.products[pIdx].current_stock = (store.products[pIdx].current_stock || 0) + item.quantity;
+      store.products[pIdx].updated_at = now;
+      addInventoryTransaction(store, {
+        product_id: item.product_id,
+        type: 'sale_edit_restore',
+        quantity: item.quantity,
+        reference_type: 'sale',
+        reference_id: p_sale_id,
+        performed_by: p_performer_id,
+        notes: 'Sale edited - old item stock restored',
+        created_at: now,
+      });
+    }
+
+    store.sale_items = store.sale_items.filter(si => si.sale_id !== p_sale_id);
+    store.sales[saleIdx] = {
+      ...store.sales[saleIdx],
+      party_id: p_party_id,
+      total_amount: roundMoney(newItems.reduce((s, i) => s + i.line_total, 0)),
+      payment_status: p_payment_status,
+      payment_method: p_payment_method,
+      amount_received: p_amount_received || 0,
+      expected_payment_date: p_expected_payment_date,
+      sale_date: p_sale_date,
+      notes: p_notes,
+      updated_at: now,
+    };
+
+    for (const item of newItems) {
+      const siId = store._nextId.sale_items || 1;
+      store.sale_items.push({
+        id: siId,
+        sale_id: p_sale_id,
+        product_id: item.product_id,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        line_total: item.line_total,
+        created_at: now,
+      });
+      store._nextId.sale_items = siId + 1;
+
+      const pIdx = store.products.findIndex(p => p.id === item.product_id);
+      store.products[pIdx].current_stock = (store.products[pIdx].current_stock || 0) - item.quantity;
+      store.products[pIdx].updated_at = now;
+      addInventoryTransaction(store, {
+        product_id: item.product_id,
+        type: 'sale_edit',
+        quantity: -item.quantity,
+        reference_type: 'sale',
+        reference_id: p_sale_id,
+        performed_by: p_performer_id,
+        notes: 'Sale edited - new item stock deducted',
+        created_at: now,
+      });
+    }
+
+    saveStore(store);
+    return null;
   },
 
   // approve_issue(session_id, approver_id) — admin approves a stock issue.
@@ -338,9 +470,7 @@ const demoRpc = {
       store.products[pIdx].current_stock = (store.products[pIdx].current_stock || 0) + item.quantity;
       store.products[pIdx].updated_at = now;
 
-      const txnId = store._nextId.inventory_transactions || 1;
-      store.inventory_transactions.push({
-        id: txnId,
+      addInventoryTransaction(store, {
         product_id: item.product_id,
         type: 'sale_delete',
         quantity: item.quantity,
@@ -350,7 +480,6 @@ const demoRpc = {
         notes: 'Sale deleted — stock restored',
         created_at: now,
       });
-      store._nextId.inventory_transactions = txnId + 1;
     }
 
     // Cascade delete sale_items, then the sale itself.

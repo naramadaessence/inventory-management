@@ -93,11 +93,12 @@ describe('demoRpc.record_sale', () => {
     expect(data).toBeNull();
 
     // Atomicity: stock unchanged, no orphan sale or sale_item.
-    // (NOTE: The demo handler inserts the sale row before the item loop, so a
-    // mid-loop failure leaves a sale with no items. This is documented as a
-    // demo-mode caveat — production Postgres rolls back the transaction.)
     const after = await getProduct(10);
     expect(after.current_stock).toBe(3);
+    const { data: sales } = await db.getAll('sales');
+    const { data: items } = await db.getAll('sale_items');
+    expect(sales).toHaveLength(0);
+    expect(items).toHaveLength(0);
   });
 
   it('multi-item sale deducts each line item from stock', async () => {
@@ -254,6 +255,109 @@ describe('demoRpc.approve_issue / approve_return', () => {
 
     const after = await getProduct(10);
     expect(after.current_stock).toBe(3); // unchanged
+  });
+});
+
+describe('demoRpc.update_sale', () => {
+  beforeEach(freshStore);
+
+  it('replaces bill items, rebalances stock, and keeps the same sale id', async () => {
+    const { data: saleId } = await db.rpc('record_sale', {
+      p_party_id: 1,
+      p_items: [
+        { product_id: 7, quantity: 2, unit_price: 450 },
+        { product_id: 8, quantity: 1, unit_price: 450 },
+      ],
+      p_payment_status: 'paid',
+      p_payment_method: 'cash',
+      p_amount_received: 1350,
+      p_expected_payment_date: null,
+      p_sale_date: '2026-05-14',
+      p_notes: '',
+      p_recorded_by: 'admin-1',
+    });
+
+    expect((await getProduct(7)).current_stock).toBe(38);
+    expect((await getProduct(8)).current_stock).toBe(34);
+
+    const { error } = await db.rpc('update_sale', {
+      p_sale_id: saleId,
+      p_party_id: 2,
+      p_items: [
+        { product_id: 7, quantity: 1, unit_price: 500 },
+        { product_id: 9, quantity: 4, unit_price: 450 },
+      ],
+      p_payment_status: 'partial',
+      p_payment_method: 'upi',
+      p_amount_received: 500,
+      p_expected_payment_date: '2026-05-20',
+      p_sale_date: '2026-05-15',
+      p_notes: 'edited bill',
+      p_performer_id: 'admin-1',
+    });
+
+    expect(error).toBeNull();
+
+    const { data: sale } = await db.getById('sales', saleId);
+    expect(sale.party_id).toBe(2);
+    expect(sale.total_amount).toBe(2300);
+    expect(sale.payment_status).toBe('partial');
+    expect(sale.amount_received).toBe(500);
+    expect(sale.notes).toBe('edited bill');
+
+    const { data: items } = await db.getAll('sale_items');
+    const editedItems = items.filter(i => i.sale_id === saleId);
+    expect(editedItems).toHaveLength(2);
+    expect(editedItems.map(i => i.product_id).sort()).toEqual([7, 9]);
+
+    expect((await getProduct(7)).current_stock).toBe(39); // old 2 restored, new 1 deducted
+    expect((await getProduct(8)).current_stock).toBe(35); // old 1 restored
+    expect((await getProduct(9)).current_stock).toBe(26); // 30 - 4
+
+    const { data: txns } = await db.getAll('inventory_transactions');
+    expect(txns.filter(t => t.type === 'sale_edit_restore')).toHaveLength(2);
+    expect(txns.filter(t => t.type === 'sale_edit')).toHaveLength(2);
+  });
+
+  it('rejects an edit with insufficient stock and leaves the old bill untouched', async () => {
+    const { data: saleId } = await db.rpc('record_sale', {
+      p_party_id: 1,
+      p_items: [{ product_id: 10, quantity: 1, unit_price: 450 }],
+      p_payment_status: 'paid',
+      p_payment_method: 'cash',
+      p_amount_received: 450,
+      p_expected_payment_date: null,
+      p_sale_date: '2026-05-14',
+      p_notes: '',
+      p_recorded_by: 'admin-1',
+    });
+
+    expect((await getProduct(10)).current_stock).toBe(2);
+
+    const { error } = await db.rpc('update_sale', {
+      p_sale_id: saleId,
+      p_party_id: 1,
+      p_items: [{ product_id: 10, quantity: 10, unit_price: 450 }],
+      p_payment_status: 'paid',
+      p_payment_method: 'cash',
+      p_amount_received: 4500,
+      p_expected_payment_date: null,
+      p_sale_date: '2026-05-14',
+      p_notes: 'bad edit',
+      p_performer_id: 'admin-1',
+    });
+
+    expect(error).not.toBeNull();
+    expect(error.message).toMatch(/insufficient stock/i);
+    expect((await getProduct(10)).current_stock).toBe(2);
+
+    const { data: sale } = await db.getById('sales', saleId);
+    expect(sale.total_amount).toBe(450);
+    expect(sale.notes).toBe('');
+    const { data: items } = await db.getAll('sale_items');
+    const originalItems = items.filter(i => i.sale_id === saleId);
+    expect(originalItems).toHaveLength(1);
+    expect(originalItems[0].quantity).toBe(1);
   });
 });
 
