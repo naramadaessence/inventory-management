@@ -8,12 +8,12 @@
 
 ## Pending User Action
 - Run `migrations/009_edit_bill_and_delete_fix.sql` in the live Supabase project before deploying the updated UI.
-- Review and run `supabase-scripts/clear-18000-sales-data.sql` in the live Supabase SQL Editor if the client confirms all `total_amount = 18000` sales should be removed while stock remains unchanged.
+- Review and run either `supabase-scripts/clear-18000-sales-data.sql` for exact 18000-total bills or `supabase-scripts/clear-all-sales-data-preserve-stock.sql` for all current sales data. Live read-only QA showed total sales as 18070 across 7 transactions.
 
 ## Recently Completed
 - **Edit Bill**: Admin Sales table now has visible Edit Bill buttons. Modal edits party/date/items/qty/price/payment/notes and saves via `update_sale`.
 - **Delete Bill fix**: Added migration 009 to allow `sale_delete` audit rows and recreate `delete_sale`.
-- **18000 cleanup**: Added a one-off SQL script that removes sales/followups/audit rows for `total_amount = 18000` without restoring stock.
+- **Sales cleanup**: Added one-off SQL scripts for exact-18000 cleanup and all-sales cleanup, both preserving product stock.
 - **Knowledge-base review**: Read README, active context, decisions, known issues, architecture, future scope, and changelog to establish current project understanding.
 - **Testing documentation**: Added `knowledge-base/testing.md`, linked it from README, and recorded the Vitest + happy-dom testing decision.
 - **Known issue documentation**: Logged demo-mode `record_sale` rollback caveat as ISSUE-002; production Supabase RPC remains transactional.

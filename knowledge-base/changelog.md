@@ -1,10 +1,10 @@
 # Changelog
 
 ## 2026-05-29 - Edit Bill, Delete Bill Fix, and 18000 Sales Cleanup Script
-**What**: Added admin Edit Bill UI, bill delete actions, atomic `update_sale` RPC support, delete-sale schema fix, and a one-off SQL cleanup script for 18000-total sales.
+**What**: Added admin Edit Bill UI, bill delete actions, atomic `update_sale` RPC support, delete-sale schema fix, and one-off SQL cleanup scripts for sales-data reset.
 **Why**: Client requested editing bills after creation, deleting bills without errors, and clearing previous 18000 sales entries without changing stock/party data.
-**Impact**: Requires running `migrations/009_edit_bill_and_delete_fix.sql` in the live Supabase project before deploying the UI. The one-off `supabase-scripts/clear-18000-sales-data.sql` script is destructive and should be run manually only after previewing the matching rows.
-**Files Changed**: `js/pages/sales.js`, `js/pages/inventory-log.js`, `js/supabase.js`, `tests/demo-rpc.test.js`, `migrations/009_edit_bill_and_delete_fix.sql`, `supabase-scripts/clear-18000-sales-data.sql`, `supabase-schema.sql`, `knowledge-base/*`
+**Impact**: Requires running `migrations/009_edit_bill_and_delete_fix.sql` in the live Supabase project before deploying the UI. The one-off cleanup scripts are destructive and should be run manually only after previewing the matching rows.
+**Files Changed**: `js/pages/sales.js`, `js/pages/inventory-log.js`, `js/supabase.js`, `tests/demo-rpc.test.js`, `migrations/009_edit_bill_and_delete_fix.sql`, `supabase-scripts/clear-18000-sales-data.sql`, `supabase-scripts/clear-all-sales-data-preserve-stock.sql`, `supabase-schema.sql`, `knowledge-base/*`
 **Tests**: `npm test` passed (11 tests). `npm run build` passed. Browser smoke tested local Sales record/edit flow on `http://127.0.0.1:5173`.
 **Commit**: N/A
 
@@ -12,7 +12,7 @@
 - Edit Bill can change party, sale date, line items, quantities, prices, payment status, amount received, due date, and notes.
 - `update_sale` restores old item stock, replaces line items, deducts edited items, updates the sale header, and writes `sale_edit_restore` / `sale_edit` audit rows atomically.
 - Delete fix allows `sale_delete` audit rows and keeps delete stock restoration transactional.
-- Added manual Supabase cleanup script for deleting sales with `total_amount = 18000` without touching product stock.
+- Added manual Supabase cleanup scripts for deleting exact-18000 sales or all current sales without touching product stock.
 
 ---
 
