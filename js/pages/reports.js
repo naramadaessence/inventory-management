@@ -88,6 +88,8 @@ export async function renderReports(body, header) {
     const { data: checkoutItems } = await db.fetchAllPaged('checkout_items');
     const { data: categories } = await db.getAll('categories');
     const { data: allSaleItems } = await db.fetchAllPaged('sale_items');
+    const { data: parties } = await db.getAll('parties');
+    const { data: installations } = await db.getAll('installations');
     const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
     const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
 
@@ -99,7 +101,7 @@ export async function renderReports(body, header) {
     const filteredItems = allSaleItems.filter(si => filteredSaleIds.has(si.sale_id));
 
     if (activeTab === 'sales') renderSalesReport(container, filteredSales, filteredItems, prodMap, profiles);
-    else if (activeTab === 'stock') renderStockReport(container, products, catMap);
+    else if (activeTab === 'stock') renderStockReport(container, products, catMap, parties, installations, prodMap);
     else if (activeTab === 'sellers') renderSellerReport(container, sessions, checkoutItems, profiles, prodMap, startDate, endDate);
     else if (activeTab === 'movers') renderMoversReport(container, filteredItems, products, prodMap);
   }
@@ -159,9 +161,20 @@ function renderSalesReport(container, sales, saleItems, prodMap, profiles) {
   }
 }
 
-function renderStockReport(container, products, catMap) {
+function renderStockReport(container, products, catMap, parties, installations, prodMap) {
   const activeProducts = products.filter(p => p.is_active);
-  const totalValue = activeProducts.reduce((s, p) => s + p.current_stock * p.unit_price, 0);
+  const warehouseValue = activeProducts.reduce((s, p) => s + p.current_stock * p.unit_price, 0);
+
+  // Free-to-Use deployed machines are still our assets
+  const partyMap = Object.fromEntries((parties || []).map(p => [p.id, p]));
+  const ftuDeployedValue = (installations || [])
+    .filter(i => i.status === 'active' && partyMap[i.party_id]?.machine_type === 'free_to_use')
+    .reduce((sum, i) => {
+      const prod = prodMap[i.product_id];
+      return sum + ((i.quantity || 1) * (prod?.unit_price || 0));
+    }, 0);
+  const totalValue = warehouseValue + ftuDeployedValue;
+
   const byCat = {};
   activeProducts.forEach(p => {
     const cName = catMap[p.category_id]?.name || 'Other';
@@ -173,7 +186,7 @@ function renderStockReport(container, products, catMap) {
 
   container.innerHTML = `
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-icon amber"><i class="fas fa-warehouse"></i></div><div class="stat-info"><div class="stat-label">Total Stock Value</div><div class="stat-value">${formatCurrency(totalValue)}</div></div></div>
+      <div class="stat-card"><div class="stat-icon amber"><i class="fas fa-warehouse"></i></div><div class="stat-info"><div class="stat-label">Total Asset Value</div><div class="stat-value">${formatCurrency(totalValue)}</div><div class="stat-change" style="font-size:0.7rem;">Warehouse: ${formatCurrency(warehouseValue)}${ftuDeployedValue > 0 ? ` · Deployed: ${formatCurrency(ftuDeployedValue)}` : ''}</div></div></div>
       <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-boxes-stacked"></i></div><div class="stat-info"><div class="stat-label">Active Products</div><div class="stat-value">${activeProducts.length}</div></div></div>
     </div>
     <div class="grid-2">
