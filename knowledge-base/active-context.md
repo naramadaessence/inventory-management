@@ -1,7 +1,7 @@
 ## Current Status
-**Last Updated**: 2026-05-29
-**Last Agent Session**: Implemented the data-consistency hardening found during review: bill delete followup handling, stronger sale validation, RPC-backed stock workflows, atomic payment collections, tighter RLS/schema constraints, demo parity, and expanded tests.
-**Test Suite Status**: Pass - `npm test` passed 21/21 and `npm run build` passed on 2026-05-29 after the hardening changes.
+**Last Updated**: 2026-06-10
+**Last Agent Session**: Asset valuation — Free-to-Use deployed machines now included in Total Asset Value on dashboard and reports.
+**Test Suite Status**: Pass — `npm test` 21/21 and `npm run build` pass on 2026-06-10.
 
 ## In Progress
 - None.
