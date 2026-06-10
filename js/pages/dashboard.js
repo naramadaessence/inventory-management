@@ -35,7 +35,7 @@ export async function renderDashboard(body, header) {
     { data: completions },
     { data: txns },
     { data: allProfiles },
-    { data: installations },
+    { data: categories },
   ] = await Promise.all([
     db.getAll('products'),
     db.fetchAllPaged('checkout_sessions'),
@@ -46,7 +46,7 @@ export async function renderDashboard(body, header) {
     db.getAll('refill_completions'),
     db.getAll('inventory_transactions', { orderBy: ['created_at', 'desc'], limit: 20 }),
     db.getAll('profiles'),
-    db.getAll('installations'),
+    db.getAll('categories'),
   ]);
   // Reuse `amcParties` and `products` below — no second fetch needed.
   const allParties = amcParties;
@@ -65,14 +65,27 @@ export async function renderDashboard(body, header) {
   // Asset valuation: Free-to-Use machines are still our property even though
   // they're deployed at customer sites.  Purchased machines are excluded because
   // ownership has transferred to the customer.
-  const partyMap = Object.fromEntries(allParties.map(p => [p.id, p]));
-  const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
-  const ftuDeployedValue = installations
-    .filter(i => i.status === 'active' && partyMap[i.party_id]?.machine_type === 'free_to_use')
-    .reduce((sum, i) => {
-      const prod = prodMap[i.product_id];
-      return sum + ((i.quantity || 1) * (prod?.unit_price || 0));
-    }, 0);
+  // Data source: parties.machine_counts (category_id → qty) — NOT installations table.
+  // Only machine categories count (no oils, no refills).
+  const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
+  const isMachineCat = (cid) => { const c = catMap[parseInt(cid)]; if (!c || c.type === 'liquid') return false; const n = c.name.toLowerCase(); return !n.includes('refill') && !n.includes('oil'); };
+  // Average unit price per machine category (for valuation)
+  const avgPriceByCat = {};
+  products.filter(p => p.is_active).forEach(p => {
+    if (!avgPriceByCat[p.category_id]) avgPriceByCat[p.category_id] = { sum: 0, count: 0 };
+    avgPriceByCat[p.category_id].sum += p.unit_price;
+    avgPriceByCat[p.category_id].count++;
+  });
+  let ftuDeployedValue = 0;
+  allParties.filter(p => p.machine_type === 'free_to_use').forEach(p => {
+    const mc = p.machine_counts || {};
+    Object.entries(mc).forEach(([cid, qty]) => {
+      if (isMachineCat(cid) && qty > 0) {
+        const avg = avgPriceByCat[parseInt(cid)];
+        ftuDeployedValue += qty * (avg ? avg.sum / avg.count : 0);
+      }
+    });
+  });
   const totalAssetValue = warehouseStockValue + ftuDeployedValue;
   const activeRentals = rentals.filter(r => r.status === 'active').length;
   const totalSalesValue = sales.reduce((sum, s) => sum + (s.total_amount || 0), 0);

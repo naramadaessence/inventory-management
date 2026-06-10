@@ -53,22 +53,27 @@ export async function renderProducts(body, header) {
   `;
   document.getElementById('mobile-toggle')?.addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
 
-  const [{ data: products }, { data: categories }, { data: installations }, { data: parties }] = await Promise.all([
+  const [{ data: products }, { data: categories }, { data: parties }] = await Promise.all([
     db.getAll('products'),
     db.getAll('categories'),
-    db.getAll('installations'),
     db.getAll('parties'),
   ]);
   const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
 
-  // Build per-product deployed (Free-to-Use) quantity map
-  const partyMap = Object.fromEntries((parties || []).map(p => [p.id, p]));
-  const deployedByProduct = {};
-  (installations || []).filter(i => i.status === 'active' && partyMap[i.party_id]?.machine_type === 'free_to_use').forEach(i => {
-    if (!deployedByProduct[i.product_id]) deployedByProduct[i.product_id] = { qty: 0, parties: [] };
-    deployedByProduct[i.product_id].qty += (i.quantity || 1);
-    const pName = partyMap[i.party_id]?.name;
-    if (pName && !deployedByProduct[i.product_id].parties.includes(pName)) deployedByProduct[i.product_id].parties.push(pName);
+  // Machine category filter: only physical machines (diffusers/dispensers), NOT oils or refills
+  const isMachineCat = (cid) => { const c = catMap[parseInt(cid)]; if (!c || c.type === 'liquid') return false; const n = c.name.toLowerCase(); return !n.includes('refill') && !n.includes('oil'); };
+
+  // Build per-CATEGORY deployed (Free-to-Use) quantity map from parties.machine_counts
+  const deployedByCat = {};  // category_id → { qty, parties[] }
+  (parties || []).filter(p => p.machine_type === 'free_to_use').forEach(p => {
+    const mc = p.machine_counts || {};
+    Object.entries(mc).forEach(([cid, qty]) => {
+      if (isMachineCat(cid) && qty > 0) {
+        if (!deployedByCat[cid]) deployedByCat[cid] = { qty: 0, parties: [] };
+        deployedByCat[cid].qty += qty;
+        if (p.name && !deployedByCat[cid].parties.includes(p.name)) deployedByCat[cid].parties.push(p.name);
+      }
+    });
   });
 
   body.innerHTML = `
@@ -112,7 +117,7 @@ export async function renderProducts(body, header) {
       container.innerHTML = stockSummaryHtml(filtered) + `<div class="product-grid">${filtered.map(p => {
         const cat = catMap[p.category_id];
         const isLow = p.current_stock <= p.min_stock_threshold;
-        const dep = deployedByProduct[p.id];
+        const dep = isMachineCat(String(p.category_id)) ? deployedByCat[String(p.category_id)] : null;
         const depHtml = dep ? `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:10px;background:rgba(20,184,166,0.1);color:#14b8a6;font-size:0.7rem;font-weight:600;" title="Deployed at: ${dep.parties.map(n => escapeHtml(n)).join(', ')}"><i class="fas fa-truck-loading" style="font-size:0.55rem;"></i> ${dep.qty} deployed</span>` : '';
         return `<div class="product-card" data-id="${p.id}">
           ${productImageHtml(p)}
@@ -134,7 +139,7 @@ export async function renderProducts(body, header) {
           const cat = catMap[p.category_id];
           const isLow = p.current_stock <= p.min_stock_threshold;
           const imgUrl = getImageUrl(p.image_url);
-          const dep = deployedByProduct[p.id];
+          const dep = isMachineCat(String(p.category_id)) ? deployedByCat[String(p.category_id)] : null;
           const depCell = dep
             ? `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:12px;background:rgba(20,184,166,0.1);color:#14b8a6;font-weight:600;font-size:0.8rem;" title="${dep.parties.map(n => escapeHtml(n)).join(', ')}">${formatStock(dep.qty, p.type)}</span>`
             : '<span style="color:var(--text-muted);">—</span>';

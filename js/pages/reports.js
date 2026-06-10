@@ -89,7 +89,6 @@ export async function renderReports(body, header) {
     const { data: categories } = await db.getAll('categories');
     const { data: allSaleItems } = await db.fetchAllPaged('sale_items');
     const { data: parties } = await db.getAll('parties');
-    const { data: installations } = await db.getAll('installations');
     const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
     const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
 
@@ -101,7 +100,7 @@ export async function renderReports(body, header) {
     const filteredItems = allSaleItems.filter(si => filteredSaleIds.has(si.sale_id));
 
     if (activeTab === 'sales') renderSalesReport(container, filteredSales, filteredItems, prodMap, profiles);
-    else if (activeTab === 'stock') renderStockReport(container, products, catMap, parties, installations, prodMap);
+    else if (activeTab === 'stock') renderStockReport(container, products, catMap, parties, prodMap);
     else if (activeTab === 'sellers') renderSellerReport(container, sessions, checkoutItems, profiles, prodMap, startDate, endDate);
     else if (activeTab === 'movers') renderMoversReport(container, filteredItems, products, prodMap);
   }
@@ -161,31 +160,40 @@ function renderSalesReport(container, sales, saleItems, prodMap, profiles) {
   }
 }
 
-function renderStockReport(container, products, catMap, parties, installations, prodMap) {
+function renderStockReport(container, products, catMap, parties, prodMap) {
   const activeProducts = products.filter(p => p.is_active);
   const warehouseValue = activeProducts.reduce((s, p) => s + p.current_stock * p.unit_price, 0);
 
-  // Free-to-Use deployed machines are still our assets
-  const partyMap = Object.fromEntries((parties || []).map(p => [p.id, p]));
-  const activeInstalls = (installations || [])
-    .filter(i => i.status === 'active' && partyMap[i.party_id]?.machine_type === 'free_to_use');
+  // Machine category filter: only physical machines (diffusers/dispensers), NOT oils or refills
+  const isMachineCat = (cid) => { const c = catMap[parseInt(cid)]; if (!c || c.type === 'liquid') return false; const n = c.name.toLowerCase(); return !n.includes('refill') && !n.includes('oil'); };
 
-  // Per-product deployed quantity and party locations
-  const deployedByProduct = {};
-  activeInstalls.forEach(i => {
-    const pid = i.product_id;
-    if (!deployedByProduct[pid]) deployedByProduct[pid] = { qty: 0, parties: [] };
-    deployedByProduct[pid].qty += (i.quantity || 1);
-    const pName = partyMap[i.party_id]?.name;
-    if (pName && !deployedByProduct[pid].parties.includes(pName)) {
-      deployedByProduct[pid].parties.push(pName);
-    }
+  // Deployed machines: sourced from parties.machine_counts (category_id → qty)
+  // Only Free-to-Use parties, only machine categories
+  const deployedByCat = {};  // category_id → { qty, parties[] }
+  (parties || []).filter(p => p.machine_type === 'free_to_use').forEach(p => {
+    const mc = p.machine_counts || {};
+    Object.entries(mc).forEach(([cid, qty]) => {
+      if (isMachineCat(cid) && qty > 0) {
+        if (!deployedByCat[cid]) deployedByCat[cid] = { qty: 0, parties: [] };
+        deployedByCat[cid].qty += qty;
+        if (p.name && !deployedByCat[cid].parties.includes(p.name)) deployedByCat[cid].parties.push(p.name);
+      }
+    });
   });
 
-  const ftuDeployedValue = activeInstalls.reduce((sum, i) => {
-    const prod = prodMap[i.product_id];
-    return sum + ((i.quantity || 1) * (prod?.unit_price || 0));
-  }, 0);
+  // Average unit price per machine category for valuation
+  const avgPriceByCat = {};
+  activeProducts.forEach(p => {
+    if (!avgPriceByCat[p.category_id]) avgPriceByCat[p.category_id] = { sum: 0, count: 0 };
+    avgPriceByCat[p.category_id].sum += p.unit_price;
+    avgPriceByCat[p.category_id].count++;
+  });
+
+  let ftuDeployedValue = 0;
+  Object.entries(deployedByCat).forEach(([cid, data]) => {
+    const avg = avgPriceByCat[parseInt(cid)];
+    ftuDeployedValue += data.qty * (avg ? avg.sum / avg.count : 0);
+  });
   const totalValue = warehouseValue + ftuDeployedValue;
 
   // Category breakdown (warehouse only)
@@ -198,12 +206,16 @@ function renderStockReport(container, products, catMap, parties, installations, 
   });
   const catEntries = Object.entries(byCat).sort((a, b) => b[1].value - a[1].value);
 
-  // Build combined product list: warehouse stock + deployed qty, sorted by total value
+  // Build combined product list: warehouse stock + deployed qty (by category), sorted by total value
   const productRows = activeProducts.map(p => {
-    const dep = deployedByProduct[p.id] || { qty: 0, parties: [] };
+    const dep = deployedByCat[String(p.category_id)] || { qty: 0, parties: [] };
+    // Only show deployed for machine categories
+    const showDeployed = isMachineCat(String(p.category_id));
+    const depQty = showDeployed ? dep.qty : 0;
+    const depParties = showDeployed ? dep.parties : [];
     const whValue = p.current_stock * p.unit_price;
-    const depValue = dep.qty * p.unit_price;
-    return { ...p, deployedQty: dep.qty, deployedParties: dep.parties, whValue, depValue, totalValue: whValue + depValue };
+    const depValue = depQty * p.unit_price;
+    return { ...p, deployedQty: depQty, deployedParties: depParties, whValue, depValue, totalValue: whValue + depValue };
   }).sort((a, b) => b.totalValue - a.totalValue);
 
   container.innerHTML = `
