@@ -1,5 +1,20 @@
 # Changelog
 
+## 2026-06-10 — Products Page + Reports: Deployed Column Always Visible
+**What**: Products page (grid + table) now shows Free-to-Use deployed count per product. Reports Stock Details table always shows Deployed/Location columns (no longer conditional).
+**Why**: Client wants clear visibility on every product card and table row of what's in the warehouse vs deployed at customer sites.
+**Impact**: Products page now fetches installations + parties data (parallel). No schema change.
+**Files Changed**: `js/pages/products.js`, `js/pages/reports.js`
+**Tests**: UI-only. Build passes, 21/21 tests pass.
+**Commit**: `e48b88e`
+
+- Products grid cards: teal badge "🚛 X deployed" with hover tooltip showing party names
+- Products table view: "Stock" → "Warehouse Stock", new "Deployed" column with teal badges or "—"
+- Reports Stock Details: Deployed + Location columns always shown (not conditionally hidden)
+- Legend (🟠 Warehouse · 🟢 Deployed) always visible in Reports header
+
+---
+
 ## 2026-06-10 — Stock Valuation: Warehouse vs Deployed Breakdown
 **What**: Reports → Stock Valuation tab now shows full warehouse vs Free-to-Use deployed breakdown in both the doughnut chart and stock details table.
 **Why**: Client needs clear visibility into how much stock is in the warehouse vs deployed at Free-to-Use customer sites.
