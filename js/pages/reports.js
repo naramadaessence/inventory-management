@@ -214,8 +214,8 @@ function renderStockReport(container, products, catMap, parties, installations, 
     </div>
     <div class="grid-2">
       <div class="card"><div class="card-header"><h3>Asset Value by Category</h3></div><div class="card-body"><div class="chart-container"><canvas id="stock-chart"></canvas></div></div></div>
-      <div class="card"><div class="card-header"><h3>Stock Details</h3>${ftuDeployedValue > 0 ? '<div style="display:flex;gap:10px;align-items:center;font-size:0.7rem;"><span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></span> Warehouse</span><span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;border-radius:50%;background:#14b8a6;display:inline-block;"></span> Deployed</span></div>' : ''}</div><div class="card-body">
-        <table class="data-table"><thead><tr><th>Product</th><th>Warehouse</th>${ftuDeployedValue > 0 ? '<th>Deployed</th><th>Location</th>' : ''}<th>Total Value</th></tr></thead>
+      <div class="card"><div class="card-header"><h3>Stock Details</h3><div style="display:flex;gap:10px;align-items:center;font-size:0.7rem;"><span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></span> Warehouse</span><span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;border-radius:50%;background:#14b8a6;display:inline-block;"></span> Deployed (Free-to-Use)</span></div></div><div class="card-body">
+        <table class="data-table"><thead><tr><th>Product</th><th>Warehouse</th><th>Deployed</th><th>Location</th><th>Total Value</th></tr></thead>
         <tbody>${productRows.slice(0, 20).map(p => {
           const depBadge = p.deployedQty > 0
             ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;background:rgba(20,184,166,0.1);color:#14b8a6;font-weight:600;font-size:0.8rem;">${formatStock(p.deployedQty, p.type)}</span>`
@@ -226,7 +226,8 @@ function renderStockReport(container, products, catMap, parties, installations, 
           return `<tr>
             <td>${esc(p.name)}</td>
             <td>${formatStock(p.current_stock, p.type)}</td>
-            ${ftuDeployedValue > 0 ? `<td>${depBadge}</td><td>${locationText}</td>` : ''}
+            <td>${depBadge}</td>
+            <td>${locationText}</td>
             <td style="font-weight:600;">${formatCurrency(p.totalValue)}</td>
           </tr>`;
         }).join('')}</tbody></table>
