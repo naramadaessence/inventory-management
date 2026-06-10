@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-06-10 - Free to Use Machine Pricing Validation
+**What**: Added validation to prevent selling items below stock value to parties with 'Free to Use' machines.
+**Why**: Client requested that if a machine is free to use, the sale price of refills/items cannot be deducted from (be less than) the Total Stock Value (unit price) to ensure costs are recovered.
+**Files Changed**: `js/pages/sales.js`
+**Commit**: Pending
+
+- Added validation in `Record Sale` modal when adding items.
+- Added validation in `Edit Bill` modal when adding new items and when updating prices of existing items inline.
+- Shows error toast and prevents saving if price is below product unit price for 'Free to Use' machines.
+
 ## 2026-05-29 - Data Consistency Hardening
 **What**: Hardened bill edit/delete, sales validation, payment collections, stock workflows, RLS, schema constraints, demo parity, and tests.
 **Why**: The detailed review found remaining ways for stock, sales, sale_items, payment followups, and audit rows to diverge under bad input, partial failures, or concurrent admin actions.

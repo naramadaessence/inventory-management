@@ -301,9 +301,17 @@ function openSaleModal(parties, products, body, header) {
     const po = document.getElementById('add-item-product').selectedOptions[0];
     const pid = parseInt(po.value), qty = parseFloat(document.getElementById('add-item-qty').value), price = parseFloat(document.getElementById('add-item-price').value);
     if (!pid || isNaN(qty) || qty <= 0 || isNaN(price) || price < 0) { showToast('Invalid product, quantity or price', 'error'); return; }
+    
+    const pr = products.find(p => p.id === pid);
+    const party = parties.find(x => x.id === selectedPartyId);
+    if (party && party.machine_type === 'free_to_use' && price < (pr?.unit_price || 0)) {
+      showToast(`Price cannot be less than stock value (₹${pr?.unit_price}) for Free to Use machines`, 'error');
+      return;
+    }
+
     const ex = lineItems.find(i => i.product_id === pid && i.unit_price === price);
     if (ex) { ex.quantity += qty; ex.line_total = roundCurrency(ex.quantity * ex.unit_price); }
-    else { const pr = products.find(p => p.id === pid); lineItems.push({ product_id: pid, quantity: qty, unit_price: price, line_total: roundCurrency(qty * price), prodName: pr?.name || '?', prodType: pr?.type || 'unit' }); }
+    else { lineItems.push({ product_id: pid, quantity: qty, unit_price: price, line_total: roundCurrency(qty * price), prodName: pr?.name || '?', prodType: pr?.type || 'unit' }); }
     document.getElementById('add-item-qty').value = 1; renderItems();
   });
 
@@ -493,6 +501,15 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
           input.value = lineItems[idx].unit_price;
           return;
         }
+
+        const party = parties.find(x => x.id === selectedPartyId);
+        const product = prodMap[lineItems[idx].product_id];
+        if (party && party.machine_type === 'free_to_use' && product && price < product.unit_price) {
+          showToast(`Price cannot be less than stock value (₹${product.unit_price}) for Free to Use machines`, 'error');
+          input.value = lineItems[idx].unit_price;
+          return;
+        }
+
         lineItems[idx].unit_price = price;
         lineItems[idx].line_total = roundCurrency(lineItems[idx].quantity * price);
         renderItems();
@@ -526,6 +543,15 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
         ok = false;
         return;
       }
+
+      const party = parties.find(x => x.id === selectedPartyId);
+      const product = prodMap[lineItems[idx].product_id];
+      if (party && party.machine_type === 'free_to_use' && product && price < product.unit_price) {
+        showToast(`Price cannot be less than stock value (₹${product.unit_price}) for Free to Use machines`, 'error');
+        ok = false;
+        return;
+      }
+
       lineItems[idx].unit_price = price;
     });
     lineItems.forEach(item => {
@@ -575,6 +601,13 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
       showToast('Invalid product, quantity or price', 'error');
       return;
     }
+
+    const party = parties.find(x => x.id === selectedPartyId);
+    if (party && party.machine_type === 'free_to_use' && price < product.unit_price) {
+      showToast(`Price cannot be less than stock value (₹${product.unit_price}) for Free to Use machines`, 'error');
+      return;
+    }
+
     const existing = lineItems.find(item => item.product_id === product.id && item.unit_price === price);
     if (existing) {
       existing.quantity += qty;
