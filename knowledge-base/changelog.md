@@ -1,13 +1,5 @@
 # Changelog
 
-## 2026-06-11 - Allow Discount for Free to Use Machines
-**What**: Modified sales validation to allow selling items below stock value to parties with 'Free to Use' machines.
-**Why**: Client requested to allow the discount anyway, bypassing the strict unit price enforcement.
-**Files Changed**: `js/pages/sales.js`
-**Commit**: Pending
-
-- Changed the blocking error to a non-blocking warning toast when price is below unit price for a 'Free to Use' machine in `Record Sale` and `Edit Bill` flows.
-
 ## 2026-06-10 - Free to Use Machine Pricing Validation
 **What**: Added validation to prevent selling items below stock value to parties with 'Free to Use' machines.
 **Why**: Client requested that if a machine is free to use, the sale price of refills/items cannot be deducted from (be less than) the Total Stock Value (unit price) to ensure costs are recovered.

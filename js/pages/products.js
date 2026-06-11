@@ -53,9 +53,28 @@ export async function renderProducts(body, header) {
   `;
   document.getElementById('mobile-toggle')?.addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
 
-  const { data: products } = await db.getAll('products');
-  const { data: categories } = await db.getAll('categories');
+  const [{ data: products }, { data: categories }, { data: parties }] = await Promise.all([
+    db.getAll('products'),
+    db.getAll('categories'),
+    db.getAll('parties'),
+  ]);
   const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
+
+  // Machine category filter: only physical machines (diffusers/dispensers), NOT oils or refills
+  const isMachineCat = (cid) => { const c = catMap[parseInt(cid)]; if (!c || c.type === 'liquid') return false; const n = c.name.toLowerCase(); return !n.includes('refill') && !n.includes('oil'); };
+
+  // Build per-CATEGORY deployed (Free-to-Use) quantity map from parties.machine_counts
+  const deployedByCat = {};  // category_id → { qty, parties[] }
+  (parties || []).filter(p => p.machine_type === 'free_to_use').forEach(p => {
+    const mc = p.machine_counts || {};
+    Object.entries(mc).forEach(([cid, qty]) => {
+      if (isMachineCat(cid) && qty > 0) {
+        if (!deployedByCat[cid]) deployedByCat[cid] = { qty: 0, parties: [] };
+        deployedByCat[cid].qty += qty;
+        if (p.name && !deployedByCat[cid].parties.includes(p.name)) deployedByCat[cid].parties.push(p.name);
+      }
+    });
+  });
 
   body.innerHTML = `
     <div class="toolbar">
@@ -98,6 +117,8 @@ export async function renderProducts(body, header) {
       container.innerHTML = stockSummaryHtml(filtered) + `<div class="product-grid">${filtered.map(p => {
         const cat = catMap[p.category_id];
         const isLow = p.current_stock <= p.min_stock_threshold;
+        const dep = isMachineCat(String(p.category_id)) ? deployedByCat[String(p.category_id)] : null;
+        const depHtml = dep ? `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:10px;background:rgba(20,184,166,0.1);color:#14b8a6;font-size:0.7rem;font-weight:600;" title="Deployed at: ${dep.parties.map(n => escapeHtml(n)).join(', ')}"><i class="fas fa-truck-loading" style="font-size:0.55rem;"></i> ${dep.qty} deployed</span>` : '';
         return `<div class="product-card" data-id="${p.id}">
           ${productImageHtml(p)}
           <div class="product-card-body">
@@ -105,6 +126,7 @@ export async function renderProducts(body, header) {
             <div style="font-size:0.75rem;color:var(--text-muted);">${escapeHtml(cat?.name || '—')} · ${formatPricePerUnit(p.unit_price, p.type)}</div>
             <div class="product-card-meta">
               <span class="product-card-stock" style="${isLow ? 'color:var(--red);font-weight:600;' : ''}">${isLow ? '⚠ ' : ''}${formatStock(p.current_stock, p.type)}</span>
+              ${depHtml}
               <span class="product-card-type ${p.type}">${p.type}</span>
             </div>
           </div>
@@ -112,11 +134,15 @@ export async function renderProducts(body, header) {
       }).join('')}</div>`;
     } else {
       container.innerHTML = stockSummaryHtml(filtered) + `<div class="table-wrapper"><table class="data-table">
-        <thead><tr><th></th><th>Product</th><th>Category</th><th>Type</th><th>Price</th><th>Stock</th><th>Threshold</th><th>Expiry</th><th>Actions</th></tr></thead>
+        <thead><tr><th></th><th>Product</th><th>Category</th><th>Type</th><th>Price</th><th>Warehouse Stock</th><th>Deployed</th><th>Threshold</th><th>Expiry</th><th>Actions</th></tr></thead>
         <tbody>${filtered.map(p => {
           const cat = catMap[p.category_id];
           const isLow = p.current_stock <= p.min_stock_threshold;
           const imgUrl = getImageUrl(p.image_url);
+          const dep = isMachineCat(String(p.category_id)) ? deployedByCat[String(p.category_id)] : null;
+          const depCell = dep
+            ? `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:12px;background:rgba(20,184,166,0.1);color:#14b8a6;font-weight:600;font-size:0.8rem;" title="${dep.parties.map(n => escapeHtml(n)).join(', ')}">${formatStock(dep.qty, p.type)}</span>`
+            : '<span style="color:var(--text-muted);">—</span>';
           return `<tr>
             <td style="width:40px;">${imgUrl ? `<img src="${escapeHtml(imgUrl)}" style="width:36px;height:36px;border-radius:6px;object-fit:cover;" />` : `<i class="fas ${p.type === 'liquid' ? 'fa-flask' : 'fa-box'}" style="color:var(--text-muted);font-size:1.2rem;"></i>`}</td>
             <td><strong>${escapeHtml(p.name)}</strong>${p.model_number ? `<br><small style="color:var(--text-muted);">${escapeHtml(p.model_number)}</small>` : ''}</td>
@@ -124,6 +150,7 @@ export async function renderProducts(body, header) {
             <td><span class="badge-status ${p.type === 'liquid' ? 'purple' : 'blue'}">${p.type}</span></td>
             <td>${formatPricePerUnit(p.unit_price, p.type)}</td>
             <td style="${isLow ? 'color:var(--red);font-weight:700;' : ''}">${isLow ? '⚠ ' : ''}${formatStock(p.current_stock, p.type)}</td>
+            <td>${depCell}</td>
             <td>${formatStock(p.min_stock_threshold, p.type)}</td>
             <td>${formatDate(p.expiry_date)}</td>
             <td><button class="btn btn-sm btn-ghost product-edit-btn" data-id="${p.id}"><i class="fas fa-pen"></i></button></td>

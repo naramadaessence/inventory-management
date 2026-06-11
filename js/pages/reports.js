@@ -88,6 +88,7 @@ export async function renderReports(body, header) {
     const { data: checkoutItems } = await db.fetchAllPaged('checkout_items');
     const { data: categories } = await db.getAll('categories');
     const { data: allSaleItems } = await db.fetchAllPaged('sale_items');
+    const { data: parties } = await db.getAll('parties');
     const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
     const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
 
@@ -99,7 +100,7 @@ export async function renderReports(body, header) {
     const filteredItems = allSaleItems.filter(si => filteredSaleIds.has(si.sale_id));
 
     if (activeTab === 'sales') renderSalesReport(container, filteredSales, filteredItems, prodMap, profiles);
-    else if (activeTab === 'stock') renderStockReport(container, products, catMap);
+    else if (activeTab === 'stock') renderStockReport(container, products, catMap, parties, prodMap);
     else if (activeTab === 'sellers') renderSellerReport(container, sessions, checkoutItems, profiles, prodMap, startDate, endDate);
     else if (activeTab === 'movers') renderMoversReport(container, filteredItems, products, prodMap);
   }
@@ -159,9 +160,43 @@ function renderSalesReport(container, sales, saleItems, prodMap, profiles) {
   }
 }
 
-function renderStockReport(container, products, catMap) {
+function renderStockReport(container, products, catMap, parties, prodMap) {
   const activeProducts = products.filter(p => p.is_active);
-  const totalValue = activeProducts.reduce((s, p) => s + p.current_stock * p.unit_price, 0);
+  const warehouseValue = activeProducts.reduce((s, p) => s + p.current_stock * p.unit_price, 0);
+
+  // Machine category filter: only physical machines (diffusers/dispensers), NOT oils or refills
+  const isMachineCat = (cid) => { const c = catMap[parseInt(cid)]; if (!c || c.type === 'liquid') return false; const n = c.name.toLowerCase(); return !n.includes('refill') && !n.includes('oil'); };
+
+  // Deployed machines: sourced from parties.machine_counts (category_id → qty)
+  // Only Free-to-Use parties, only machine categories
+  const deployedByCat = {};  // category_id → { qty, parties[] }
+  (parties || []).filter(p => p.machine_type === 'free_to_use').forEach(p => {
+    const mc = p.machine_counts || {};
+    Object.entries(mc).forEach(([cid, qty]) => {
+      if (isMachineCat(cid) && qty > 0) {
+        if (!deployedByCat[cid]) deployedByCat[cid] = { qty: 0, parties: [] };
+        deployedByCat[cid].qty += qty;
+        if (p.name && !deployedByCat[cid].parties.includes(p.name)) deployedByCat[cid].parties.push(p.name);
+      }
+    });
+  });
+
+  // Average unit price per machine category for valuation
+  const avgPriceByCat = {};
+  activeProducts.forEach(p => {
+    if (!avgPriceByCat[p.category_id]) avgPriceByCat[p.category_id] = { sum: 0, count: 0 };
+    avgPriceByCat[p.category_id].sum += p.unit_price;
+    avgPriceByCat[p.category_id].count++;
+  });
+
+  let ftuDeployedValue = 0;
+  Object.entries(deployedByCat).forEach(([cid, data]) => {
+    const avg = avgPriceByCat[parseInt(cid)];
+    ftuDeployedValue += data.qty * (avg ? avg.sum / avg.count : 0);
+  });
+  const totalValue = warehouseValue + ftuDeployedValue;
+
+  // Category breakdown (warehouse only)
   const byCat = {};
   activeProducts.forEach(p => {
     const cName = catMap[p.category_id]?.name || 'Other';
@@ -171,32 +206,82 @@ function renderStockReport(container, products, catMap) {
   });
   const catEntries = Object.entries(byCat).sort((a, b) => b[1].value - a[1].value);
 
+  // Build combined product list: warehouse stock + deployed qty (by category), sorted by total value
+  const productRows = activeProducts.map(p => {
+    const dep = deployedByCat[String(p.category_id)] || { qty: 0, parties: [] };
+    // Only show deployed for machine categories
+    const showDeployed = isMachineCat(String(p.category_id));
+    const depQty = showDeployed ? dep.qty : 0;
+    const depParties = showDeployed ? dep.parties : [];
+    const whValue = p.current_stock * p.unit_price;
+    const depValue = depQty * p.unit_price;
+    return { ...p, deployedQty: depQty, deployedParties: depParties, whValue, depValue, totalValue: whValue + depValue };
+  }).sort((a, b) => b.totalValue - a.totalValue);
+
   container.innerHTML = `
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-icon amber"><i class="fas fa-warehouse"></i></div><div class="stat-info"><div class="stat-label">Total Stock Value</div><div class="stat-value">${formatCurrency(totalValue)}</div></div></div>
+      <div class="stat-card"><div class="stat-icon amber"><i class="fas fa-warehouse"></i></div><div class="stat-info"><div class="stat-label">Total Asset Value</div><div class="stat-value">${formatCurrency(totalValue)}</div><div class="stat-change" style="font-size:0.7rem;">Warehouse: ${formatCurrency(warehouseValue)}${ftuDeployedValue > 0 ? ` · Deployed: ${formatCurrency(ftuDeployedValue)}` : ''}</div></div></div>
       <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-boxes-stacked"></i></div><div class="stat-info"><div class="stat-label">Active Products</div><div class="stat-value">${activeProducts.length}</div></div></div>
+      ${ftuDeployedValue > 0 ? `<div class="stat-card"><div class="stat-icon" style="background:rgba(20,184,166,0.12);color:#14b8a6;"><i class="fas fa-truck-loading"></i></div><div class="stat-info"><div class="stat-label">Deployed (Free-to-Use)</div><div class="stat-value">${formatCurrency(ftuDeployedValue)}</div><div class="stat-change" style="font-size:0.7rem;">${activeInstalls.length} installation${activeInstalls.length !== 1 ? 's' : ''} at ${new Set(activeInstalls.map(i => i.party_id)).size} location${new Set(activeInstalls.map(i => i.party_id)).size !== 1 ? 's' : ''}</div></div></div>` : ''}
     </div>
     <div class="grid-2">
-      <div class="card"><div class="card-header"><h3>Value by Category</h3></div><div class="card-body"><div class="chart-container"><canvas id="stock-chart"></canvas></div></div></div>
-      <div class="card"><div class="card-header"><h3>Stock Details</h3></div><div class="card-body">
-        <table class="data-table"><thead><tr><th>Product</th><th>Stock</th><th>Value</th></tr></thead>
-        <tbody>${activeProducts.sort((a,b) => (b.current_stock*b.unit_price) - (a.current_stock*a.unit_price)).slice(0,15).map(p => `<tr><td>${esc(p.name)}</td><td>${formatStock(p.current_stock, p.type)}</td><td style="font-weight:600;">${formatCurrency(p.current_stock * p.unit_price)}</td></tr>`).join('')}</tbody></table>
+      <div class="card"><div class="card-header"><h3>Asset Value by Category</h3></div><div class="card-body"><div class="chart-container"><canvas id="stock-chart"></canvas></div></div></div>
+      <div class="card"><div class="card-header"><h3>Stock Details</h3><div style="display:flex;gap:10px;align-items:center;font-size:0.7rem;"><span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;border-radius:50%;background:var(--amber);display:inline-block;"></span> Warehouse</span><span style="display:inline-flex;align-items:center;gap:4px;"><span style="width:8px;height:8px;border-radius:50%;background:#14b8a6;display:inline-block;"></span> Deployed (Free-to-Use)</span></div></div><div class="card-body">
+        <table class="data-table"><thead><tr><th>Product</th><th>Warehouse</th><th>Deployed</th><th>Location</th><th>Total Value</th></tr></thead>
+        <tbody>${productRows.slice(0, 20).map(p => {
+          const depBadge = p.deployedQty > 0
+            ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;background:rgba(20,184,166,0.1);color:#14b8a6;font-weight:600;font-size:0.8rem;">${formatStock(p.deployedQty, p.type)}</span>`
+            : '<span style="color:var(--text-muted);font-size:0.8rem;">—</span>';
+          const locationText = p.deployedParties.length > 0
+            ? `<span style="font-size:0.75rem;color:var(--text-muted);">${p.deployedParties.map(n => esc(n)).join(', ')}</span>`
+            : '<span style="color:var(--text-muted);font-size:0.75rem;">—</span>';
+          return `<tr>
+            <td>${esc(p.name)}</td>
+            <td>${formatStock(p.current_stock, p.type)}</td>
+            <td>${depBadge}</td>
+            <td>${locationText}</td>
+            <td style="font-weight:600;">${formatCurrency(p.totalValue)}</td>
+          </tr>`;
+        }).join('')}</tbody></table>
       </div></div>
     </div>
   `;
 
-  if (catEntries.length > 0) {
-    const colors = ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ef4444', '#06b6d4'];
+  // Build chart data: categories (warehouse) + deployed slice
+  const chartLabels = catEntries.map(([n]) => n);
+  const chartData = catEntries.map(([, d]) => d.value);
+  const colors = ['#f59e0b', '#3b82f6', '#10b981', '#8b5cf6', '#ef4444', '#06b6d4', '#ec4899', '#84cc16'];
+  const chartColors = colors.slice(0, catEntries.length);
+
+  // Add deployed slice if there is deployed value
+  if (ftuDeployedValue > 0) {
+    chartLabels.push('Deployed (Free-to-Use)');
+    chartData.push(ftuDeployedValue);
+    chartColors.push('#14b8a6');
+  }
+
+  if (chartLabels.length > 0) {
     const ctx = document.getElementById('stock-chart').getContext('2d');
     const chart = new Chart(ctx, {
       type: 'doughnut',
       data: {
-        labels: catEntries.map(([n]) => n),
-        datasets: [{ data: catEntries.map(([, d]) => d.value), backgroundColor: colors.slice(0, catEntries.length), borderWidth: 0 }]
+        labels: chartLabels,
+        datasets: [{ data: chartData, backgroundColor: chartColors, borderWidth: 2, borderColor: 'var(--card)' }]
       },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { position: 'bottom', labels: { color: '#94a3b8', padding: 16 } } }
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#94a3b8', padding: 16 } },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                const pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : 0;
+                return ` ${ctx.label}: ${formatCurrency(ctx.parsed)} (${pct}%)`;
+              }
+            }
+          }
+        }
       }
     });
     chartInstances.push(chart);

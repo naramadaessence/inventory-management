@@ -35,6 +35,7 @@ export async function renderDashboard(body, header) {
     { data: completions },
     { data: txns },
     { data: allProfiles },
+    { data: categories },
   ] = await Promise.all([
     db.getAll('products'),
     db.fetchAllPaged('checkout_sessions'),
@@ -45,6 +46,7 @@ export async function renderDashboard(body, header) {
     db.getAll('refill_completions'),
     db.getAll('inventory_transactions', { orderBy: ['created_at', 'desc'], limit: 20 }),
     db.getAll('profiles'),
+    db.getAll('categories'),
   ]);
   // Reuse `amcParties` and `products` below — no second fetch needed.
   const allParties = amcParties;
@@ -58,7 +60,33 @@ export async function renderDashboard(body, header) {
   const lowStockProducts = products.filter(p => p.is_active && p.current_stock <= p.min_stock_threshold);
   const expiringProducts = products.filter(p => p.is_active && p.expiry_date && daysUntil(p.expiry_date) <= CONFIG.EXPIRY_WARN_DAYS && daysUntil(p.expiry_date) > 0);
   const expiredProducts = products.filter(p => p.is_active && p.expiry_date && daysUntil(p.expiry_date) <= 0);
-  const totalStockValue = products.reduce((sum, p) => sum + (p.current_stock * p.unit_price), 0);
+  const warehouseStockValue = products.reduce((sum, p) => sum + (p.current_stock * p.unit_price), 0);
+
+  // Asset valuation: Free-to-Use machines are still our property even though
+  // they're deployed at customer sites.  Purchased machines are excluded because
+  // ownership has transferred to the customer.
+  // Data source: parties.machine_counts (category_id → qty) — NOT installations table.
+  // Only machine categories count (no oils, no refills).
+  const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
+  const isMachineCat = (cid) => { const c = catMap[parseInt(cid)]; if (!c || c.type === 'liquid') return false; const n = c.name.toLowerCase(); return !n.includes('refill') && !n.includes('oil'); };
+  // Average unit price per machine category (for valuation)
+  const avgPriceByCat = {};
+  products.filter(p => p.is_active).forEach(p => {
+    if (!avgPriceByCat[p.category_id]) avgPriceByCat[p.category_id] = { sum: 0, count: 0 };
+    avgPriceByCat[p.category_id].sum += p.unit_price;
+    avgPriceByCat[p.category_id].count++;
+  });
+  let ftuDeployedValue = 0;
+  allParties.filter(p => p.machine_type === 'free_to_use').forEach(p => {
+    const mc = p.machine_counts || {};
+    Object.entries(mc).forEach(([cid, qty]) => {
+      if (isMachineCat(cid) && qty > 0) {
+        const avg = avgPriceByCat[parseInt(cid)];
+        ftuDeployedValue += qty * (avg ? avg.sum / avg.count : 0);
+      }
+    });
+  });
+  const totalAssetValue = warehouseStockValue + ftuDeployedValue;
   const activeRentals = rentals.filter(r => r.status === 'active').length;
   const totalSalesValue = sales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
   const alertCount = lowStockProducts.length + flaggedSessions + expiredProducts.length + pendingTotal;
@@ -184,9 +212,9 @@ export async function renderDashboard(body, header) {
       <div class="stat-card">
         <div class="stat-icon amber"><i class="fas fa-warehouse"></i></div>
         <div class="stat-info">
-          <div class="stat-label">Total Stock Value</div>
-          <div class="stat-value">${formatCurrency(totalStockValue)}</div>
-          <div class="stat-change">${products.filter(p=>p.is_active).length} active products</div>
+          <div class="stat-label">Total Asset Value</div>
+          <div class="stat-value">${formatCurrency(totalAssetValue)}</div>
+          <div class="stat-change" style="font-size:0.7rem;">Warehouse: ${formatCurrency(warehouseStockValue)}${ftuDeployedValue > 0 ? ` · Deployed: ${formatCurrency(ftuDeployedValue)}` : ''}</div>
         </div>
       </div>
       <div class="stat-card">
