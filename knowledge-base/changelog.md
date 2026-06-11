@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-06-11 - Enforce AMC Fixed Price in Edit Bill
+**What**: Added AMC fixed price toggle and total capping to the Edit Bill modal.
+**Why**: Client requested that when editing a bill for a party with an active AMC, the total bill amount should not exceed the fixed AMC price, matching the behavior of the Record Sale modal.
+**Files Changed**: `js/pages/sales.js`
+**Commit**: Pending
+
+- Added `isAmcSale` toggle to `openEditSaleModal` that automatically checks if the original sale total matched the party's AMC rate.
+- Capped the `totalAmount()` to the AMC rate when `isAmcSale` is active.
+- Added logic to automatically prorate line items when submitting the edited bill with an active AMC, ensuring atomic database consistency.
+
+---
+
 ## 2026-06-11 - Allow Discount for Free to Use Machines
 **What**: Modified sales validation to allow selling items below stock value to parties with 'Free to Use' machines.
 **Why**: Client requested to allow the discount anyway, bypassing the strict unit price enforcement.

@@ -382,6 +382,9 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
   const activeProducts = products.filter(p => p.is_active || oldQtyByProd[p.id]);
   let selectedPartyId = sale.party_id ? Number(sale.party_id) : null;
   let selectedRates = getPartyRates(parties, selectedPartyId);
+  const initialParty = parties.find(p => p.id === selectedPartyId);
+  let isAmcSale = initialParty?.amc_active && Number(initialParty.amc_rate) === Number(sale.total_amount);
+  let selectedPartyAmcRate = initialParty?.amc_active && initialParty?.amc_rate > 0 ? Number(initialParty.amc_rate) : 0;
   let lineItems = saleItems.map(item => {
     const product = prodMap[item.product_id] || { id: item.product_id, name: 'Unknown product', type: 'unit' };
     return makeLineItem(product, item.quantity, item.unit_price);
@@ -407,6 +410,15 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
         <label class="form-label">Sale Date *</label>
         <input class="form-input" type="date" id="edit-sale-date" value="${sale.sale_date || ''}" required />
       </div>
+    </div>
+    <div id="edit-amc-toggle-section" style="display:${initialParty?.amc_active && initialParty?.amc_rate > 0 ? 'block' : 'none'};background:linear-gradient(135deg,var(--primary-soft),#e8f4fd);border:2px solid var(--primary);border-radius:8px;padding:12px 16px;margin-bottom:16px;">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+        <input type="checkbox" id="edit-sale-amc-toggle" style="width:18px;height:18px;accent-color:var(--primary);" ${isAmcSale ? 'checked' : ''} />
+        <div>
+          <strong style="font-size:0.9rem;color:var(--primary);"><i class="fas fa-file-contract"></i> AMC Sale</strong>
+          <div style="font-size:0.75rem;color:var(--text-muted);" id="edit-amc-rate-label">Fixed monthly rate: ${formatCurrency(selectedPartyAmcRate)}</div>
+        </div>
+      </label>
     </div>
     <div style="background:var(--bg-secondary);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><i class="fas fa-cart-plus" style="color:var(--primary);"></i><strong style="font-size:0.9rem;">Add / Change Items</strong></div>
@@ -457,7 +469,8 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
   const { close } = createModal('Edit Bill', content, { footer, large: true });
 
   function totalAmount() {
-    return roundCurrency(lineItems.reduce((sum, item) => sum + item.line_total, 0));
+    const calcTotal = lineItems.reduce((sum, item) => sum + item.line_total, 0);
+    return roundCurrency(isAmcSale ? selectedPartyAmcRate : calcTotal);
   }
 
   function renderItems() {
@@ -477,7 +490,14 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
       </table>`;
     }
 
-    document.getElementById('edit-sale-grand-total').textContent = `Grand Total: ${formatCurrency(totalAmount())}`;
+    const calcTotal = lineItems.reduce((sum, item) => sum + item.line_total, 0);
+    const grandTotal = totalAmount();
+    const totalEl = document.getElementById('edit-sale-grand-total');
+    if (isAmcSale) {
+      totalEl.innerHTML = `Grand Total: ${formatCurrency(grandTotal)} <span style="font-size:0.75rem;font-weight:400;color:var(--primary);">(AMC fixed rate)</span>`;
+    } else {
+      totalEl.textContent = `Grand Total: ${formatCurrency(grandTotal)}`;
+    }
     document.querySelectorAll('.edit-item-qty').forEach(input => {
       input.addEventListener('change', () => {
         const idx = Number(input.dataset.idx);
@@ -588,7 +608,28 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
   document.getElementById('edit-sale-party').addEventListener('change', (e) => {
     selectedPartyId = e.target.value ? Number(e.target.value) : null;
     selectedRates = getPartyRates(parties, selectedPartyId);
+    
+    const p = parties.find(x => x.id === selectedPartyId);
+    const amcSection = document.getElementById('edit-amc-toggle-section');
+    const amcToggle = document.getElementById('edit-sale-amc-toggle');
+    if (p && p.amc_active && p.amc_rate > 0) {
+      selectedPartyAmcRate = Number(p.amc_rate);
+      amcSection.style.display = 'block';
+      document.getElementById('edit-amc-rate-label').textContent = `Fixed monthly rate: ${formatCurrency(selectedPartyAmcRate)}`;
+    } else {
+      amcSection.style.display = 'none';
+      isAmcSale = false;
+      amcToggle.checked = false;
+      selectedPartyAmcRate = 0;
+    }
+    
     updateAddPrice();
+    renderItems();
+  });
+
+  document.getElementById('edit-sale-amc-toggle').addEventListener('change', (e) => {
+    isAmcSale = e.target.checked;
+    renderItems();
   });
   document.getElementById('edit-add-item-product').addEventListener('change', updateAddPrice);
   document.getElementById('edit-btn-add-item').addEventListener('click', () => {
@@ -640,10 +681,25 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
       return;
     }
 
+    const calcTotal = lineItems.reduce((sum, item) => sum + item.line_total, 0);
+    const rpcItems = (() => {
+      if (!isAmcSale || calcTotal <= 0) {
+        return lineItems.map(i => ({ product_id: i.product_id, quantity: i.quantity, unit_price: i.unit_price }));
+      }
+      let remaining = total;
+      return lineItems.map((i, idx) => {
+        const lineTarget = idx === lineItems.length - 1
+          ? remaining
+          : roundCurrency((i.line_total / calcTotal) * total);
+        remaining = roundCurrency(remaining - lineTarget);
+        return { product_id: i.product_id, quantity: i.quantity, unit_price: lineTarget / i.quantity };
+      });
+    })();
+
     const result = await dbOp(db.rpc('update_sale', {
       p_sale_id: sale.id,
       p_party_id: selectedPartyId,
-      p_items: lineItems.map(item => ({ product_id: item.product_id, quantity: item.quantity, unit_price: item.unit_price })),
+      p_items: rpcItems,
       p_payment_status: paymentStatus,
       p_payment_method: document.getElementById('edit-sale-method').value || null,
       p_amount_received: amountReceived,
