@@ -305,8 +305,8 @@ function openSaleModal(parties, products, body, header) {
     const pr = products.find(p => p.id === pid);
     const party = parties.find(x => x.id === selectedPartyId);
     if (party && party.machine_type === 'free_to_use' && price < (pr?.unit_price || 0)) {
-      showToast(`Price cannot be less than stock value (₹${pr?.unit_price}) for Free to Use machines`, 'error');
-      return;
+      showToast(`Warning: Selling below stock value to Free to Use machine`, 'success');
+      // Allowed anyway per request
     }
 
     const ex = lineItems.find(i => i.product_id === pid && i.unit_price === price);
@@ -505,9 +505,8 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
         const party = parties.find(x => x.id === selectedPartyId);
         const product = prodMap[lineItems[idx].product_id];
         if (party && party.machine_type === 'free_to_use' && product && price < product.unit_price) {
-          showToast(`Price cannot be less than stock value (₹${product.unit_price}) for Free to Use machines`, 'error');
-          input.value = lineItems[idx].unit_price;
-          return;
+          showToast(`Warning: Selling below stock value to Free to Use machine`, 'success');
+          // Allowed anyway per request
         }
 
         lineItems[idx].unit_price = price;
@@ -547,9 +546,8 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
       const party = parties.find(x => x.id === selectedPartyId);
       const product = prodMap[lineItems[idx].product_id];
       if (party && party.machine_type === 'free_to_use' && product && price < product.unit_price) {
-        showToast(`Price cannot be less than stock value (₹${product.unit_price}) for Free to Use machines`, 'error');
-        ok = false;
-        return;
+        showToast(`Warning: Selling below stock value to Free to Use machine`, 'success');
+        // Allowed anyway per request
       }
 
       lineItems[idx].unit_price = price;
@@ -604,8 +602,8 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
 
     const party = parties.find(x => x.id === selectedPartyId);
     if (party && party.machine_type === 'free_to_use' && price < product.unit_price) {
-      showToast(`Price cannot be less than stock value (₹${product.unit_price}) for Free to Use machines`, 'error');
-      return;
+      showToast(`Warning: Selling below stock value to Free to Use machine`, 'success');
+      // Allowed anyway per request
     }
 
     const existing = lineItems.find(item => item.product_id === product.id && item.unit_price === price);
