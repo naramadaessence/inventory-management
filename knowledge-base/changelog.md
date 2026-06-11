@@ -1,5 +1,59 @@
 # Changelog
 
+## 2026-06-11 - Allow Discount for Free to Use Machines
+**What**: Modified sales validation to allow selling items below stock value to parties with 'Free to Use' machines.
+**Why**: Client requested to allow the discount anyway, bypassing the strict unit price enforcement.
+**Files Changed**: `js/pages/sales.js`
+**Commit**: Pending
+
+- Changed the blocking error to a non-blocking warning toast when price is below unit price for a 'Free to Use' machine in `Record Sale` and `Edit Bill` flows.
+
+---
+
+## 2026-06-10 — Products Page + Reports: Deployed Column Always Visible
+**What**: Products page (grid + table) now shows Free-to-Use deployed count per product. Reports Stock Details table always shows Deployed/Location columns (no longer conditional).
+**Why**: Client wants clear visibility on every product card and table row of what's in the warehouse vs deployed at customer sites.
+**Impact**: Products page now fetches installations + parties data (parallel). No schema change.
+**Files Changed**: `js/pages/products.js`, `js/pages/reports.js`
+**Tests**: UI-only. Build passes, 21/21 tests pass.
+**Commit**: `e48b88e`
+
+- Products grid cards: teal badge "🚛 X deployed" with hover tooltip showing party names
+- Products table view: "Stock" → "Warehouse Stock", new "Deployed" column with teal badges or "—"
+- Reports Stock Details: Deployed + Location columns always shown (not conditionally hidden)
+- Legend (🟠 Warehouse · 🟢 Deployed) always visible in Reports header
+
+---
+
+## 2026-06-10 — Stock Valuation: Warehouse vs Deployed Breakdown
+**What**: Reports → Stock Valuation tab now shows full warehouse vs Free-to-Use deployed breakdown in both the doughnut chart and stock details table.
+**Why**: Client needs clear visibility into how much stock is in the warehouse vs deployed at Free-to-Use customer sites.
+**Impact**: No migrations. Adaptive UI — extra columns/chart slices/stat card only appear when there are active FTU installations.
+**Files Changed**: `js/pages/reports.js`.
+**Tests**: No new automated test — UI presentation change. Build passes, 21/21 tests pass.
+**Commit**: `57d9460`
+
+- Chart: renamed to "Asset Value by Category", adds a teal "Deployed (Free-to-Use)" slice when FTU value > 0, tooltips show % breakdown
+- Table: "Stock" column renamed to "Warehouse"; "Deployed" column with teal badge + "Location" column showing party names appear conditionally
+- New stat card: "Deployed (Free-to-Use)" with teal icon showing installation/location counts
+- Table header: color-coded legend (🟠 Warehouse / 🟢 Deployed) when deployed data exists
+
+---
+
+## 2026-06-10 — Asset Valuation: Free-to-Use Machines Included
+**What**: Dashboard and Reports "Total Stock Value" renamed to "Total Asset Value" and now includes Free-to-Use deployed machines in the valuation. Purchased machines remain excluded.
+**Why**: Client needs stock/asset valuation to reflect actual ownership — Free-to-Use machines are still company assets even though they're deployed at customer locations.
+**Impact**: No migrations. The asset value stat card now shows a breakdown: `Warehouse: ₹X · Deployed: ₹Y`.
+**Files Changed**: `js/pages/dashboard.js`, `js/pages/reports.js`.
+**Tests**: No new automated test — UI presentation change. Build passes, 21/21 tests pass. Manually verified: value correctly sums warehouse stock + active FTU installations.
+**Commit**: `e3fb68d`
+
+- Dashboard: added `installations` to the `Promise.all` fetch batch, computes `ftuDeployedValue` from active installations where party `machine_type === 'free_to_use'`
+- Reports stock tab: same logic added to `renderStockReport`
+- Both display a subtitle showing warehouse vs deployed breakdown
+
+---
+
 ## 2026-06-10 - Free to Use Machine Pricing Validation
 **What**: Added validation to prevent selling items below stock value to parties with 'Free to Use' machines.
 **Why**: Client requested that if a machine is free to use, the sale price of refills/items cannot be deducted from (be less than) the Total Stock Value (unit price) to ensure costs are recovered.
