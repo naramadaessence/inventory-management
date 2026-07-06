@@ -47,6 +47,7 @@ export async function renderProducts(body, header) {
       <div class="page-header-subtitle">Manage your product catalog & stock levels</div>
     </div>
     <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" id="btn-export-csv" title="Download CSV"><i class="fas fa-download"></i> Export</button>
       <button class="btn btn-secondary" id="btn-manage-cats"><i class="fas fa-tags"></i> Categories</button>
       <button class="btn btn-primary" id="btn-add-product"><i class="fas fa-plus"></i> Add Product</button>
     </div>
@@ -169,6 +170,34 @@ export async function renderProducts(body, header) {
   document.getElementById('product-view').addEventListener('change', e => { view = e.target.value; renderList(); });
   document.getElementById('btn-add-product').addEventListener('click', () => openProductModal(null, categories));
   document.getElementById('btn-manage-cats').addEventListener('click', () => openCategoryManager(body, header));
+  document.getElementById('btn-export-csv').addEventListener('click', () => {
+    const headers = ['Name', 'Model Number', 'Category', 'Type', 'Unit Price', 'Current Stock', 'Deployed', 'Threshold', 'Expiry Date'];
+    const rows = products.filter(p => p.is_active !== false).map(p => {
+      const cat = catMap[p.category_id];
+      const dep = isMachineCat(String(p.category_id)) ? deployedByCat[String(p.category_id)] : null;
+      return [
+        `"${(p.name || '').replace(/"/g, '""')}"`,
+        `"${(p.model_number || '').replace(/"/g, '""')}"`,
+        `"${(cat?.name || '—').replace(/"/g, '""')}"`,
+        p.type,
+        p.unit_price,
+        p.current_stock,
+        dep ? dep.qty : 0,
+        p.min_stock_threshold,
+        p.expiry_date || ''
+      ].join(',');
+    });
+    const csvContent = [headers.join(','), ...rows].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `products_export_${new Date().toISOString().split('T')[0]}.csv`;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  });
 
   renderList();
 }

@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-07-06 - Export Products to CSV
+**What**: Added a CSV export button on the Products page.
+**Why**: Allows the user to download a comprehensive list of all active products, including stock levels, categories, unit prices, and deployed Free-to-Use machine counts, directly into a spreadsheet for external reporting or auditing.
+**Files Changed**: `js/pages/products.js`
+**Commit**: Pending
+
+- Added an "Export" button to the Products page header toolbar.
+- Implemented client-side CSV generation that formats raw product and stock data (Warehouse vs. Deployed) into an easily consumable format.
+- Uses native `Blob` and URL creation to instantly trigger the download without requiring a backend endpoint.
+
+---
+
 ## 2026-06-11 - Enforce AMC Fixed Price in Edit Bill
 **What**: Added AMC fixed price toggle and total capping to the Edit Bill modal.
 **Why**: Client requested that when editing a bill for a party with an active AMC, the total bill amount should not exceed the fixed AMC price, matching the behavior of the Record Sale modal.
