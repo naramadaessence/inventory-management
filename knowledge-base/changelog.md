@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-07-06 - Fix Reports Stock Valuation Bug
+**What**: Fixed an `activeInstalls is not defined` reference error on the Reports Stock Valuation tab.
+**Why**: A previous migration changed how deployed machines are tracked (now using `parties.machine_counts` instead of an `installations` array in this specific context), which caused a crash when rendering the 'Deployed (Free-to-Use)' stat card.
+**Files Changed**: `js/pages/reports.js`
+**Commit**: Pending
+
+- Replaced the missing `activeInstalls` variable with dynamic calculation of `totalDeployedMachines` and `ftuParties` directly from the active `parties` data.
+- The 'Deployed (Free-to-Use)' stat card now correctly shows the total number of machines and locations.
+
+---
+
 ## 2026-07-06 - Export Products to CSV
 **What**: Added a CSV export button on the Products page.
 **Why**: Allows the user to download a comprehensive list of all active products, including stock levels, categories, unit prices, and deployed Free-to-Use machine counts, directly into a spreadsheet for external reporting or auditing.

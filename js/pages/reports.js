@@ -190,6 +190,21 @@ function renderStockReport(container, products, catMap, parties, prodMap) {
   });
 
   let ftuDeployedValue = 0;
+  let totalDeployedMachines = 0;
+  let ftuParties = new Set();
+  
+  (parties || []).filter(p => p.machine_type === 'free_to_use').forEach(p => {
+    const mc = p.machine_counts || {};
+    let hasMachine = false;
+    Object.entries(mc).forEach(([cid, qty]) => {
+      if (isMachineCat(cid) && qty > 0) {
+        hasMachine = true;
+        totalDeployedMachines += qty;
+      }
+    });
+    if (hasMachine) ftuParties.add(p.id);
+  });
+
   Object.entries(deployedByCat).forEach(([cid, data]) => {
     const avg = avgPriceByCat[parseInt(cid)];
     ftuDeployedValue += data.qty * (avg ? avg.sum / avg.count : 0);
@@ -222,7 +237,7 @@ function renderStockReport(container, products, catMap, parties, prodMap) {
     <div class="stats-grid">
       <div class="stat-card"><div class="stat-icon amber"><i class="fas fa-warehouse"></i></div><div class="stat-info"><div class="stat-label">Total Asset Value</div><div class="stat-value">${formatCurrency(totalValue)}</div><div class="stat-change" style="font-size:0.7rem;">Warehouse: ${formatCurrency(warehouseValue)}${ftuDeployedValue > 0 ? ` · Deployed: ${formatCurrency(ftuDeployedValue)}` : ''}</div></div></div>
       <div class="stat-card"><div class="stat-icon blue"><i class="fas fa-boxes-stacked"></i></div><div class="stat-info"><div class="stat-label">Active Products</div><div class="stat-value">${activeProducts.length}</div></div></div>
-      ${ftuDeployedValue > 0 ? `<div class="stat-card"><div class="stat-icon" style="background:rgba(20,184,166,0.12);color:#14b8a6;"><i class="fas fa-truck-loading"></i></div><div class="stat-info"><div class="stat-label">Deployed (Free-to-Use)</div><div class="stat-value">${formatCurrency(ftuDeployedValue)}</div><div class="stat-change" style="font-size:0.7rem;">${activeInstalls.length} installation${activeInstalls.length !== 1 ? 's' : ''} at ${new Set(activeInstalls.map(i => i.party_id)).size} location${new Set(activeInstalls.map(i => i.party_id)).size !== 1 ? 's' : ''}</div></div></div>` : ''}
+      ${ftuDeployedValue > 0 ? `<div class="stat-card"><div class="stat-icon" style="background:rgba(20,184,166,0.12);color:#14b8a6;"><i class="fas fa-truck-loading"></i></div><div class="stat-info"><div class="stat-label">Deployed (Free-to-Use)</div><div class="stat-value">${formatCurrency(ftuDeployedValue)}</div><div class="stat-change" style="font-size:0.7rem;">${totalDeployedMachines} machine${totalDeployedMachines !== 1 ? 's' : ''} at ${ftuParties.size} location${ftuParties.size !== 1 ? 's' : ''}</div></div></div>` : ''}
     </div>
     <div class="grid-2">
       <div class="card"><div class="card-header"><h3>Asset Value by Category</h3></div><div class="card-body"><div class="chart-container"><canvas id="stock-chart"></canvas></div></div></div>
