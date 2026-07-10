@@ -18,6 +18,7 @@
 - Fixed `amount_received` reset to 0 in UI when switching payment status to pending.
 - **Migration 012**: Dropped non-negative constraint on `payment_followups.amount_collected`.
 - **Migration 012**: `update_sale` now automatically creates a correction row in `payment_followups` if `amount_received` changes, keeping the Collections page Total Collected perfectly in sync with Admin edits.
+- **CSV Export Feature**: Added "Export CSV" button to the Sales page. It dynamically respects the active filter (All, GST, or Cash) and exports the exact subset of rows displayed to a timestamped CSV file, preserving all formatting and characters.
 
 ---
 

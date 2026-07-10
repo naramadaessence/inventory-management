@@ -92,11 +92,14 @@ export async function renderSales(body, header) {
       <div class="stat-card"><div class="stat-icon amber"><i class="fas fa-clock"></i></div><div class="stat-info"><div class="stat-label">Pending Amount</div><div class="stat-value">${formatCurrency(totalPending)}</div></div></div>
     </div>` : ''}
     ${sales.length === 0 ? '<div class="empty-state"><i class="fas fa-receipt"></i><h3>No sales recorded</h3><p>Click "Record Sale" to add your first sale.</p></div>' : `
-    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
-      <span style="font-size:0.8rem;color:var(--text-muted);font-weight:500;">Filter:</span>
-      <button class="btn btn-sm btn-primary sale-type-filter active" data-sale-type-filter="all" id="filter-all" style="border-radius:20px;"><i class="fas fa-list"></i> All Sales</button>
-      <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="gst" id="filter-gst" style="border-radius:20px;"><i class="fas fa-file-invoice"></i> GST Sales</button>
-      <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="cash" id="filter-cash" style="border-radius:20px;"><i class="fas fa-money-bill-wave"></i> Cash (Kaccha)</button>
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center;justify-content:space-between;">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <span style="font-size:0.8rem;color:var(--text-muted);font-weight:500;">Filter:</span>
+        <button class="btn btn-sm btn-primary sale-type-filter active" data-sale-type-filter="all" id="filter-all" style="border-radius:20px;"><i class="fas fa-list"></i> All Sales</button>
+        <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="gst" id="filter-gst" style="border-radius:20px;"><i class="fas fa-file-invoice"></i> GST Sales</button>
+        <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="cash" id="filter-cash" style="border-radius:20px;"><i class="fas fa-money-bill-wave"></i> Cash (Kaccha)</button>
+      </div>
+      <button class="btn btn-sm btn-secondary" id="btn-export-csv"><i class="fas fa-download"></i> Export CSV</button>
     </div>
     <div class="table-wrapper"><table class="data-table">
       <thead><tr><th>Date</th><th>Party</th><th>Type</th><th>Items</th><th>Amount</th><th>Received</th><th>Payment</th><th>Due Date</th>${isAdmin ? '<th>Actions</th>' : ''}</tr></thead>
@@ -127,15 +130,58 @@ export async function renderSales(body, header) {
   document.getElementById('btn-new-sale').addEventListener('click', () => openSaleModal(parties, products, body, header));
 
   // Sale type filter buttons
+  let currentFilter = 'all';
   document.querySelectorAll('.sale-type-filter').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.sale-type-filter').forEach(b => { b.classList.remove('active', 'btn-primary'); b.classList.add('btn-ghost'); });
       btn.classList.remove('btn-ghost'); btn.classList.add('active', 'btn-primary');
-      const filter = btn.dataset.saleTypeFilter;
+      currentFilter = btn.dataset.saleTypeFilter;
       document.querySelectorAll('.sale-row').forEach(row => {
-        row.style.display = (filter === 'all' || row.dataset.saleType === filter) ? '' : 'none';
+        row.style.display = (currentFilter === 'all' || row.dataset.saleType === currentFilter) ? '' : 'none';
       });
     });
+  });
+
+  // Export CSV logic
+  document.getElementById('btn-export-csv')?.addEventListener('click', () => {
+    const exportSales = sales.filter(s => currentFilter === 'all' || (s.sale_type || 'gst') === currentFilter);
+    if (exportSales.length === 0) {
+      showToast('No sales to export in this view', 'warning');
+      return;
+    }
+
+    const headers = ['Date', 'Party', 'Type', 'Items', 'Amount', 'Received', 'Payment Status', 'Due Date'];
+    const rows = [headers];
+
+    exportSales.forEach(s => {
+      const party = partyMap[s.party_id];
+      const sItems = itemsBySale[s.id] || [];
+      const saleType = s.sale_type === 'cash' ? 'Cash (Kaccha)' : 'GST';
+      const itemsText = itemsSummary(sItems, prodMap);
+      rows.push([
+        formatDate(s.sale_date || s.created_at),
+        party?.name || 'Walk-in',
+        saleType,
+        itemsText,
+        s.total_amount,
+        s.amount_received || 0,
+        s.payment_status || 'pending',
+        s.expected_payment_date ? formatDate(s.expected_payment_date) : ''
+      ]);
+    });
+
+    const toCsvField = val => {
+      if (val === null || val === undefined) return '""';
+      return '"' + String(val).replace(/"/g, '""') + '"';
+    };
+    const csvContent = "\uFEFF" + rows.map(r => r.map(toCsvField).join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `sales_export_${currentFilter}_${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   });
   // Edit: admin only
   if (isAdmin) {
