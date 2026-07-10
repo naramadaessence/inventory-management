@@ -106,6 +106,7 @@ CREATE TABLE sales (
   CONSTRAINT sales_amount_received_lte_total CHECK (amount_received <= total_amount),
   expected_payment_date DATE,
   sale_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  sale_type TEXT NOT NULL DEFAULT 'gst' CHECK (sale_type IN ('gst', 'cash')),
   notes TEXT,
   recorded_by UUID REFERENCES profiles(id),
   created_at TIMESTAMPTZ DEFAULT now()

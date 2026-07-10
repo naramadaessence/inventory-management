@@ -92,16 +92,24 @@ export async function renderSales(body, header) {
       <div class="stat-card"><div class="stat-icon amber"><i class="fas fa-clock"></i></div><div class="stat-info"><div class="stat-label">Pending Amount</div><div class="stat-value">${formatCurrency(totalPending)}</div></div></div>
     </div>` : ''}
     ${sales.length === 0 ? '<div class="empty-state"><i class="fas fa-receipt"></i><h3>No sales recorded</h3><p>Click "Record Sale" to add your first sale.</p></div>' : `
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center;">
+      <span style="font-size:0.8rem;color:var(--text-muted);font-weight:500;">Filter:</span>
+      <button class="btn btn-sm btn-primary sale-type-filter active" data-sale-type-filter="all" id="filter-all" style="border-radius:20px;"><i class="fas fa-list"></i> All Sales</button>
+      <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="gst" id="filter-gst" style="border-radius:20px;"><i class="fas fa-file-invoice"></i> GST Sales</button>
+      <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="cash" id="filter-cash" style="border-radius:20px;"><i class="fas fa-money-bill-wave"></i> Cash (Kaccha)</button>
+    </div>
     <div class="table-wrapper"><table class="data-table">
-      <thead><tr><th>Date</th><th>Party</th><th>Items</th><th>Amount</th><th>Received</th><th>Payment</th><th>Due Date</th>${isAdmin ? '<th>Actions</th>' : ''}</tr></thead>
+      <thead><tr><th>Date</th><th>Party</th><th>Type</th><th>Items</th><th>Amount</th><th>Received</th><th>Payment</th><th>Due Date</th>${isAdmin ? '<th>Actions</th>' : ''}</tr></thead>
       <tbody>${sales.map(s => {
         const party = partyMap[s.party_id];
         const sItems = itemsBySale[s.id] || [];
         const balance = (s.total_amount || 0) - (s.amount_received || 0);
         const isOverdue = s.expected_payment_date && s.payment_status !== 'paid' && daysUntil(s.expected_payment_date) < 0;
-        return `<tr class="sale-row" data-id="${s.id}" style="cursor:pointer;">
+        const saleType = s.sale_type || 'gst';
+        return `<tr class="sale-row" data-id="${s.id}" data-sale-type="${saleType}" style="cursor:pointer;">
           <td>${formatDate(s.sale_date || s.created_at)}</td>
           <td><strong>${esc(party?.name || 'Walk-in')}</strong></td>
+          <td><span class="badge-status ${saleType === 'gst' ? 'blue' : 'amber'}" style="font-size:0.7rem;">${saleType === 'gst' ? '<i class="fas fa-file-invoice"></i> GST' : '<i class="fas fa-money-bill-wave"></i> Cash'}</span></td>
           <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;">${itemsSummary(sItems, prodMap)}</td>
           <td style="font-weight:600;color:var(--green);">${formatCurrency(s.total_amount)}</td>
           <td>${s.amount_received ? formatCurrency(s.amount_received) : '—'}</td>
@@ -117,6 +125,18 @@ export async function renderSales(body, header) {
   `;
 
   document.getElementById('btn-new-sale').addEventListener('click', () => openSaleModal(parties, products, body, header));
+
+  // Sale type filter buttons
+  document.querySelectorAll('.sale-type-filter').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.sale-type-filter').forEach(b => { b.classList.remove('active', 'btn-primary'); b.classList.add('btn-ghost'); });
+      btn.classList.remove('btn-ghost'); btn.classList.add('active', 'btn-primary');
+      const filter = btn.dataset.saleTypeFilter;
+      document.querySelectorAll('.sale-row').forEach(row => {
+        row.style.display = (filter === 'all' || row.dataset.saleType === filter) ? '' : 'none';
+      });
+    });
+  });
   // Edit: admin only
   if (isAdmin) {
     document.querySelectorAll('.sale-row').forEach(row => {
@@ -193,7 +213,10 @@ function openSaleModal(parties, products, body, header) {
     <div id="items-list" style="margin-bottom:16px;"></div>
     <div id="sale-grand-total" style="text-align:right;font-size:1.1rem;font-weight:700;color:var(--green);margin-bottom:16px;">Grand Total: ₹0</div>
     <div class="form-row">
+      <div class="form-group"><label class="form-label">Sale Type *</label><select class="form-select" id="sale-type"><option value="gst">GST Sale</option><option value="cash">Cash (Kaccha) Sale</option></select></div>
       <div class="form-group"><label class="form-label">Payment Status</label><select class="form-select" id="sale-payment"><option value="paid">Paid</option><option value="partial">Partial</option><option value="pending">Pending</option></select></div>
+    </div>
+    <div class="form-row">
       <div class="form-group"><label class="form-label">Payment Method</label><select class="form-select" id="sale-method"><option value="">— Select —</option><option value="cash">Cash</option><option value="upi">UPI / Online</option><option value="bank_transfer">Bank Transfer</option><option value="cheque">Cheque</option></select></div>
     </div>
     <div class="form-row" id="pending-fields" style="display:none;">
@@ -364,6 +387,7 @@ function openSaleModal(parties, products, body, header) {
       p_sale_date: document.getElementById('sale-date').value,
       p_notes: document.getElementById('sale-notes').value.trim(),
       p_recorded_by: auth.currentUser.id,
+      p_sale_type: document.getElementById('sale-type').value,
     }), 'Failed to record sale');
     if (!result) return;
 
@@ -441,6 +465,12 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
     <div id="edit-items-list" style="margin-bottom:16px;"></div>
     <div id="edit-sale-grand-total" style="text-align:right;font-size:1.1rem;font-weight:700;color:var(--green);margin-bottom:16px;">Grand Total: ${formatCurrency(sale.total_amount)}</div>
     <div class="form-row">
+      <div class="form-group"><label class="form-label">Sale Type</label>
+        <select class="form-select" id="edit-sale-type">
+          <option value="gst" ${(sale.sale_type || 'gst') === 'gst' ? 'selected' : ''}>GST Sale</option>
+          <option value="cash" ${sale.sale_type === 'cash' ? 'selected' : ''}>Cash (Kaccha) Sale</option>
+        </select>
+      </div>
       <div class="form-group"><label class="form-label">Payment Status</label>
         <select class="form-select" id="edit-sale-payment">
           <option value="paid" ${sale.payment_status === 'paid' ? 'selected' : ''}>Paid</option>
@@ -448,6 +478,8 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
           <option value="pending" ${sale.payment_status === 'pending' ? 'selected' : ''}>Pending</option>
         </select>
       </div>
+    </div>
+    <div class="form-row">
       <div class="form-group"><label class="form-label">Payment Method</label>
         <select class="form-select" id="edit-sale-method">
           <option value="">Select</option>
@@ -707,6 +739,7 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
       p_sale_date: document.getElementById('edit-sale-date').value,
       p_notes: document.getElementById('edit-sale-notes').value.trim(),
       p_performer_id: auth.currentUser.id,
+      p_sale_type: document.getElementById('edit-sale-type').value,
     }), 'Failed to update bill');
     if (!result) return;
 

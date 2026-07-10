@@ -258,13 +258,17 @@ const demoRpc = {
 
   // record_sale(...) — insert sale + line items + deduct stock + log transactions.
   // p_items: [{ product_id, quantity, unit_price }, ...]
-  record_sale({ p_party_id, p_items, p_payment_status, p_payment_method, p_amount_received, p_expected_payment_date, p_sale_date, p_notes, p_recorded_by }) {
+  record_sale({ p_party_id, p_items, p_payment_status, p_payment_method, p_amount_received, p_expected_payment_date, p_sale_date, p_notes, p_recorded_by, p_sale_type }) {
     const store = getStore();
     const now = new Date().toISOString();
     const items = normalizeSaleItems(p_items);
     assertStockAvailableForSale(store, items);
     if (!['paid', 'partial', 'pending'].includes(p_payment_status)) {
       throw new Error('Invalid payment status');
+    }
+    const saleType = p_sale_type || 'gst';
+    if (!['gst', 'cash'].includes(saleType)) {
+      throw new Error('Invalid sale type');
     }
 
     // Round to 2 dp to match DECIMAL(12,2) in production.
@@ -283,6 +287,7 @@ const demoRpc = {
       sale_date: p_sale_date,
       notes: p_notes,
       recorded_by: p_recorded_by,
+      sale_type: saleType,
       created_at: now,
     });
     store._nextId.sales = saleId + 1;
@@ -320,7 +325,7 @@ const demoRpc = {
   },
 
   // update_sale(...) — replace bill line items, re-balance stock, update payment metadata.
-  update_sale({ p_sale_id, p_party_id, p_items, p_payment_status, p_payment_method, p_amount_received, p_expected_payment_date, p_sale_date, p_notes, p_performer_id }) {
+  update_sale({ p_sale_id, p_party_id, p_items, p_payment_status, p_payment_method, p_amount_received, p_expected_payment_date, p_sale_date, p_notes, p_performer_id, p_sale_type }) {
     const store = getStore();
     const saleIdx = store.sales.findIndex(s => s.id === p_sale_id);
     if (saleIdx === -1) throw new Error(`Sale ${p_sale_id} does not exist`);
@@ -329,6 +334,10 @@ const demoRpc = {
     const newItems = normalizeSaleItems(p_items);
     if (!['paid', 'partial', 'pending'].includes(p_payment_status)) {
       throw new Error('Invalid payment status');
+    }
+    const saleType = p_sale_type || 'gst';
+    if (!['gst', 'cash'].includes(saleType)) {
+      throw new Error('Invalid sale type');
     }
     const oldItems = store.sale_items.filter(si => si.sale_id === p_sale_id);
     const restoreByProduct = {};
@@ -364,6 +373,7 @@ const demoRpc = {
       expected_payment_date: p_payment_status === 'paid' ? null : p_expected_payment_date,
       sale_date: p_sale_date,
       notes: p_notes,
+      sale_type: saleType,
       updated_at: now,
     };
 

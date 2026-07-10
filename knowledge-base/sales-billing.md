@@ -5,7 +5,7 @@ Sales is the bill/invoice workflow for Narmada Essence. Sellers/admins can recor
 
 ## How It Is Structured
 - `js/pages/sales.js` renders the Sales page, sales table, Record Sale modal, Edit Bill modal, and delete actions.
-- `sales` is the bill header table: party, total, payment status, amount received, expected payment date, sale date, notes, and recorder.
+- `sales` is the bill header table: party, total, payment status, amount received, expected payment date, sale date, sale type (gst/cash), notes, and recorder.
 - `sale_items` is the bill line-item table: sale id, product id, quantity, unit price, line total.
 - `js/supabase.js` contains demo-mode RPC handlers for `record_sale`, `update_sale`, and `delete_sale`.
 - `migrations/006_atomic_operations.sql` introduced the original sale/delete RPCs.

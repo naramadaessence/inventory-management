@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-07-10 - Sale Type (GST / Cash) Feature
+**What**: Added a Sale Type field to categorize sales as GST Sale or Cash (Kaccha) Sale, with one-click filtering on the Sales page.
+**Why**: Client needs to quickly separate GST-billed sales from cash/kaccha sales for accounting and tax reporting purposes.
+**Files Changed**: `js/pages/sales.js`, `js/supabase.js`, `supabase-schema.sql`, `migrations/011_sale_type.sql` (NEW)
+**Tests**: `npm test` passed 21/21; `npm run build` passed.
+**Commit**: Pending
+
+- Added `sale_type` column (`TEXT NOT NULL DEFAULT 'gst'`, CHECK `IN ('gst', 'cash')`) to the `sales` table.
+- Updated `record_sale` and `update_sale` Postgres RPCs to accept and persist `p_sale_type`.
+- Updated demo-mode RPC handlers in `supabase.js` with identical `p_sale_type` support + validation.
+- Record Sale modal: new Sale Type dropdown (GST Sale / Cash Kaccha Sale) alongside payment fields.
+- Edit Bill modal: pre-selects the existing sale type, allows changing it.
+- Sales table: new "Type" column with color-coded badges (blue = GST, amber = Cash).
+- Filter bar: pill-shaped buttons — All Sales, GST Sales, Cash (Kaccha) — for instant client-side row filtering.
+- Existing sales default to 'gst' for backwards compatibility.
+
+---
+
 ## 2026-07-06 - Fix Reports Stock Valuation Bug
 **What**: Fixed an `activeInstalls is not defined` reference error on the Reports Stock Valuation tab.
 **Why**: A previous migration changed how deployed machines are tracked (now using `parties.machine_counts` instead of an `installations` array in this specific context), which caused a crash when rendering the 'Deployed (Free-to-Use)' stat card.
