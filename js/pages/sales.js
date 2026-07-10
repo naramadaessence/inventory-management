@@ -338,7 +338,11 @@ function openSaleModal(parties, products, body, header) {
     document.getElementById('add-item-qty').value = 1; renderItems();
   });
 
-  document.getElementById('sale-payment').addEventListener('change', (e) => { document.getElementById('pending-fields').style.display = (e.target.value === 'pending' || e.target.value === 'partial') ? 'flex' : 'none'; });
+  document.getElementById('sale-payment').addEventListener('change', (e) => {
+    const show = e.target.value === 'pending' || e.target.value === 'partial';
+    document.getElementById('pending-fields').style.display = show ? 'flex' : 'none';
+    if (e.target.value === 'pending') document.getElementById('sale-received').value = 0;
+  });
   document.getElementById('sale-cancel').onclick = close;
 
   document.getElementById('sale-save').onclick = (e) => withSaving(e.currentTarget, async () => {
@@ -690,7 +694,9 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
     renderItems();
   });
   document.getElementById('edit-sale-payment').addEventListener('change', (e) => {
-    document.getElementById('edit-pending-fields').style.display = (e.target.value === 'pending' || e.target.value === 'partial') ? 'flex' : 'none';
+    const show = e.target.value === 'pending' || e.target.value === 'partial';
+    document.getElementById('edit-pending-fields').style.display = show ? 'flex' : 'none';
+    if (e.target.value === 'pending') document.getElementById('edit-sale-received').value = 0;
   });
   document.getElementById('edit-sale-cancel').onclick = close;
   document.getElementById('edit-sale-delete').onclick = (e) => withSaving(e.currentTarget, async () => {
