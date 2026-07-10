@@ -403,6 +403,30 @@ const demoRpc = {
       });
     }
 
+    // Handle syncing with payment_followups
+    const oldCollected = store.payment_followups
+      .filter(f => f.sale_id === p_sale_id)
+      .reduce((sum, f) => sum + (f.amount_collected || 0), 0);
+    const diff = roundMoney(amountReceived - oldCollected);
+
+    if (diff !== 0) {
+      const fuId = store._nextId.payment_followups || 1;
+      store.payment_followups.push({
+        id: fuId,
+        sale_id: p_sale_id,
+        party_id: p_party_id,
+        visited_by: p_performer_id,
+        visit_date: now,
+        status_update: p_payment_status,
+        payment_method: p_payment_method || null,
+        amount_collected: diff,
+        expected_payment_date: p_payment_status === 'paid' ? null : p_expected_payment_date,
+        notes: 'Admin edit bill correction',
+        created_at: now,
+      });
+      store._nextId.payment_followups = fuId + 1;
+    }
+
     saveStore(store);
     return null;
   },

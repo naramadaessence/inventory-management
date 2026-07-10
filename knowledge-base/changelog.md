@@ -15,6 +15,9 @@
 - Sales table: new "Type" column with color-coded badges (blue = GST, amber = Cash).
 - Filter bar: pill-shaped buttons — All Sales, GST Sales, Cash (Kaccha) — for instant client-side row filtering.
 - Existing sales default to 'gst' for backwards compatibility.
+- Fixed `amount_received` reset to 0 in UI when switching payment status to pending.
+- **Migration 012**: Dropped non-negative constraint on `payment_followups.amount_collected`.
+- **Migration 012**: `update_sale` now automatically creates a correction row in `payment_followups` if `amount_received` changes, keeping the Collections page Total Collected perfectly in sync with Admin edits.
 
 ---
 
