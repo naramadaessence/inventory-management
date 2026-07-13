@@ -98,6 +98,8 @@ export async function renderSales(body, header) {
         <button class="btn btn-sm btn-primary sale-type-filter active" data-sale-type-filter="all" id="filter-all" style="border-radius:20px;"><i class="fas fa-list"></i> All Sales</button>
         <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="gst" id="filter-gst" style="border-radius:20px;"><i class="fas fa-file-invoice"></i> GST Sales</button>
         <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="cash" id="filter-cash" style="border-radius:20px;"><i class="fas fa-money-bill-wave"></i> Cash (Kaccha)</button>
+        <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="free_to_use" id="filter-freetouse" style="border-radius:20px;"><i class="fas fa-handshake"></i> Free to Use</button>
+        <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="purchased" id="filter-purchased" style="border-radius:20px;"><i class="fas fa-shopping-bag"></i> Purchased</button>
       </div>
       <button class="btn btn-sm btn-secondary" id="btn-export-csv"><i class="fas fa-download"></i> Export CSV</button>
     </div>
@@ -109,7 +111,8 @@ export async function renderSales(body, header) {
         const balance = (s.total_amount || 0) - (s.amount_received || 0);
         const isOverdue = s.expected_payment_date && s.payment_status !== 'paid' && daysUntil(s.expected_payment_date) < 0;
         const saleType = s.sale_type || 'gst';
-        return `<tr class="sale-row" data-id="${s.id}" data-sale-type="${saleType}" style="cursor:pointer;">
+        const machineType = party?.machine_type || 'none';
+        return `<tr class="sale-row" data-id="${s.id}" data-sale-type="${saleType}" data-machine-type="${machineType}" style="cursor:pointer;">
           <td>${formatDate(s.sale_date || s.created_at)}</td>
           <td><strong>${esc(party?.name || 'Walk-in')}</strong></td>
           <td><span class="badge-status ${saleType === 'gst' ? 'blue' : 'amber'}" style="font-size:0.7rem;">${saleType === 'gst' ? '<i class="fas fa-file-invoice"></i> GST' : '<i class="fas fa-money-bill-wave"></i> Cash'}</span></td>
@@ -137,14 +140,26 @@ export async function renderSales(body, header) {
       btn.classList.remove('btn-ghost'); btn.classList.add('active', 'btn-primary');
       currentFilter = btn.dataset.saleTypeFilter;
       document.querySelectorAll('.sale-row').forEach(row => {
-        row.style.display = (currentFilter === 'all' || row.dataset.saleType === currentFilter) ? '' : 'none';
+        if (currentFilter === 'free_to_use') {
+          row.style.display = row.dataset.machineType === 'free_to_use' ? '' : 'none';
+        } else if (currentFilter === 'purchased') {
+          row.style.display = row.dataset.machineType !== 'free_to_use' ? '' : 'none';
+        } else {
+          row.style.display = (currentFilter === 'all' || row.dataset.saleType === currentFilter) ? '' : 'none';
+        }
       });
     });
   });
 
   // Export CSV logic
   document.getElementById('btn-export-csv')?.addEventListener('click', () => {
-    const exportSales = sales.filter(s => currentFilter === 'all' || (s.sale_type || 'gst') === currentFilter);
+    const exportSales = sales.filter(s => {
+      const party = partyMap[s.party_id];
+      const machineType = party?.machine_type || 'none';
+      if (currentFilter === 'free_to_use') return machineType === 'free_to_use';
+      if (currentFilter === 'purchased') return machineType !== 'free_to_use';
+      return currentFilter === 'all' || (s.sale_type || 'gst') === currentFilter;
+    });
     if (exportSales.length === 0) {
       showToast('No sales to export in this view', 'warning');
       return;

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-07-13 - Added Free to Use and Purchased Filters
+**What**: Added "Free to Use" and "Purchased" filters to the Sales page.
+**Why**: Client requested to filter sales by party's machine type, specifically separating "Free to Use" sales from all other sales ("Purchased").
+**Files Changed**: `js/pages/sales.js`
+**Commit**: Pending
+
+- Added `data-machine-type` attribute to sale rows in the UI to facilitate filtering.
+- Added two new filter buttons to the Sales page: "Free to Use" and "Purchased".
+- "Free to Use" filter displays sales where the party's `machine_type` is `free_to_use`.
+- "Purchased" filter displays all sales where the party's `machine_type` is NOT `free_to_use` (including actual purchased, walk-in, or no machine).
+- Updated the CSV export logic to respect the new filters appropriately.
+
+---
+
 ## 2026-07-10 - Sale Type (GST / Cash) Feature
 **What**: Added a Sale Type field to categorize sales as GST Sale or Cash (Kaccha) Sale, with one-click filtering on the Sales page.
 **Why**: Client needs to quickly separate GST-billed sales from cash/kaccha sales for accounting and tax reporting purposes.
