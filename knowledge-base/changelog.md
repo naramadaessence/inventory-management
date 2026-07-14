@@ -1,6 +1,15 @@
 # Changelog
 
-## 2026-07-13 - Added Free to Use and Purchased Filters
+## 2026-07-14 - Added Counts to Sale Filters
+**What**: Added count numbers next to the filter labels on the Sales page (e.g., "Free to Use (14)").
+**Why**: Client requested to see the number of items that fall under each filter category directly on the buttons.
+**Files Changed**: `js/pages/sales.js`
+**Commit**: Pending
+
+- Computed counts for 'All', 'GST', 'Cash', 'Free to Use', and 'Purchased' based on the active `sales` array.
+- Injected these counts into the inner HTML of their respective filter buttons.
+
+---## 2026-07-13 - Added Free to Use and Purchased Filters
 **What**: Added "Free to Use" and "Purchased" filters to the Sales page.
 **Why**: Client requested to filter sales by party's machine type, specifically separating "Free to Use" sales from all other sales ("Purchased").
 **Files Changed**: `js/pages/sales.js`

@@ -85,6 +85,12 @@ export async function renderSales(body, header) {
   const totalReceived = sales.reduce((s, r) => s + (r.amount_received || 0), 0);
   const totalPending = totalRevenue - totalReceived;
 
+  const allCount = sales.length;
+  const gstCount = sales.filter(s => (s.sale_type || 'gst') === 'gst').length;
+  const cashCount = sales.filter(s => s.sale_type === 'cash').length;
+  const freeToUseCount = sales.filter(s => (partyMap[s.party_id]?.machine_type || 'none') === 'free_to_use').length;
+  const purchasedCount = sales.filter(s => (partyMap[s.party_id]?.machine_type || 'none') !== 'free_to_use').length;
+
   body.innerHTML = `
     ${isAdmin ? `<div class="stats-grid">
       <div class="stat-card"><div class="stat-icon green"><i class="fas fa-indian-rupee-sign"></i></div><div class="stat-info"><div class="stat-label">Total Revenue</div><div class="stat-value">${formatCurrency(totalRevenue)}</div></div></div>
@@ -95,11 +101,11 @@ export async function renderSales(body, header) {
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;align-items:center;justify-content:space-between;">
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
         <span style="font-size:0.8rem;color:var(--text-muted);font-weight:500;">Filter:</span>
-        <button class="btn btn-sm btn-primary sale-type-filter active" data-sale-type-filter="all" id="filter-all" style="border-radius:20px;"><i class="fas fa-list"></i> All Sales</button>
-        <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="gst" id="filter-gst" style="border-radius:20px;"><i class="fas fa-file-invoice"></i> GST Sales</button>
-        <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="cash" id="filter-cash" style="border-radius:20px;"><i class="fas fa-money-bill-wave"></i> Cash (Kaccha)</button>
-        <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="free_to_use" id="filter-freetouse" style="border-radius:20px;"><i class="fas fa-handshake"></i> Free to Use</button>
-        <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="purchased" id="filter-purchased" style="border-radius:20px;"><i class="fas fa-shopping-bag"></i> Purchased</button>
+        <button class="btn btn-sm btn-primary sale-type-filter active" data-sale-type-filter="all" id="filter-all" style="border-radius:20px;"><i class="fas fa-list"></i> All Sales (${allCount})</button>
+        <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="gst" id="filter-gst" style="border-radius:20px;"><i class="fas fa-file-invoice"></i> GST Sales (${gstCount})</button>
+        <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="cash" id="filter-cash" style="border-radius:20px;"><i class="fas fa-money-bill-wave"></i> Cash (Kaccha) (${cashCount})</button>
+        <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="free_to_use" id="filter-freetouse" style="border-radius:20px;"><i class="fas fa-handshake"></i> Free to Use (${freeToUseCount})</button>
+        <button class="btn btn-sm btn-ghost sale-type-filter" data-sale-type-filter="purchased" id="filter-purchased" style="border-radius:20px;"><i class="fas fa-shopping-bag"></i> Purchased (${purchasedCount})</button>
       </div>
       <button class="btn btn-sm btn-secondary" id="btn-export-csv"><i class="fas fa-download"></i> Export CSV</button>
     </div>
