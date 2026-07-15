@@ -691,4 +691,38 @@ describe('demoRpc stock workflow RPCs', () => {
     expect(txns[0].type).toBe('adjustment');
     expect(txns[0].quantity).toBe(2);
   });
+
+  it('supports sell_qty and installed_qty fields on product creation and update', async () => {
+    // Check initial seed values
+    const p1 = await getProduct(1);
+    expect(p1.sell_qty).toBe(0);
+    expect(p1.installed_qty).toBe(0);
+
+    // Insert new product with custom sell_qty and installed_qty
+    const { data: created, error: insertErr } = await db.insert('products', {
+      name: 'Test Dispenser With Qty',
+      category_id: 1,
+      type: 'unit',
+      model_number: 'TST-001',
+      unit_price: 1500,
+      current_stock: 0,
+      min_stock_threshold: 5,
+      sell_qty: 12.5,
+      installed_qty: 8,
+      is_active: true
+    });
+    expect(insertErr).toBeNull();
+    expect(created.sell_qty).toBe(12.5);
+    expect(created.installed_qty).toBe(8);
+
+    // Update product quantities
+    const { data: updated, error: updateErr } = await db.update('products', created.id, {
+      sell_qty: 25,
+      installed_qty: 15
+    });
+    expect(updateErr).toBeNull();
+    expect(updated.sell_qty).toBe(25);
+    expect(updated.installed_qty).toBe(15);
+  });
 });
+

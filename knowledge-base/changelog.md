@@ -1,5 +1,19 @@
 # Changelog
 
+## 2026-07-15 - Added Sell Qty & Installed Qty to Products
+**What**: Added two new fields (`sell_qty`, `installed_qty`) to the products table, modal forms (Add/Edit), table view, and CSV export.
+**Why**: Client needs to track sell quantity and installed quantity per product alongside existing stock fields.
+**Files Changed**: `supabase-schema.sql`, `migrations/013_product_qty_fields.sql` (NEW), `js/supabase.js`, `js/pages/products.js`, `tests/demo-rpc.test.js`, `knowledge-base/architecture.md`
+**Tests**: `npm test` passed 22/22.
+
+- Added `sell_qty DECIMAL(12,3)` and `installed_qty DECIMAL(12,3)` columns to `products` table (schema + migration 013).
+- Updated demo store seed data with `sell_qty: 0, installed_qty: 0` for all 22 products.
+- Added input fields to Add/Edit Product modal with validation (≥0) and dynamic unit labels (pieces/kg).
+- Added columns in table view between "Warehouse Stock" and "Deployed".
+- Added to CSV export headers and row data.
+- Added test case verifying insert/update persistence of these fields.
+
+---
 ## 2026-07-14 - Added Counts to Sale Filters
 **What**: Added count numbers next to the filter labels on the Sales page (e.g., "Free to Use (14)").
 **Why**: Client requested to see the number of items that fall under each filter category directly on the buttons.

@@ -135,7 +135,7 @@ export async function renderProducts(body, header) {
       }).join('')}</div>`;
     } else {
       container.innerHTML = stockSummaryHtml(filtered) + `<div class="table-wrapper"><table class="data-table">
-        <thead><tr><th></th><th>Product</th><th>Category</th><th>Type</th><th>Price</th><th>Warehouse Stock</th><th>Deployed</th><th>Threshold</th><th>Expiry</th><th>Actions</th></tr></thead>
+        <thead><tr><th></th><th>Product</th><th>Category</th><th>Type</th><th>Price</th><th>Warehouse Stock</th><th>Sell Qty</th><th>Installed Qty</th><th>Deployed</th><th>Threshold</th><th>Expiry</th><th>Actions</th></tr></thead>
         <tbody>${filtered.map(p => {
           const cat = catMap[p.category_id];
           const isLow = p.current_stock <= p.min_stock_threshold;
@@ -151,6 +151,8 @@ export async function renderProducts(body, header) {
             <td><span class="badge-status ${p.type === 'liquid' ? 'purple' : 'blue'}">${p.type}</span></td>
             <td>${formatPricePerUnit(p.unit_price, p.type)}</td>
             <td style="${isLow ? 'color:var(--red);font-weight:700;' : ''}">${isLow ? '⚠ ' : ''}${formatStock(p.current_stock, p.type)}</td>
+            <td>${formatStock(p.sell_qty || 0, p.type)}</td>
+            <td>${formatStock(p.installed_qty || 0, p.type)}</td>
             <td>${depCell}</td>
             <td>${formatStock(p.min_stock_threshold, p.type)}</td>
             <td>${formatDate(p.expiry_date)}</td>
@@ -171,7 +173,7 @@ export async function renderProducts(body, header) {
   document.getElementById('btn-add-product').addEventListener('click', () => openProductModal(null, categories));
   document.getElementById('btn-manage-cats').addEventListener('click', () => openCategoryManager(body, header));
   document.getElementById('btn-export-csv').addEventListener('click', () => {
-    const headers = ['Name', 'Model Number', 'Category', 'Type', 'Unit Price', 'Current Stock', 'Deployed', 'Threshold', 'Expiry Date'];
+    const headers = ['Name', 'Model Number', 'Category', 'Type', 'Unit Price', 'Current Stock', 'Sell Qty', 'Installed Qty', 'Deployed', 'Threshold', 'Expiry Date'];
     const rows = products.filter(p => p.is_active !== false).map(p => {
       const cat = catMap[p.category_id];
       const dep = isMachineCat(String(p.category_id)) ? deployedByCat[String(p.category_id)] : null;
@@ -182,6 +184,8 @@ export async function renderProducts(body, header) {
         p.type,
         p.unit_price,
         p.current_stock,
+        p.sell_qty || 0,
+        p.installed_qty || 0,
         dep ? dep.qty : 0,
         p.min_stock_threshold,
         p.expiry_date || ''
@@ -255,6 +259,16 @@ function openProductModal(product, categories) {
     </div>
     <div class="form-row">
       <div class="form-group">
+        <label class="form-label" id="prod-sellqty-label">Sell Qty</label>
+        <input class="form-input" type="number" id="prod-sellqty" value="${product?.sell_qty !== undefined && product?.sell_qty !== null ? product.sell_qty : 0}" min="0" step="${product?.type === 'liquid' ? '0.001' : '1'}" />
+      </div>
+      <div class="form-group">
+        <label class="form-label" id="prod-installedqty-label">Installed Qty</label>
+        <input class="form-input" type="number" id="prod-installedqty" value="${product?.installed_qty !== undefined && product?.installed_qty !== null ? product.installed_qty : 0}" min="0" step="${product?.type === 'liquid' ? '0.001' : '1'}" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
         <label class="form-label">Max Daily Consumption</label>
         <input class="form-input" type="number" id="prod-maxdaily" value="${product?.max_daily_consumption || ''}" min="0" />
       </div>
@@ -315,6 +329,14 @@ function openProductModal(product, categories) {
     document.getElementById('prod-stock-label').textContent = `Current Stock (${isLiquid ? 'kg' : 'pieces'}) *`;
     document.getElementById('prod-stock').step = isLiquid ? '0.001' : '1';
     document.getElementById('prod-price-label').textContent = isLiquid ? 'Unit Price (₹/kg) *' : 'Unit Price (₹/pc) *';
+    const sellInput = document.getElementById('prod-sellqty');
+    const instInput = document.getElementById('prod-installedqty');
+    const sellLabel = document.getElementById('prod-sellqty-label');
+    const instLabel = document.getElementById('prod-installedqty-label');
+    if (sellInput) sellInput.step = isLiquid ? '0.001' : '1';
+    if (instInput) instInput.step = isLiquid ? '0.001' : '1';
+    if (sellLabel) sellLabel.textContent = `Sell Qty (${isLiquid ? 'kg' : 'pieces'})`;
+    if (instLabel) instLabel.textContent = `Installed Qty (${isLiquid ? 'kg' : 'pieces'})`;
   }
   updateStockLabels();
   document.getElementById('prod-category').addEventListener('change', updateStockLabels);
@@ -328,6 +350,8 @@ function openProductModal(product, categories) {
     const price = parseFloat(document.getElementById('prod-price').value);
     const stock = parseFloat(document.getElementById('prod-stock').value);
     const threshold = parseFloat(document.getElementById('prod-threshold').value);
+    const sellQty = parseFloat(document.getElementById('prod-sellqty').value) || 0;
+    const installedQty = parseFloat(document.getElementById('prod-installedqty').value) || 0;
     const maxDaily = parseFloat(document.getElementById('prod-maxdaily').value) || null;
     const expiry = document.getElementById('prod-expiry').value || null;
 
@@ -336,6 +360,8 @@ function openProductModal(product, categories) {
     if (isNaN(price) || price < 0) { showToast('Valid price is required', 'error'); return; }
     if (isNaN(stock) || stock < 0) { showToast('Valid stock quantity is required', 'error'); return; }
     if (isNaN(threshold) || threshold < 0) { showToast('Valid threshold is required', 'error'); return; }
+    if (isNaN(sellQty) || sellQty < 0) { showToast('Valid sell quantity is required', 'error'); return; }
+    if (isNaN(installedQty) || installedQty < 0) { showToast('Valid installed quantity is required', 'error'); return; }
 
     let imageUrl = product?.image_url || null;
 
@@ -362,7 +388,9 @@ function openProductModal(product, categories) {
       name, model_number: model || null, category_id: catId, type: cat?.type || 'unit',
       unit_price: price, min_stock_threshold: threshold,
       max_daily_consumption: maxDaily, expiry_date: expiry, is_active: true,
-      image_url: imageUrl
+      image_url: imageUrl,
+      sell_qty: sellQty,
+      installed_qty: installedQty
     };
 
     if (isEdit) {

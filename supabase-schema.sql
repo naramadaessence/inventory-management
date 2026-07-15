@@ -36,6 +36,8 @@ CREATE TABLE products (
   max_daily_consumption DECIMAL(12,3),
   expiry_date DATE,
   image_url TEXT,
+  sell_qty DECIMAL(12,3) NOT NULL DEFAULT 0 CHECK (sell_qty >= 0),
+  installed_qty DECIMAL(12,3) NOT NULL DEFAULT 0 CHECK (installed_qty >= 0),
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()

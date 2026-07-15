@@ -32,6 +32,8 @@
 | min_stock_threshold | decimal | Alert when stock <= this |
 | max_daily_consumption | decimal | Flag if checkout consumption exceeds this |
 | expiry_date | date | Nullable |
+| sell_qty | decimal | Sell quantity tracking (≥0, default 0) |
+| installed_qty | decimal | Installed quantity tracking (≥0, default 0) |
 | is_active | boolean | Soft delete |
 
 ### checkout_sessions
