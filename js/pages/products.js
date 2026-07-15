@@ -117,7 +117,8 @@ export async function renderProducts(body, header) {
     if (view === 'grid') {
       container.innerHTML = stockSummaryHtml(filtered) + `<div class="product-grid">${filtered.map(p => {
         const cat = catMap[p.category_id];
-        const isLow = p.current_stock <= p.min_stock_threshold;
+        const availableStock = Number(p.current_stock || 0) - Number(p.sell_qty || 0) - Number(p.installed_qty || 0);
+        const isLow = availableStock <= p.min_stock_threshold;
         const dep = isMachineCat(String(p.category_id)) ? deployedByCat[String(p.category_id)] : null;
         const depHtml = dep ? `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:10px;background:rgba(20,184,166,0.1);color:#14b8a6;font-size:0.7rem;font-weight:600;" title="Deployed at: ${dep.parties.map(n => escapeHtml(n)).join(', ')}"><i class="fas fa-truck-loading" style="font-size:0.55rem;"></i> ${dep.qty} deployed</span>` : '';
         return `<div class="product-card" data-id="${p.id}">
@@ -126,7 +127,7 @@ export async function renderProducts(body, header) {
             <h4 title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</h4>
             <div style="font-size:0.75rem;color:var(--text-muted);">${escapeHtml(cat?.name || '—')} · ${formatPricePerUnit(p.unit_price, p.type)}</div>
             <div class="product-card-meta">
-              <span class="product-card-stock" style="${isLow ? 'color:var(--red);font-weight:600;' : ''}">${isLow ? '⚠ ' : ''}${formatStock(p.current_stock, p.type)}</span>
+              <span class="product-card-stock" style="${isLow ? 'color:var(--red);font-weight:600;' : ''}">${isLow ? '⚠ ' : ''}${formatStock(availableStock, p.type)}</span>
               ${depHtml}
               <span class="product-card-type ${p.type}">${p.type}</span>
             </div>
@@ -135,10 +136,11 @@ export async function renderProducts(body, header) {
       }).join('')}</div>`;
     } else {
       container.innerHTML = stockSummaryHtml(filtered) + `<div class="table-wrapper"><table class="data-table">
-        <thead><tr><th></th><th>Product</th><th>Category</th><th>Type</th><th>Price</th><th>Warehouse Stock</th><th>Sell Qty</th><th>Installed Qty</th><th>Deployed</th><th>Threshold</th><th>Expiry</th><th>Actions</th></tr></thead>
+        <thead><tr><th></th><th>Product</th><th>Category</th><th>Type</th><th>Price</th><th>Total Stock</th><th>Sell Qty</th><th>Installed Qty</th><th>Current Stock</th><th>Deployed</th><th>Threshold</th><th>Expiry</th><th>Actions</th></tr></thead>
         <tbody>${filtered.map(p => {
           const cat = catMap[p.category_id];
-          const isLow = p.current_stock <= p.min_stock_threshold;
+          const availableStock = Number(p.current_stock || 0) - Number(p.sell_qty || 0) - Number(p.installed_qty || 0);
+          const isLow = availableStock <= p.min_stock_threshold;
           const imgUrl = getImageUrl(p.image_url);
           const dep = isMachineCat(String(p.category_id)) ? deployedByCat[String(p.category_id)] : null;
           const depCell = dep
@@ -150,9 +152,10 @@ export async function renderProducts(body, header) {
             <td>${escapeHtml(cat?.name || '—')}</td>
             <td><span class="badge-status ${p.type === 'liquid' ? 'purple' : 'blue'}">${p.type}</span></td>
             <td>${formatPricePerUnit(p.unit_price, p.type)}</td>
-            <td style="${isLow ? 'color:var(--red);font-weight:700;' : ''}">${isLow ? '⚠ ' : ''}${formatStock(p.current_stock, p.type)}</td>
+            <td>${formatStock(p.current_stock, p.type)}</td>
             <td>${formatStock(p.sell_qty || 0, p.type)}</td>
             <td>${formatStock(p.installed_qty || 0, p.type)}</td>
+            <td style="${isLow ? 'color:var(--red);font-weight:700;' : ''}">${isLow ? '⚠ ' : ''}${formatStock(availableStock, p.type)}</td>
             <td>${depCell}</td>
             <td>${formatStock(p.min_stock_threshold, p.type)}</td>
             <td>${formatDate(p.expiry_date)}</td>
@@ -173,10 +176,11 @@ export async function renderProducts(body, header) {
   document.getElementById('btn-add-product').addEventListener('click', () => openProductModal(null, categories));
   document.getElementById('btn-manage-cats').addEventListener('click', () => openCategoryManager(body, header));
   document.getElementById('btn-export-csv').addEventListener('click', () => {
-    const headers = ['Name', 'Model Number', 'Category', 'Type', 'Unit Price', 'Current Stock', 'Sell Qty', 'Installed Qty', 'Deployed', 'Threshold', 'Expiry Date'];
+    const headers = ['Name', 'Model Number', 'Category', 'Type', 'Unit Price', 'Total Stock', 'Sell Qty', 'Installed Qty', 'Current Stock', 'Deployed', 'Threshold', 'Expiry Date'];
     const rows = products.filter(p => p.is_active !== false).map(p => {
       const cat = catMap[p.category_id];
       const dep = isMachineCat(String(p.category_id)) ? deployedByCat[String(p.category_id)] : null;
+      const availableStock = Number(p.current_stock || 0) - Number(p.sell_qty || 0) - Number(p.installed_qty || 0);
       return [
         `"${(p.name || '').replace(/"/g, '""')}"`,
         `"${(p.model_number || '').replace(/"/g, '""')}"`,
@@ -186,6 +190,7 @@ export async function renderProducts(body, header) {
         p.current_stock,
         p.sell_qty || 0,
         p.installed_qty || 0,
+        availableStock,
         dep ? dep.qty : 0,
         p.min_stock_threshold,
         p.expiry_date || ''
@@ -249,7 +254,7 @@ function openProductModal(product, categories) {
     </div>
     <div class="form-row">
       <div class="form-group">  
-        <label class="form-label" id="prod-stock-label">Current Stock *</label>
+        <label class="form-label" id="prod-stock-label">Total Stock *</label>
         <input class="form-input" type="number" id="prod-stock" value="${product?.current_stock || 0}" min="0" step="${product?.type === 'liquid' ? '0.001' : '1'}" required />
       </div>
       <div class="form-group">
@@ -265,6 +270,14 @@ function openProductModal(product, categories) {
       <div class="form-group">
         <label class="form-label" id="prod-installedqty-label">Installed Qty</label>
         <input class="form-input" type="number" id="prod-installedqty" value="${product?.installed_qty !== undefined && product?.installed_qty !== null ? product.installed_qty : 0}" min="0" step="${product?.type === 'liquid' ? '0.001' : '1'}" />
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label" id="prod-currentstock-label" style="color:var(--primary);font-weight:600;">Current Stock (auto-calculated)</label>
+        <div class="form-input" id="prod-currentstock-display" style="background:var(--surface-alt,#f5f5f5);font-weight:700;font-size:1.1rem;cursor:default;">${Number(product?.current_stock || 0) - Number(product?.sell_qty || 0) - Number(product?.installed_qty || 0)}</div>
+      </div>
+      <div class="form-group">
       </div>
     </div>
     <div class="form-row">
@@ -326,20 +339,38 @@ function openProductModal(product, categories) {
     const catId = parseInt(document.getElementById('prod-category').value);
     const cat = categories.find(c => c.id === catId);
     const isLiquid = cat?.type === 'liquid';
-    document.getElementById('prod-stock-label').textContent = `Current Stock (${isLiquid ? 'kg' : 'pieces'}) *`;
+    document.getElementById('prod-stock-label').textContent = `Total Stock (${isLiquid ? 'kg' : 'pieces'}) *`;
     document.getElementById('prod-stock').step = isLiquid ? '0.001' : '1';
     document.getElementById('prod-price-label').textContent = isLiquid ? 'Unit Price (₹/kg) *' : 'Unit Price (₹/pc) *';
     const sellInput = document.getElementById('prod-sellqty');
     const instInput = document.getElementById('prod-installedqty');
     const sellLabel = document.getElementById('prod-sellqty-label');
     const instLabel = document.getElementById('prod-installedqty-label');
+    const csLabel = document.getElementById('prod-currentstock-label');
     if (sellInput) sellInput.step = isLiquid ? '0.001' : '1';
     if (instInput) instInput.step = isLiquid ? '0.001' : '1';
     if (sellLabel) sellLabel.textContent = `Sell Qty (${isLiquid ? 'kg' : 'pieces'})`;
     if (instLabel) instLabel.textContent = `Installed Qty (${isLiquid ? 'kg' : 'pieces'})`;
+    if (csLabel) csLabel.textContent = `Current Stock (${isLiquid ? 'kg' : 'pieces'}) — auto-calculated`;
   }
   updateStockLabels();
   document.getElementById('prod-category').addEventListener('change', updateStockLabels);
+
+  // Live-calculate Current Stock = Total Stock - Sell Qty - Installed Qty
+  function recalcCurrentStock() {
+    const total = parseFloat(document.getElementById('prod-stock').value) || 0;
+    const sell = parseFloat(document.getElementById('prod-sellqty').value) || 0;
+    const installed = parseFloat(document.getElementById('prod-installedqty').value) || 0;
+    const current = total - sell - installed;
+    const display = document.getElementById('prod-currentstock-display');
+    if (display) {
+      display.textContent = current;
+      display.style.color = current < 0 ? 'var(--red)' : '';
+    }
+  }
+  document.getElementById('prod-stock').addEventListener('input', recalcCurrentStock);
+  document.getElementById('prod-sellqty').addEventListener('input', recalcCurrentStock);
+  document.getElementById('prod-installedqty').addEventListener('input', recalcCurrentStock);
 
   document.getElementById('prod-save-btn').onclick = (e) => withSaving(e.currentTarget, async () => {
     const name = document.getElementById('prod-name').value.trim();
