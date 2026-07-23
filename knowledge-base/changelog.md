@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-07-23 - Increased AMC Day Limit to 31
+**What**: Increased the AMC Day selection limit from 28 to 31.
+**Why**: Client requested to be able to select dates up to the 31st for AMC refill reminders.
+**Files Changed**: `js/pages/parties.js`, `js/pages/collections.js`, `supabase-schema.sql`, `migrations/014_amc_day_limit_31.sql` (NEW)
+**Commit**: Pending
+
+- Changed the dropdown loop in `parties.js` to iterate up to 31.
+- Updated the sort dropdown label from '1st → 28th' to '1st → 31st'.
+- Updated placeholder texts in `collections.js` from '28th' to '31st'.
+- Updated `amc_day` CHECK constraint in `supabase-schema.sql` to allow up to 31.
+- Created `014_amc_day_limit_31.sql` migration file to apply the constraint change.
+
 ## 2026-07-15 - Added Sell Qty & Installed Qty to Products
 **What**: Added two new fields (`sell_qty`, `installed_qty`) to the products table, modal forms (Add/Edit), table view, and CSV export.
 **Why**: Client needs to track sell quantity and installed quantity per product alongside existing stock fields.

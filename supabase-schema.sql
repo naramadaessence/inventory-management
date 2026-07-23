@@ -53,7 +53,7 @@ CREATE TABLE parties (
   machine_type TEXT DEFAULT 'none' CHECK (machine_type IN ('none', 'purchased', 'free_to_use')),
   machine_counts JSONB,
   amc_active BOOLEAN DEFAULT false,
-  amc_day INTEGER CHECK (amc_day >= 1 AND amc_day <= 28),
+  amc_day INTEGER CHECK (amc_day >= 1 AND amc_day <= 31),
   amc_rate NUMERIC DEFAULT 0,
   custom_category_rates JSONB,
   created_at TIMESTAMPTZ DEFAULT now()

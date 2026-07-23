@@ -325,7 +325,7 @@ export async function renderCollections(body, header) {
       </div>
       <div class="form-group">
         <label class="form-label">Visit Notes *</label>
-        <textarea class="form-textarea" id="visit-notes" maxlength="500" placeholder="E.g. Met Mr. Patel, he said payment on 28th by UPI..."></textarea>
+        <textarea class="form-textarea" id="visit-notes" maxlength="500" placeholder="E.g. Met Mr. Patel, he said payment on 31st by UPI..."></textarea>
       </div>
     `;
     const footer = `<button class="btn btn-secondary" id="visit-cancel">Cancel</button><button class="btn btn-primary" id="visit-save"><i class="fas fa-check"></i> Log Visit</button>`;
@@ -442,7 +442,7 @@ export async function renderCollections(body, header) {
       </div>
       <div class="form-group">
         <label class="form-label">Visit Notes</label>
-        <textarea class="form-textarea" id="fu-notes" maxlength="500" placeholder="E.g. Met Mr. Patel, he said payment will be made by 28th..."></textarea>
+        <textarea class="form-textarea" id="fu-notes" maxlength="500" placeholder="E.g. Met Mr. Patel, he said payment will be made by 31st..."></textarea>
       </div>
     `;
     const footer = `<button class="btn btn-secondary" id="fu-cancel">Cancel</button><button class="btn btn-primary" id="fu-save"><i class="fas fa-check"></i> Update Payment</button>`;

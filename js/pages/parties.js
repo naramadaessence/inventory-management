@@ -93,7 +93,7 @@ export async function renderParties(body, header) {
             <option value="sales_asc">Sales: Low → High</option>
             <option value="amc_desc">AMC Rate: High → Low</option>
             <option value="amc_asc">AMC Rate: Low → High</option>
-            <option value="amc_day_asc">AMC Day: 1st → 28th</option>
+            <option value="amc_day_asc">AMC Day: 1st → 31st</option>
             <option value="newest">Newest First</option>
             <option value="oldest">Oldest First</option>
           </select>
@@ -297,7 +297,7 @@ function openPartyModal(party, body, header, products, categories) {
         <div class="form-group" style="margin-bottom:0;">
           <label class="form-label">Refill Day of Month</label>
           <select class="form-select" id="party-amc-day">
-            ${Array.from({length: 28}, (_, i) => i + 1).map(d =>
+            ${Array.from({length: 31}, (_, i) => i + 1).map(d =>
               `<option value="${d}" ${party?.amc_day === d ? 'selected' : ''}>${getOrdinal(d)}</option>`
             ).join('')}
           </select>
