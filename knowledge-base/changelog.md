@@ -11,6 +11,7 @@
 - Built in parallel by five agents with strict file ownership against a contract written first (`stock-reconciliation.md` + demo RPCs + contract tests); integrated and re-verified in the main session.
 - Demo store auto-upgrades old localStorage data (new tables, tolerances, fragrance pre-fill); `demo.insert/update` no longer crash on a missing table (adding an Installation in demo mode used to throw).
 - Fragrances pre-filled from product names in production (79 products); owner to review on the Products page.
+- Post-deploy smoke test on production (read-only): all 7 affected pages render, 56 Supabase requests with 0 failures, 0 JS errors, Stock Rules shows 0.01 / 0. Found "Green  Apple" (double space from a product name) duplicating a fragrance filter option → fragrance whitespace is now collapsed on save and in the demo pre-fill (regression test in `stock-reconciliation.test.js`); existing row fixed with `update products set fragrance = regexp_replace(fragrance, '\s+', ' ', 'g') where fragrance ~ '\s{2,}';`.
 
 ## 2026-10-20 - Dashboard Low-Stock Alerts Use Current Stock
 **What**: Dashboard "Low Stock Alerts" now compare Current Stock (Total − Sell Qty − Installed Qty) against the threshold instead of Total Stock, and show that figure.

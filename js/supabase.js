@@ -77,6 +77,7 @@ function deriveFragrance(name) {
   const base = String(name || '')
     .replace(/^[^A-Za-z]+/, '')
     .replace(/\s*(diffuser\s+oil|refill|oil)\s*$/i, '')
+    .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
   return base ? base.replace(/\b[a-z]/g, ch => ch.toUpperCase()) : null;

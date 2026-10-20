@@ -287,12 +287,14 @@ describe('demo store upgrade', () => {
       delete raw._nextId[t];
     }
     raw.products.forEach(p => { delete p.fragrance; });
+    raw.products.find(p => p.id === 13).name = 'Cool  Water   Refill'; // stray double spaces
     localStorage.setItem('narmada_essence_data', JSON.stringify(raw));
 
     await auth.getSession();
     expect((await rows('app_settings')).map(s => s.key).sort()).toEqual(['liquid_tolerance_kg', 'unit_tolerance']);
     expect((await product(7)).fragrance).toBe('Black Touch');
     expect((await product(17)).fragrance).toBe('Cool Water');
+    expect((await product(13)).fragrance).toBe('Cool Water');
     expect((await product(1)).fragrance).toBeNull();
   });
 });

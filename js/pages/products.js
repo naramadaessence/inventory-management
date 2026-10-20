@@ -525,7 +525,7 @@ function openProductModal(product, categories, pendingAdjustment = null) {
   document.getElementById('prod-save-btn').onclick = (e) => withSaving(e.currentTarget, async () => {
     const name = document.getElementById('prod-name').value.trim();
     const model = document.getElementById('prod-model').value.trim();
-    const fragrance = document.getElementById('prod-fragrance').value.trim() || null;
+    const fragrance = document.getElementById('prod-fragrance').value.replace(/\s+/g, ' ').trim() || null;
     const catId = parseInt(document.getElementById('prod-category').value);
     const cat = categories.find(c => c.id === catId);
     const isLiquid = cat?.type === 'liquid';
