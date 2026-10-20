@@ -141,7 +141,7 @@
 ---
 
 ## ISSUE-012: "Current Stock" On Products Page May Double-Count Sales
-**Status**: Open — needs client decision
+**Status**: Resolved — by design (owner confirmed 2026-10-20)
 **Severity**: Medium
 **Discovered**: 2026-10-20
 **Symptom**: Products page shows "Total Stock" = `current_stock` and "Current Stock" = `current_stock − sell_qty − installed_qty`. `current_stock` is already reduced automatically by every sale, so if staff also type sold quantities into Sell Qty they are subtracted twice. The Products page low-stock styling uses the derived figure while the Dashboard low-stock alert and sale stock checks use `current_stock`, so they can disagree.
