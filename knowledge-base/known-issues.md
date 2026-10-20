@@ -147,7 +147,7 @@
 **Symptom**: Products page shows "Total Stock" = `current_stock` and "Current Stock" = `current_stock − sell_qty − installed_qty`. `current_stock` is already reduced automatically by every sale, so if staff also type sold quantities into Sell Qty they are subtracted twice. The Products page low-stock styling uses the derived figure while the Dashboard low-stock alert and sale stock checks use `current_stock`, so they can disagree.
 **Root Cause**: `sell_qty`/`installed_qty` (migration 013) are manual numbers with no link to sales or installations; their intended meaning was not specified.
 **Workaround**: Treat Sell Qty / Installed Qty as notes only; rely on Dashboard alerts.
-**Fix**: Pending client answer on what Sell Qty / Installed Qty should mean.
+**Fix**: No code change. Owner confirmed (2026-10-20): machines (dispensers/diffusers) are installed free at clients and never billed on the Sales page, and installs do not reduce Total Stock, so Current Stock = Total − Sell Qty − Installed Qty is correct for them. Only AUTOMATIC DISPENCER (389/10/50) and BIG DIFFUSER (259/0/130) use these fields; all refills/oils are 0. Rule: never enter Sell Qty for products that are billed through the Sales page. Remaining minor gap: Dashboard low-stock alerts use Total Stock, not Current Stock.
 **Regression Test**: None yet.
 
 ---

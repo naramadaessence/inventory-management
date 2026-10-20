@@ -13,7 +13,7 @@
 - ~~Rotate the production admin password (ISSUE-010)~~ — done by owner 2026-10-20. Consider making the GitHub repo private.
 - ~~Supabase GitHub integration "Deploy to production" OFF~~ — done by owner 2026-10-20.
 - Paste `VITE_SUPABASE_ANON_KEY` into Cloudflare env vars (agents do not enter keys).
-- Answer: what should Products "Sell Qty" / "Installed Qty" mean? (ISSUE-012)
+- ~~Sell Qty meaning (ISSUE-012)~~ — answered 2026-10-20: manual figures for free-install machines; correct as-is.
 - ~~Run migration 015~~ — done 2026-10-20, verified (one record_sale + one update_sale). Production is now at migration 015.
 - ~~Sales re-test~~ — done 2026-10-20 on production as admin: Bill #132 (walk-in, PLEASURE REFILL, pending ₹0) recorded ×1 → edited ×2 → deleted. Stock 24 → 23 → 22 → 24; sales totals back to ₹200 / 1; Inventory Log shows sale, sale_edit_restore, sale_edit, sale_delete rows. Pending/₹0 was used so no payment_followups correction rows were created.
 - ~~Live-DB migration checks~~ — done 2026-10-20: 010–014 all applied in production (sale_type, sell_qty/installed_qty, 010 RPCs, amc_day 1–31, no followup amount check); duplicate record_sale/update_sale overloads found → migration 015. Queries kept for reference:
@@ -27,8 +27,8 @@
 
 ## Next Steps
 1. ISSUE-009 resolved (site live on Cloudflare). Remaining: Pending User Action items below.
-2. Remaining open item: ISSUE-012 (Sell Qty meaning) needs the client's answer.
-3. Decide on ISSUE-012 with the client.
+2. No open issues from the 2026-10-20 session.
+3. Optional: make Dashboard low-stock alerts use Current Stock (Total − Sell − Installed) for machines.
 
 ## Do Not Touch
 - Do not manually edit `products.current_stock` from browser code; use intent-specific RPCs.
