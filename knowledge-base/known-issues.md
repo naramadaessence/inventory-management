@@ -176,7 +176,8 @@
 ---
 
 ## ISSUE-015: Duplicate record_sale / update_sale Overloads And Missing anon Revoke
-**Status**: Open — fix written, waiting for `migrations/015_drop_old_sale_overloads.sql` to be run in production
+**Status**: Resolved
+**Resolved**: 2026-10-20 — owner ran migration 015 in production; verification query returned one row each for record_sale and update_sale
 **Severity**: Low
 **Discovered**: 2026-10-20
 **Symptom**: Production has two versions of each function: the migration 010 ones (no `p_sale_type`) and the 011/012 ones (with `p_sale_type`). Any RPC call that omits `p_sale_type` is ambiguous; the old `update_sale` lacks the 012 followup-correction sync. The new versions are executable by `PUBLIC`/`anon`.
