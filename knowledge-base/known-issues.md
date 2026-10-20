@@ -103,7 +103,8 @@
 ---
 
 ## ISSUE-009: Production Site Down — Vercel Hobby Team Paused
-**Status**: Resolved pending admin smoke test (site live at https://narmada-inventory.pages.dev on 2026-10-20)
+**Status**: Resolved
+**Resolved**: 2026-10-20 — live at https://narmada-inventory.pages.dev; admin confirmed login and Settings → Create User work in production
 **Severity**: Critical
 **Discovered**: 2026-10-20
 **Symptom**: `inventory-management-pi-opal.vercel.app` and `/api/create-user` return `402 Payment Required` (`X-Vercel-Error: DEPLOYMENT_DISABLED`) since 2026-07-23.

@@ -7,7 +7,7 @@
 - [x] Cloudflare Pages project `narmada-inventory` live at https://narmada-inventory.pages.dev (Git-connected, branch main). Login page renders, no console errors.
 - [x] Deploy Edge Function `create-user` to project `jnfykpicpttvnihgsckt` — done 2026-10-20 via CLI (v2, ACTIVE, verify_jwt false). Verified: OPTIONS from localhost → 204 + ACAO; POST without auth → 401 "Unauthorized"; bogus token → 401 "Invalid token".
 - [x] `ALLOWED_ORIGINS=https://narmada-inventory.pages.dev` set; preflight from that origin verified. Add a custom domain here too if one is attached later.
-- [ ] Smoke test on the new URL: admin login, create a throwaway seller, record/edit/delete a small sale.
+- [x] Smoke test 2026-10-20: admin login and Create User confirmed working by the owner. Record/edit/delete sale not yet re-tested on the new host.
 
 ## Pending User Action
 - **Rotate the production admin password** (ISSUE-010) — it was in the public repo.
@@ -24,7 +24,7 @@
 - Optional: delete the Vercel project now that Cloudflare is live; tell staff the new URL.
 
 ## Next Steps
-1. Finish the In Progress items above; then mark ISSUE-009 resolved and replace the Prod URL in README Quick Facts.
+1. ISSUE-009 resolved (site live on Cloudflare). Remaining: Pending User Action items below.
 2. Based on the live-DB query results, write a follow-up migration only for what is actually missing (and drop duplicate `record_sale`/`update_sale` overloads if both arg lists exist).
 3. Decide on ISSUE-012 with the client.
 
