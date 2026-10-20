@@ -99,7 +99,7 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 | Key | Value |
 |-----|-------|
 | Domain | narmadaessence.com |
-| Prod URL | Cloudflare Pages `*.pages.dev` URL — fill in once the project is created (old Vercel URL https://inventory-management-pi-opal.vercel.app returns 402 DEPLOYMENT_DISABLED) |
+| Prod URL | https://narmada-inventory.pages.dev (Cloudflare Pages project `narmada-inventory`, live 2026-10-20). Old Vercel URL https://inventory-management-pi-opal.vercel.app is dead (402 DEPLOYMENT_DISABLED) |
 | Hosting | Cloudflare Pages (static `dist/`) + Supabase Edge Function. Vercel Hobby team paused since 2026-07-23 (Fluid Provisioned Memory) and Hobby forbids commercial use — see `deployment.md` |
 | Supabase Project Ref | `jnfykpicpttvnihgsckt` (Mumbai, ap-south-1); GitHub integration connected 2026-10-20 — keep "Deploy to production" OFF (see `deployment.md`) |
 | Client Location | Surat, Gujarat |

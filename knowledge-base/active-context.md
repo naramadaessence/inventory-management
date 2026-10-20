@@ -4,8 +4,9 @@
 **Test Suite Status**: Pass — `npm test` 34/34 and `npm run build` pass on 2026-10-20.
 
 ## In Progress
-- [ ] Cloudflare Pages project — create from GitHub repo, build `npm run build`, output `dist`, env `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `NODE_VERSION=22` (see `deployment.md`).
-- [ ] Deploy Edge Function `create-user` to project `jnfykpicpttvnihgsckt` with JWT verification off; set secret `ALLOWED_ORIGINS` to the Pages URL.
+- [x] Cloudflare Pages project `narmada-inventory` live at https://narmada-inventory.pages.dev (Git-connected, branch main). Login page renders, no console errors.
+- [x] Deploy Edge Function `create-user` to project `jnfykpicpttvnihgsckt` — done 2026-10-20 via CLI (v2, ACTIVE, verify_jwt false). Verified: OPTIONS from localhost → 204 + ACAO; POST without auth → 401 "Unauthorized"; bogus token → 401 "Invalid token".
+- [x] `ALLOWED_ORIGINS=https://narmada-inventory.pages.dev` set; preflight from that origin verified. Add a custom domain here too if one is attached later.
 - [ ] Smoke test on the new URL: admin login, create a throwaway seller, record/edit/delete a small sale.
 
 ## Pending User Action
@@ -19,7 +20,8 @@
   select proname, pg_get_function_identity_arguments(oid) from pg_proc where pronamespace='public'::regnamespace and proname in ('record_sale','update_sale','record_payment_followup','set_product_stock','admin_issue_stock') order by 1,2;
   select conname, pg_get_constraintdef(oid) from pg_constraint where conname in ('payment_followups_nonnegative_amount','parties_amc_day_check') or (conrelid='public.payment_followups'::regclass and contype='c');
   ```
-- Optional: delete the Vercel project once Cloudflare is live.
+- Set Supabase → Authentication → URL Configuration → Site URL to https://narmada-inventory.pages.dev.
+- Optional: delete the Vercel project now that Cloudflare is live; tell staff the new URL.
 
 ## Next Steps
 1. Finish the In Progress items above; then mark ISSUE-009 resolved and replace the Prod URL in README Quick Facts.

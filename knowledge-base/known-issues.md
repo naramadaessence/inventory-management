@@ -103,7 +103,7 @@
 ---
 
 ## ISSUE-009: Production Site Down — Vercel Hobby Team Paused
-**Status**: Open (fix in progress)
+**Status**: Resolved pending admin smoke test (site live at https://narmada-inventory.pages.dev on 2026-10-20)
 **Severity**: Critical
 **Discovered**: 2026-10-20
 **Symptom**: `inventory-management-pi-opal.vercel.app` and `/api/create-user` return `402 Payment Required` (`X-Vercel-Error: DEPLOYMENT_DISABLED`) since 2026-07-23.
@@ -151,7 +151,7 @@
 ---
 
 ## ISSUE-013: Migration 012 May Not Remove The Base Schema's Followup Amount Check
-**Status**: Open — needs verification on live DB
+**Status**: Accepted Risk — not present in production (verified 2026-10-20: `payment_followups` has no CHECK constraints; `parties_amc_day_check` is 1–31, so 014 is applied). Still affects a database rebuilt from `supabase-schema.sql`.
 **Severity**: Medium
 **Discovered**: 2026-10-20
 **Symptom**: Editing a paid bill back to a lower amount could fail when `update_sale` inserts a negative correction row into `payment_followups`.

@@ -6,7 +6,7 @@ The app is a static Vite SPA (`index.html` + `js/` + `css/` → `dist/`) talking
 ## How It Is Structured
 | Piece | Where | Notes |
 |-------|-------|-------|
-| Static site | Cloudflare Pages project connected to `github.com/naramadaessence/inventory-management`, branch `main` | Build `npm run build`, output `dist` |
+| Static site | Cloudflare Pages project `narmada-inventory` → https://narmada-inventory.pages.dev, Git-connected to `github.com/naramadaessence/inventory-management`, branch `main` (every push to main auto-deploys) | Build `npm run build`, output `dist`, account narmadaessence.sachin@gmail.com |
 | Edge Function | `supabase/functions/create-user/` → Supabase project `jnfykpicpttvnihgsckt` | `index.ts` = Deno entry; `handler.js` = logic (runtime-agnostic, unit-tested) |
 | Function config | `supabase/config.toml` | Only sets `[functions.create-user] verify_jwt = false`; the function checks the JWT + admin role itself |
 | Client call site | `js/pages/settings.js` | `supabase.functions.invoke('create-user', { body })` — supabase-js adds the user's access token |
@@ -45,7 +45,7 @@ npx supabase secrets set ALLOWED_ORIGINS=https://<project>.pages.dev --project-r
 ## History
 - 2026-04-24 → 2026-07-23: Vercel Hobby (`inventory-management-pi-opal.vercel.app`, Vercel fn `api/create-user.js`).
 - 2026-07-23: Vercel paused the whole Hobby team for exceeding Fluid Provisioned Memory (likely a different project in the team, "broadcast", since deleted — unconfirmed because the Vercel account used by the agent had no access to the team). The pause did not lift on its own; Vercel requires Pro or support. Hobby is also non-commercial only, which this app is not. Site returned `402 DEPLOYMENT_DISABLED`.
-- 2026-10-20: Moved to Cloudflare Pages + Supabase Edge Function (see `decisions.md`).
+- 2026-10-20: Moved to Cloudflare Pages + Supabase Edge Function (see `decisions.md`). Edge Function `create-user` deployed via CLI (verify_jwt false), `ALLOWED_ORIGINS=https://narmada-inventory.pages.dev` set. Verified: site 200, bundle contains the prod Supabase URL and no `/api/create-user`, login page renders with no console errors, CORS preflight from the Pages origin returns 204 with the origin echoed, unauthenticated POST → 401.
 
 ## How It Is Tested
 - `tests/create-user-function.test.js` — handler: CORS preflight allow/deny, 405, 401 (missing/invalid token), 403 (non-admin), 400 (validation, Supabase errors), 500 (missing env), 200 success with phone update, 429 rate limit.
