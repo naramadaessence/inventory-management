@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-20 - Migration 015: Drop Old Sale RPC Overloads; Cloudflare Go-Live
+**What**: Added `migrations/015_drop_old_sale_overloads.sql`; production confirmed live on Cloudflare Pages.
+**Why**: A live-DB check showed migrations 002–014 are applied, but `record_sale`/`update_sale` each exist twice (010 version + 011/012 version with `p_sale_type`), and the new versions were never revoked from PUBLIC/anon (ISSUE-015).
+**Impact**: None for the app (it always sends `p_sale_type`). After 015 runs, only the current functions exist, callable by `authenticated` only.
+**Files Changed**: `migrations/015_drop_old_sale_overloads.sql` (NEW), `.gitignore`, `knowledge-base/*`
+**Tests**: No automated test added because the change is SQL-only and the suite runs against demo mode; the migration ends with a verification query. `npm test` 34/34 unchanged.
+**Commit**: see git log
+
+- Cloudflare Pages project `narmada-inventory` live at https://narmada-inventory.pages.dev; owner confirmed admin login and Create User.
+- Owner rotated the admin password, turned Supabase GitHub "Deploy to production" off, and set the Auth Site URL.
+
 ## 2026-10-20 - Move Off Vercel: Supabase Edge Function + Cloudflare Pages; KB Refresh; Sidebar Escaping
 **What**: Replaced the Vercel serverless function with a Supabase Edge Function, prepared the app for Cloudflare Pages, escaped the sidebar user name, and brought the knowledge base up to date.
 **Why**: Production has been down since 2026-07-23 (Vercel Hobby team paused, ISSUE-009); the KB was stale since 2026-06-10; the sidebar rendered `full_name` unescaped (ISSUE-014).

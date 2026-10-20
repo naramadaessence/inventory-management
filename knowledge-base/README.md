@@ -27,7 +27,7 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 ├── supabase/
 │   ├── config.toml             # Edge Function deploy config only (create-user: verify_jwt = false)
 │   └── functions/create-user/  # Edge Function: index.ts (Deno entry) + handler.js (logic, unit-tested)
-├── migrations/                 # Numbered Supabase SQL migrations 002–014 (no 001)
+├── migrations/                 # Numbered Supabase SQL migrations 002–015 (no 001)
 ├── supabase-scripts/           # Manual one-off operational SQL scripts (destructive sales cleanups)
 ├── public/                     # Static assets served at / by Vite (logo.png, favicon.svg, icons.svg)
 ├── tests/
@@ -63,7 +63,7 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 
 ## Setup / Migration Order
 - `supabase-schema.sql` is the base schema, but it has been **edited in place** over time, so it already contains many columns and constraints that later migrations also add (e.g. `sales.sale_type`, `products.sell_qty`/`installed_qty`, `amc_day` 1–31). It does **not** contain the RPC functions; those come from migrations 006, 009, 010, 011 and 012.
-- There is no `001` migration. Migrations `002`–`014` are applied **manually, in numeric order**, through the Supabase SQL editor. There is no migration runner or applied-migrations table.
+- There is no `001` migration. Migrations `002`–`015` are applied **manually, in numeric order**, through the Supabase SQL editor. There is no migration runner or applied-migrations table. Production state checked 2026-10-20: 002–014 applied; 015 written the same day (see ISSUE-015).
 - `002_grams_to_kg.sql` divides liquid quantities by 1000 and is **not re-runnable**: running it twice corrupts liquid stock and prices.
 - `002` and `003` are data migrations from older shapes (they reference the legacy `sales.product_id` / `quantity` / `unit_price` columns, which the current base schema no longer has). > ⚠️ Needs verification: the exact fresh-database path (which of 002/003 to skip) has not been tested end to end.
 - `012` drops the constraint named `payment_followups_nonnegative_amount`, but the base schema still declares an inline `CHECK (amount_collected >= 0)` on `payment_followups` (auto-named differently), so a database built from the current base schema may still reject negative correction rows. > ⚠️ Needs verification against the live DB.

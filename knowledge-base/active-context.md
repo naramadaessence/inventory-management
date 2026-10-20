@@ -14,7 +14,8 @@
 - ~~Supabase GitHub integration "Deploy to production" OFF~~ — done by owner 2026-10-20.
 - Paste `VITE_SUPABASE_ANON_KEY` into Cloudflare env vars (agents do not enter keys).
 - Answer: what should Products "Sell Qty" / "Installed Qty" mean? (ISSUE-012)
-- Run the read-only checks in ISSUE-013 and the migration-state queries below on the live DB, and record which of 010–014 are applied:
+- Run `migrations/015_drop_old_sale_overloads.sql` once in the Supabase SQL editor, then its verification query (ISSUE-015).
+- ~~Live-DB migration checks~~ — done 2026-10-20: 010–014 all applied in production (sale_type, sell_qty/installed_qty, 010 RPCs, amc_day 1–31, no followup amount check); duplicate record_sale/update_sale overloads found → migration 015. Queries kept for reference:
   ```sql
   select table_name, column_name from information_schema.columns where table_schema='public' and ((table_name='sales' and column_name='sale_type') or (table_name='products' and column_name in ('sell_qty','installed_qty')));
   select proname, pg_get_function_identity_arguments(oid) from pg_proc where pronamespace='public'::regnamespace and proname in ('record_sale','update_sale','record_payment_followup','set_product_stock','admin_issue_stock') order by 1,2;
@@ -25,7 +26,7 @@
 
 ## Next Steps
 1. ISSUE-009 resolved (site live on Cloudflare). Remaining: Pending User Action items below.
-2. Based on the live-DB query results, write a follow-up migration only for what is actually missing (and drop duplicate `record_sale`/`update_sale` overloads if both arg lists exist).
+2. After 015 is run, mark ISSUE-015 resolved.
 3. Decide on ISSUE-012 with the client.
 
 ## Do Not Touch

@@ -9,7 +9,7 @@ This file is the dumping ground for "we know about it, we're not doing it yet." 
 ## 📋 Operations / Process
 
 ### Setup / Deployment Runbook
-- **What**: Single-page `SETUP.md` covering env vars, Supabase setup steps, migration order (`supabase-schema.sql` then 002 → 003 → 004 → 005 → 006 → 007 → 008 → 009 → 010 → 011 → 012 → 013 → 014, applied manually in the Supabase SQL editor; 002 is not re-runnable; see README "Setup / Migration Order" for fresh-database caveats), demo-mode toggle, build/deploy commands, Vercel project settings, where Sentry DSN goes.
+- **What**: Single-page `SETUP.md` covering env vars, Supabase setup steps, migration order (`supabase-schema.sql` then 002 → 003 → 004 → 005 → 006 → 007 → 008 → 009 → 010 → 011 → 012 → 013 → 014 → 015, applied manually in the Supabase SQL editor; 002 is not re-runnable; see README "Setup / Migration Order" for fresh-database caveats), demo-mode toggle, build/deploy commands, Vercel project settings, where Sentry DSN goes.
 - **Why deferred**: Knowledge-base captures most of this; works for the current 1-developer setup.
 - **Trigger**: First time a second developer (or successor) needs to run this themselves.
 - **Effort**: ~30 minutes.

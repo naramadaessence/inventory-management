@@ -173,3 +173,14 @@
 **Root Cause**: `renderShell()` in `js/main.js` interpolated `user.full_name`, initials and role without `esc()`.
 **Fix**: Wrapped all three in `esc()`.
 **Regression Test**: `tests/app-shell.test.js`
+---
+
+## ISSUE-015: Duplicate record_sale / update_sale Overloads And Missing anon Revoke
+**Status**: Open — fix written, waiting for `migrations/015_drop_old_sale_overloads.sql` to be run in production
+**Severity**: Low
+**Discovered**: 2026-10-20
+**Symptom**: Production has two versions of each function: the migration 010 ones (no `p_sale_type`) and the 011/012 ones (with `p_sale_type`). Any RPC call that omits `p_sale_type` is ambiguous; the old `update_sale` lacks the 012 followup-correction sync. The new versions are executable by `PUBLIC`/`anon`.
+**Root Cause**: 011/012 changed the argument list with `CREATE OR REPLACE`, which creates a new overload instead of replacing; they also skipped 010's REVOKE/GRANT block.
+**Workaround**: None needed for the app — `sales.js` always sends `p_sale_type`, and both new functions raise for unauthenticated callers (`Authentication required` / `Only admins can edit sales`).
+**Fix**: Migration 015 drops the two old overloads and restores REVOKE from PUBLIC/anon + GRANT to authenticated. Lesson: when adding a parameter to an RPC, `DROP FUNCTION` the old signature in the same migration and repeat the grant block.
+**Regression Test**: None automated (SQL-only); verification query at the bottom of migration 015.
