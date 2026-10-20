@@ -30,6 +30,7 @@
 - Tests use the seeded demo dataset created by `initStore()` through `auth.getSession()`.
 - External services are not called during the test suite.
 - Sentry remains inactive unless `VITE_SENTRY_DSN` is configured, so normal tests do not need a Sentry mock.
+- Edge Function code is tested through a runtime-agnostic `createHandler({ env, createClient })`; keep Deno-only APIs in `index.ts` so Vitest can import the handler.
 
 ## Current Coverage
 - `tests/demo-rpc.test.js` covers:
@@ -41,6 +42,9 @@
   - `delete_sale` stock restore, sale item cascade, followup detachment, and audit transaction logging
   - `record_payment_followup` atomic followup insert + sale payment update, invalid collection rejection, and linked-sale party mismatch rejection
   - `record_stock_intake`, `record_damage_loss`, `create_rental`, `return_rental`, `admin_issue_stock`, and `set_product_stock` demo RPC parity
+
+- `tests/app-shell.test.js` (default happy-dom env) imports `js/main.js` with a demo session whose `full_name` contains HTML and asserts the sidebar renders it as text.
+- `tests/create-user-function.test.js` (`// @vitest-environment node`) tests `supabase/functions/create-user/handler.js` with an injected fake `createClient` and env getter: CORS, method, auth, admin role, validation, Supabase error passthrough, success, rate limit.
 
 ## Known Flaky Tests
 None - keep it that way.

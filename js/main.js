@@ -1,6 +1,7 @@
 import { auth, assertProductionConfig } from './supabase.js';
 import { initErrorTracking, setErrorUser, reportError } from './error-tracking.js';
 import { installKeyboardShortcuts } from './keyboard-shortcuts.js';
+import { esc } from './utils/helpers.js';
 import { renderLogin } from './pages/login.js';
 import { renderDashboard } from './pages/dashboard.js';
 import { renderProducts } from './pages/products.js';
@@ -72,10 +73,10 @@ function renderShell() {
         <nav class="sidebar-nav" id="sidebar-nav" role="navigation"></nav>
         <div class="sidebar-footer">
           <div class="sidebar-user">
-            <div class="sidebar-user-avatar" aria-hidden="true">${initials}</div>
+            <div class="sidebar-user-avatar" aria-hidden="true">${esc(initials)}</div>
             <div class="sidebar-user-info">
-              <div class="name">${user.full_name}</div>
-              <div class="role">${user.role}</div>
+              <div class="name">${esc(user.full_name)}</div>
+              <div class="role">${esc(user.role)}</div>
             </div>
             <button class="btn-logout" id="btn-logout" title="Logout" aria-label="Logout">
               <i class="fas fa-sign-out-alt" aria-hidden="true"></i>

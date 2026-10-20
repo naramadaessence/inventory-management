@@ -81,3 +81,15 @@
 **Alternatives Considered**: Direct client updates to `sales`, `sale_items`, and `products.current_stock` were rejected because they bypass the atomic stock-write rule. Delete-and-recreate was rejected because it changes bill IDs and matches the client complaint.
 **Consequences**: Production must run migration 009 before deploying the UI. Future bill-edit behavior belongs in `update_sale`, and each new stock-impacting edit path needs demo RPC parity plus tests.
 **Superseded By**:
+
+## Decision: Host on Cloudflare Pages + Supabase Edge Function (leave Vercel)
+**Date**: 2026-10-20
+**Status**: Accepted
+**Context**: Vercel paused the whole Hobby team on 2026-07-23 for exceeding Fluid Provisioned Memory; it stayed paused for ~3 months and Vercel only lifts it via a Pro upgrade or support. Vercel Hobby is also non-commercial only, and this is a business app. The app is a static SPA with a single serverless endpoint (admin user creation).
+**Decision**: Serve `dist/` from Cloudflare Pages (free plan, commercial use allowed, unlimited static bandwidth). Move `api/create-user.js` to a Supabase Edge Function `create-user` so the service role key never leaves Supabase and the frontend host has no server code. The client calls it with `supabase.functions.invoke`. Logic lives in a runtime-agnostic `handler.js` so it can be unit-tested in Vitest; `index.ts` is a one-line Deno entry.
+**Alternatives Considered**:
+- Vercel Pro ($20/user/month): fastest, no code change, but recurring cost for a static site.
+- Cloudflare Pages Function for create-user: would put the service role key in Cloudflare and tie the code to one host.
+- New Vercel Hobby team: still non-commercial and could count as evading limits.
+**Consequences**: Hosting is free and host-independent (any static host works). Edge Function deploys are manual (CLI or dashboard) and `ALLOWED_ORIGINS` must list the production origin. Supabase's GitHub integration must stay off for migrations until the schema is baselined (see `deployment.md`).
+**Superseded By**:

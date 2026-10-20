@@ -99,3 +99,75 @@
 **Workaround**: None needed after deploying this code.
 **Fix**: Updated dashboard refill completions, settings users/categories/stock intake, product save/delete, and stock-related flows to use `dbOp` or RPC results before showing success.
 **Regression Test**: `npm run build`; behavior also covered indirectly by demo RPC tests for the new RPC-backed flows.
+
+---
+
+## ISSUE-009: Production Site Down — Vercel Hobby Team Paused
+**Status**: Open (fix in progress)
+**Severity**: Critical
+**Discovered**: 2026-10-20
+**Symptom**: `inventory-management-pi-opal.vercel.app` and `/api/create-user` return `402 Payment Required` (`X-Vercel-Error: DEPLOYMENT_DISABLED`) since 2026-07-23.
+**Root Cause**: The Vercel Hobby team exceeded Fluid Provisioned Memory fair use (most likely another project in the team, "broadcast", since deleted — not confirmed). Paused Hobby teams do not auto-resume.
+**Workaround**: None on Vercel without upgrading to Pro.
+**Fix**: Code moved to Cloudflare Pages + Supabase Edge Function on 2026-10-20 (see `deployment.md`). Mark resolved once the Cloudflare site is live and Create User is smoke-tested.
+**Regression Test**: `tests/create-user-function.test.js` (function logic); deploy smoke test is manual.
+
+---
+
+## ISSUE-010: Production Admin Password Committed To A Public Repo
+**Status**: Open — needs password rotation by the owner
+**Severity**: Critical
+**Discovered**: 2026-10-20
+**Symptom**: `knowledge-base/changelog.md` (2026-04-24 entry) contained the live admin email and password in plain text. The GitHub repo is public (clones without auth).
+**Root Cause**: Deployment notes were written into the KB with credentials.
+**Workaround**: None — anyone can read git history.
+**Fix**: Password removed from the current file on 2026-10-20. Still required: change the admin password in Supabase (Authentication → Users), and consider making the repo private. Rewriting git history is optional and does not help once a secret has been public.
+**Regression Test**: None (process rule: never write credentials into the KB or code).
+
+---
+
+## ISSUE-011: SQL Migrations Are Not Re-Runnable And There Is No Migration History
+**Status**: Accepted Risk
+**Severity**: High
+**Discovered**: 2026-10-20
+**Symptom**: Re-running files in `migrations/` against production damages data or security: 002 divides liquid stock by 1000 again, 006 and 009 replace the hardened RPCs from 010–012 with unvalidated versions (006 also re-grants `adjust_stock`), 010 re-adds the non-negative followup constraint that 012 removed, 003/004 fail. A fresh database cannot be built by running `supabase-schema.sql` then 002–014 (002/003 reference dropped `sales` columns).
+**Root Cause**: Migrations were written as one-shot SQL-editor scripts; `supabase-schema.sql` was edited in place; no `supabase_migrations` history.
+**Workaround**: Apply only new migrations, once, by hand. Keep Supabase GitHub integration "Deploy to production" OFF and never place these files under `supabase/migrations/`.
+**Fix**: Baseline with `supabase db pull` before adopting CLI/integration-managed migrations (see `deployment.md`).
+**Regression Test**: None.
+
+---
+
+## ISSUE-012: "Current Stock" On Products Page May Double-Count Sales
+**Status**: Open — needs client decision
+**Severity**: Medium
+**Discovered**: 2026-10-20
+**Symptom**: Products page shows "Total Stock" = `current_stock` and "Current Stock" = `current_stock − sell_qty − installed_qty`. `current_stock` is already reduced automatically by every sale, so if staff also type sold quantities into Sell Qty they are subtracted twice. The Products page low-stock styling uses the derived figure while the Dashboard low-stock alert and sale stock checks use `current_stock`, so they can disagree.
+**Root Cause**: `sell_qty`/`installed_qty` (migration 013) are manual numbers with no link to sales or installations; their intended meaning was not specified.
+**Workaround**: Treat Sell Qty / Installed Qty as notes only; rely on Dashboard alerts.
+**Fix**: Pending client answer on what Sell Qty / Installed Qty should mean.
+**Regression Test**: None yet.
+
+---
+
+## ISSUE-013: Migration 012 May Not Remove The Base Schema's Followup Amount Check
+**Status**: Open — needs verification on live DB
+**Severity**: Medium
+**Discovered**: 2026-10-20
+**Symptom**: Editing a paid bill back to a lower amount could fail when `update_sale` inserts a negative correction row into `payment_followups`.
+**Root Cause**: 012 drops `payment_followups_nonnegative_amount`, but `supabase-schema.sql` declares an inline `CHECK (amount_collected >= 0)` with an auto-generated name, which 012 does not drop. Only databases built from the base schema are affected; production may differ.
+**Workaround**: Check live constraints with `select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.payment_followups'::regclass and contype = 'c';`
+**Fix**: If an auto-named non-negative check exists in prod, drop it in a new migration.
+**Regression Test**: None (demo mode has no constraints).
+
+---
+
+## ISSUE-014: Signed-In User Name Rendered Unescaped In Sidebar
+**Status**: Resolved
+**Severity**: Low
+**Discovered**: 2026-10-20
+**Resolved**: 2026-10-20
+**Symptom**: A profile `full_name` containing HTML was injected into the sidebar.
+**Root Cause**: `renderShell()` in `js/main.js` interpolated `user.full_name`, initials and role without `esc()`.
+**Fix**: Wrapped all three in `esc()`.
+**Regression Test**: `tests/app-shell.test.js`

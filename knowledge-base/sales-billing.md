@@ -29,6 +29,7 @@ Sales is the bill/invoice workflow for Narmada Essence. Sellers/admins can recor
 - If the client wants a removed sale to restore stock, use the app's Delete Bill option. If they want sales data removed while stock stays as-is, use the one-off cleanup script pattern.
 - Live read-only QA on 2026-05-29 showed production Sales total as 18070 across 7 transactions; confirm whether cleanup should target exact 18000 rows or all current sales data.
 - The bill total is calculated from line items. Payment received cannot exceed the computed bill total.
+- Free-to-Use parties: selling below a product's `unit_price` is **allowed by design** (client request, commit 89be5a1, 2026-06-11). The UI only shows a warning toast; there is intentionally no server-side price floor. AMC bills also scale line prices to hit the fixed AMC total, which can put lines below `unit_price` for any party. Do not add a floor in `record_sale`/`update_sale` without a new client decision.
 
 ## How It Is Tested
 - `tests/demo-rpc.test.js` covers:

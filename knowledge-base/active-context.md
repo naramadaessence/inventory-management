@@ -1,34 +1,38 @@
 ## Current Status
-**Last Updated**: 2026-06-10
-**Last Agent Session**: Asset valuation — Free-to-Use deployed machines now included in Total Asset Value on dashboard and reports.
-**Test Suite Status**: Pass — `npm test` 21/21 and `npm run build` pass on 2026-06-10.
+**Last Updated**: 2026-10-20
+**Last Agent Session**: Production was down (Vercel Hobby team paused since 2026-07-23). Moved `create-user` to a Supabase Edge Function, prepared Cloudflare Pages hosting, escaped the sidebar user name, refreshed the whole KB, documented migration re-run risk and a leaked admin password.
+**Test Suite Status**: Pass — `npm test` 34/34 and `npm run build` pass on 2026-10-20.
 
 ## In Progress
-- None.
+- [ ] Cloudflare Pages project — create from GitHub repo, build `npm run build`, output `dist`, env `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `NODE_VERSION=22` (see `deployment.md`).
+- [ ] Deploy Edge Function `create-user` to project `jnfykpicpttvnihgsckt` with JWT verification off; set secret `ALLOWED_ORIGINS` to the Pages URL.
+- [ ] Smoke test on the new URL: admin login, create a throwaway seller, record/edit/delete a small sale.
 
 ## Pending User Action
-- Run `migrations/010_data_consistency_hardening.sql` in the live Supabase project before relying on the deployed UI. If migration 009 was already run, still run 010; it supersedes 009 for the full consistency fix.
-- If live Sales still shows the 7 rows totaling 18070 and the client wants all current sales data removed while preserving stock/party data, run `supabase-scripts/clear-all-sales-data-preserve-stock.sql` after previewing the rows.
-- After Vercel deploys the pushed commit and migration 010 is applied, smoke test production with admin login: create a small sale, edit it, delete it, and confirm totals/stock behave as expected.
-
-## Recently Completed
-- **Data consistency hardening**: Added migration 010 with validated sales/edit/delete RPCs, followup-safe delete, business RPCs for stock workflows, payment followup atomicity, RLS tightening, and data guard constraints.
-- **UI stock-flow cleanup**: Moved product stock adjustment, stock intake, damage/loss, rentals, returns, and admin immediate checkout away from direct browser stock writes.
-- **Collections atomicity**: Replaced browser-side followup insert plus sale update with `record_payment_followup`.
-- **Error handling**: Wrapped remaining admin save handlers in `dbOp` or RPC calls before showing success.
-- **AMC fixed-rate bills**: Sales now sends adjusted line prices so the database-computed sale total matches the AMC fixed total.
-- **Tests**: Expanded `tests/demo-rpc.test.js` from 11 to 21 tests covering invalid sales, followup-safe delete, payment followups, payment/sale party mismatch rejection, stock intake, damage/loss, rentals, admin issue, and stock adjustment.
-- **Knowledge base**: Added `stock-workflows.md` and updated architecture, sales-billing, testing, decisions, known issues, README, changelog, and this active context.
+- **Rotate the production admin password** (ISSUE-010) — it was in the public repo.
+- Supabase → Settings → Integrations → GitHub: turn **"Deploy to production" OFF** (ISSUE-011).
+- Paste `VITE_SUPABASE_ANON_KEY` into Cloudflare env vars (agents do not enter keys).
+- Answer: what should Products "Sell Qty" / "Installed Qty" mean? (ISSUE-012)
+- Run the read-only checks in ISSUE-013 and the migration-state queries below on the live DB, and record which of 010–014 are applied:
+  ```sql
+  select table_name, column_name from information_schema.columns where table_schema='public' and ((table_name='sales' and column_name='sale_type') or (table_name='products' and column_name in ('sell_qty','installed_qty')));
+  select proname, pg_get_function_identity_arguments(oid) from pg_proc where pronamespace='public'::regnamespace and proname in ('record_sale','update_sale','record_payment_followup','set_product_stock','admin_issue_stock') order by 1,2;
+  select conname, pg_get_constraintdef(oid) from pg_constraint where conname in ('payment_followups_nonnegative_amount','parties_amc_day_check') or (conrelid='public.payment_followups'::regclass and contype='c');
+  ```
+- Optional: delete the Vercel project once Cloudflare is live.
 
 ## Next Steps
-1. Apply migration 010 in live Supabase.
-2. Re-run the sales cleanup script if the client still wants all old sales removed.
-3. Smoke test the deployed app after Vercel finishes deploying the pushed commit.
+1. Finish the In Progress items above; then mark ISSUE-009 resolved and replace the Prod URL in README Quick Facts.
+2. Based on the live-DB query results, write a follow-up migration only for what is actually missing (and drop duplicate `record_sale`/`update_sale` overloads if both arg lists exist).
+3. Decide on ISSUE-012 with the client.
 
 ## Do Not Touch
 - Do not manually edit `products.current_stock` from browser code; use intent-specific RPCs.
-- Do not re-enable direct authenticated writes to `sale_items`; sale item changes belong in `record_sale` and `update_sale`.
+- Do not re-enable direct authenticated writes to `sale_items`.
 - Do not run sales cleanup scripts without previewing the rows first.
+- Do not re-run anything in `migrations/` or move it under `supabase/migrations/` (ISSUE-011).
+- Do not add a Free-to-Use price floor; below-price sales are allowed by client request (`sales-billing.md`).
+- Never write credentials into the KB or code.
 
 ## House Style Reminders (for future agents)
 - New save handlers: use `withSaving(e.currentTarget, async () => { ... })` from `helpers.js`.
@@ -36,11 +40,12 @@
 - Stock mutations: never `db.update('products', ..., { current_stock: ... })` directly. Use one of the higher-level RPCs documented in `stock-workflows.md`.
 - Aggregations over high-volume tables: use `db.fetchAllPaged()` or a Postgres aggregate RPC when one exists.
 - Magic thresholds: extend `CONFIG` in `helpers.js` rather than inlining.
-- User-derived strings in toasts/modal titles: use `textContent`; helper utilities handle this.
+- User-derived strings: always `esc()` in template HTML; toasts/modal titles use `textContent`.
 - New business logic in demo mode parity: mirror production RPCs in `demoRpc` and add tests in `tests/demo-rpc.test.js`.
+- Server-side code: Supabase Edge Functions under `supabase/functions/<name>/` with logic in a testable `handler.js`.
 - Errors that should reach the operator: surface via `dbOp` or call `reportError` directly.
-- Stable lookups (categories, profiles): `db.getAll(table)` is cached for 60s; mutating writes auto-invalidate. Do not pass options if you want the cache.
+- Stable lookups (categories, profiles): `db.getAll(table)` is cached for 60s; mutating writes auto-invalidate.
 - Deferred items: edit `knowledge-base/future-scope.md` rather than letting them drift.
 - New page render: show `skeletonHTML(...)` while data loads.
 - New keyboard shortcut: extend `js/keyboard-shortcuts.js`; avoid ad-hoc keydown listeners.
-- Sales bill edits: use `db.rpc('update_sale', ...)`; do not update `sales`, `sale_items`, or `products.current_stock` directly from the client.
+- Sales bill edits: use `db.rpc('update_sale', ...)`.

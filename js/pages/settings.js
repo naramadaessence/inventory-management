@@ -141,20 +141,15 @@ function openUserModal(user, container, body) {
         if (!result) return;
         showToast('User created (demo mode)', 'success');
       } else {
-        // Production: call serverless API
+        // Production: call the create-user Supabase Edge Function
         try {
-          const { data: { session } } = await supabase.auth.getSession();
-          const res = await fetch('/api/create-user', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${session.access_token}`
-            },
-            body: JSON.stringify({ email, password, full_name: name, phone })
+          const { data: result, error } = await supabase.functions.invoke('create-user', {
+            body: { email, password, full_name: name, phone }
           });
-          const result = await res.json();
-          if (!res.ok) {
-            showToast(result.error || 'Failed to create user', 'error');
+          if (error) {
+            let detail = null;
+            try { detail = await error.context?.json?.(); } catch { /* non-JSON error body */ }
+            showToast(detail?.error || 'Failed to create user', 'error');
             return;
           }
           // Update role if not default seller

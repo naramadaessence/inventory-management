@@ -1,0 +1,8 @@
+# Used only for Edge Function deploys. Database migrations are NOT managed by
+# the Supabase CLI in this repo (see knowledge-base/deployment.md) - do not add
+# a supabase/migrations folder without baselining first.
+project_id = "narmada-essence"
+
+[functions.create-user]
+# The function verifies the caller's JWT and admin role itself.
+verify_jwt = false

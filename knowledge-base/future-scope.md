@@ -9,7 +9,7 @@ This file is the dumping ground for "we know about it, we're not doing it yet." 
 ## 📋 Operations / Process
 
 ### Setup / Deployment Runbook
-- **What**: Single-page `SETUP.md` covering env vars, Supabase setup steps, migration order (`supabase-schema.sql` then 002 → 003 → 004 → 005 → 006 → 007 → 008), demo-mode toggle, build/deploy commands, Vercel project settings, where Sentry DSN goes.
+- **What**: Single-page `SETUP.md` covering env vars, Supabase setup steps, migration order (`supabase-schema.sql` then 002 → 003 → 004 → 005 → 006 → 007 → 008 → 009 → 010 → 011 → 012 → 013 → 014, applied manually in the Supabase SQL editor; 002 is not re-runnable; see README "Setup / Migration Order" for fresh-database caveats), demo-mode toggle, build/deploy commands, Vercel project settings, where Sentry DSN goes.
 - **Why deferred**: Knowledge-base captures most of this; works for the current 1-developer setup.
 - **Trigger**: First time a second developer (or successor) needs to run this themselves.
 - **Effort**: ~30 minutes.
@@ -42,11 +42,14 @@ This file is the dumping ground for "we know about it, we're not doing it yet." 
 - **Trigger**: Client confirms this app is the GST source of truth, or asks for "print bill" ability for any sale.
 - **Effort**: ~2 days for basic invoice (jsPDF / react-pdf). Add another day for GST tax math.
 
-### Data Export (CSV / Excel)
-- **What**: Per-page export buttons on sales, collections, inventory log, parties. Generate CSV (or `.xlsx` via `sheetjs`) of filtered/visible rows. Special: GST-format export for Tally import.
-- **Why deferred**: No explicit ask yet; manual SQL export possible via Supabase Dashboard.
-- **Trigger**: First "send me last month's sales as Excel" request.
-- **Effort**: ~half a day for generic CSV; Tally format is a separate research task.
+### Data Export (CSV / Excel) — partly done
+- **Done**: Client-side CSV export on two pages.
+  - **Products** (`js/pages/products.js`, 2026-07-06): "Export" button downloads all active products (name, model, category, type, price, Total Stock, Sell Qty, Installed Qty, derived Current Stock, Deployed, threshold, expiry). It ignores the search/category filter.
+  - **Sales** (`js/pages/sales.js`, 2026-07-10): "Export CSV" button downloads the currently filtered view (All / GST / Cash / Free to Use / Purchased) with date, party, type, items, amount, received, status, due date. UTF-8 BOM for Excel.
+- **Remaining**: Export on collections, inventory log and parties; `.xlsx` output (e.g. `sheetjs`); GST-format export for Tally import; a date-range option (the Sales export always covers all loaded sales in the active filter).
+- **Why deferred**: No explicit ask for the remaining pages; manual SQL export possible via Supabase Dashboard.
+- **Trigger**: First "send me last month's collections / log as Excel" request, or a Tally import ask.
+- **Effort**: ~1–2 hours per extra page (copy the Sales pattern); Tally format is a separate research task.
 
 ### Mobile UX Pass
 - **What**: Walk through seller's day on a real mid-range Android (~360 px width). Fix touch-target sizes, party combobox dropdown positioning on small screens, modal sizing, table horizontal scroll behavior.
@@ -126,6 +129,6 @@ This file is the dumping ground for "we know about it, we're not doing it yet." 
 
 ---
 
-*Last updated: 2026-05-14 — completed items in this sweep are recorded in `changelog.md`.*
+*Last updated: 2026-10-20 — completed items are recorded in `changelog.md`.*
 
 When you complete an item, move it from this file into `changelog.md` with a normal dated entry.

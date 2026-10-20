@@ -1,6 +1,6 @@
 // Lightweight error-tracking shim that lazy-loads Sentry only when configured.
 //
-// Activation: set VITE_SENTRY_DSN in your .env (and Vercel env vars) to a
+// Activation: set VITE_SENTRY_DSN in your .env (and Cloudflare Pages env vars) to a
 // Sentry project DSN. If unset, this module is effectively a no-op — Sentry
 // won't be loaded, no events will be sent, no bundle cost is paid beyond
 // these few KB of glue.
@@ -9,7 +9,7 @@
 //   1. Sign up at https://sentry.io (free tier covers 5K events / month)
 //   2. Create a Browser-JavaScript project
 //   3. Copy the DSN from Settings → Client Keys
-//   4. Add VITE_SENTRY_DSN=<dsn> to Vercel env vars (Production scope)
+//   4. Add VITE_SENTRY_DSN=<dsn> to Cloudflare Pages env vars (Production) and redeploy
 
 const DSN = import.meta.env.VITE_SENTRY_DSN || '';
 

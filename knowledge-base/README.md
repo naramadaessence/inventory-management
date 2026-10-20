@@ -10,40 +10,63 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 | Styling | Custom CSS design system (light theme, amber accents) |
 | Backend | Supabase (PostgreSQL + Auth + RLS) |
 | Charts | Chart.js |
+| Error monitoring | Sentry (`@sentry/browser`), lazy-loaded only when `VITE_SENTRY_DSN` is set |
+| Serverless API | Supabase Edge Function `create-user` (`supabase/functions/create-user/`, admin-only user creation) |
 | Test Runner | Vitest + happy-dom |
-| Hosting | Vercel (Hobby tier) |
+| Hosting | Cloudflare Pages (free plan) — moving from Vercel Hobby on 2026-10-20, see `deployment.md` |
 | Repo | github.com/naramadaessence/inventory-management |
 
 ## Directory Structure
 ```
-├── index.html                 # Entry point
-├── vite.config.js            # Vite configuration
+├── index.html                  # Entry point
+├── vite.config.js              # Vite configuration (dev port 3000, output dist/)
+├── vitest.config.js            # Vitest config (happy-dom, tests/**/*.test.js)
 ├── package.json
-├── catalog_data.json          # Product seed data (48+ SKUs)
-├── migrations/                # Ordered Supabase SQL migrations
-├── supabase-scripts/          # Manual one-off operational SQL scripts
+├── supabase-schema.sql         # Base schema: tables, constraints, RLS (edited in place, see Setup below)
+├── Narmada Essence Catalog.pdf # Client product catalog (reference only, not loaded by the app)
+├── supabase/
+│   ├── config.toml             # Edge Function deploy config only (create-user: verify_jwt = false)
+│   └── functions/create-user/  # Edge Function: index.ts (Deno entry) + handler.js (logic, unit-tested)
+├── migrations/                 # Numbered Supabase SQL migrations 002–014 (no 001)
+├── supabase-scripts/           # Manual one-off operational SQL scripts (destructive sales cleanups)
+├── public/                     # Static assets served at / by Vite (logo.png, favicon.svg, icons.svg)
+├── tests/
+│   ├── demo-rpc.test.js        # Vitest suite for demo-mode RPC handlers
+│   ├── app-shell.test.js       # App shell rendering (escaping of user name)
+│   └── create-user-function.test.js # create-user Edge Function handler
 ├── css/
-│   └── styles.css            # Full design system
+│   └── styles.css              # Full design system
 ├── js/
-│   ├── main.js               # SPA router + app shell
-│   ├── supabase.js           # DB client + demo mode (localStorage)
+│   ├── main.js                 # SPA router + app shell (role-based nav)
+│   ├── supabase.js             # DB client, demo mode (localStorage) + demoRpc handlers
+│   ├── error-tracking.js       # Env-gated Sentry shim (no-op without VITE_SENTRY_DSN)
+│   ├── keyboard-shortcuts.js   # Global shortcuts (?, n, /, g + letter navigation)
 │   ├── utils/
-│   │   └── helpers.js        # Formatters, toasts, modals, date ranges
+│   │   └── helpers.js          # Formatters, toasts, modals, dbOp, CONFIG, withSaving
 │   └── pages/
 │       ├── login.js
-│       ├── dashboard.js      # Stats, low-stock alerts, expiry alerts
-│       ├── products.js       # CRUD, grid/table view, search, categories
-│       ├── daily-operations.js # Checkout/checkin workflow + flagging
-│       ├── sales.js          # Record sales, revenue tracking
-│       ├── parties.js        # Customer directory
-│       ├── rentals.js        # Machine rental tracking
-│       ├── damage-loss.js    # Damage/loss reporting
-│       ├── inventory-log.js  # Full audit trail
-│       ├── reports.js        # Date-range reports + Chart.js charts
-│       └── settings.js       # Users, categories, stock intake
-├── assets/products/          # Product images (user-supplied)
-└── knowledge-base/           # This folder
+│       ├── dashboard.js        # Stats, low-stock/expiry alerts, refill + payment reminders
+│       ├── products.js         # CRUD, grid/table view, categories, CSV export
+│       ├── daily-operations.js # Issue → return → admin approval workflow + flagging
+│       ├── sales.js            # Multi-item bills, Edit Bill, GST/Cash + machine-type filters, CSV export
+│       ├── collections.js      # Payment follow-ups, pending/overdue tracking
+│       ├── parties.js          # Customer directory, machine type/counts, AMC settings, custom rates
+│       ├── installations.js    # Machines deployed at party locations (admin only)
+│       ├── rentals.js          # Machine rental tracking
+│       ├── damage-loss.js      # Damage/loss reporting
+│       ├── inventory-log.js    # Paginated audit trail
+│       ├── reports.js          # Date-range reports + Chart.js charts
+│       └── settings.js         # Users, categories, stock intake
+├── dist/                       # Build output (gitignored)
+└── knowledge-base/             # This folder
 ```
+
+## Setup / Migration Order
+- `supabase-schema.sql` is the base schema, but it has been **edited in place** over time, so it already contains many columns and constraints that later migrations also add (e.g. `sales.sale_type`, `products.sell_qty`/`installed_qty`, `amc_day` 1–31). It does **not** contain the RPC functions; those come from migrations 006, 009, 010, 011 and 012.
+- There is no `001` migration. Migrations `002`–`014` are applied **manually, in numeric order**, through the Supabase SQL editor. There is no migration runner or applied-migrations table.
+- `002_grams_to_kg.sql` divides liquid quantities by 1000 and is **not re-runnable**: running it twice corrupts liquid stock and prices.
+- `002` and `003` are data migrations from older shapes (they reference the legacy `sales.product_id` / `quantity` / `unit_price` columns, which the current base schema no longer has). > ⚠️ Needs verification: the exact fresh-database path (which of 002/003 to skip) has not been tested end to end.
+- `012` drops the constraint named `payment_followups_nonnegative_amount`, but the base schema still declares an inline `CHECK (amount_collected >= 0)` on `payment_followups` (auto-named differently), so a database built from the current base schema may still reject negative correction rows. > ⚠️ Needs verification against the live DB.
 
 ## Reading Order
 | # | File | Purpose |
@@ -58,6 +81,7 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 | 8 | future-scope.md | Explicitly deferred work and trigger conditions |
 | 9 | stock-workflows.md | Stock-changing RPCs, audit flow, concurrency rules |
 | 10 | sales-billing.md | Sales, bills, sale_items, edit/delete behavior |
+| 11 | deployment.md | Hosting, Edge Function deploy, env vars, Supabase GitHub integration risk |
 
 ## Critical Rules
 - **Demo mode**: App works fully without Supabase via localStorage. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` env vars for production. Production builds hard-fail if env vars are missing (no silent fallback).
@@ -65,7 +89,8 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 - **Stock consistency**: Every stock change (checkout, checkin, sale, rental, damage, stock intake, product adjustment) creates a corresponding `inventory_transactions` entry for full audit trail.
 - **Atomic stock writes**: All stock-mutating flows go through intent-specific Postgres RPCs (`record_sale`, `update_sale`, `delete_sale`, `approve_issue`, `approve_return`, `admin_issue_stock`, `record_stock_intake`, `record_damage_loss`, `create_rental`, `return_rental`, `set_product_stock`). Never update `products.current_stock` directly from browser code.
 - **Pagination**: Aggregations over high-volume tables use `db.fetchAllPaged()` to avoid silent 1000-row truncation. Display lists use `limit:N` or true server-side pagination.
-- **Role-based access**: Admin sees all pages. Seller only sees their own checkout history.
+- **Role-based access**: Admin sees all pages. Seller nav is Dashboard, Daily Operations, Record Sale, Collections, Parties; sellers see only their own sessions, sales and followups (RLS-enforced).
+- **User creation**: Production accounts are created only through the `create-user` Supabase Edge Function (admin JWT + role check inside the function, service role key from Supabase's built-in env, CORS allow-list from the `ALLOWED_ORIGINS` secret, best-effort 5 req/IP/min). Never create users by raw SQL insert into `auth.users`.
 - **Input validation**: All forms validate on client side. Supabase RLS enforces on server side.
 - **Soft deletes**: Products are deactivated (`is_active: false`), never hard-deleted.
 - **Tests/build**: Run `npm test` for the full Vitest suite. Run `npm run build` for production bundle verification.
@@ -74,10 +99,14 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 | Key | Value |
 |-----|-------|
 | Domain | narmadaessence.com |
+| Prod URL | Cloudflare Pages `*.pages.dev` URL — fill in once the project is created (old Vercel URL https://inventory-management-pi-opal.vercel.app returns 402 DEPLOYMENT_DISABLED) |
+| Hosting | Cloudflare Pages (static `dist/`) + Supabase Edge Function. Vercel Hobby team paused since 2026-07-23 (Fluid Provisioned Memory) and Hobby forbids commercial use — see `deployment.md` |
+| Supabase Project Ref | `jnfykpicpttvnihgsckt` (Mumbai, ap-south-1); GitHub integration connected 2026-10-20 — keep "Deploy to production" OFF (see `deployment.md`) |
 | Client Location | Surat, Gujarat |
 | Product Count | 48+ SKUs |
 | Categories | Dispensers, Diffusers, Refills, Oils, Room Cream |
-| Tracking Types | Unit (pieces) and Liquid (grams) |
-| Demo Login | admin@narmadaessence.com / admin123 |
-| Seller Login | seller1@narmadaessence.com / seller123 |
+| Tracking Types | Unit (pieces) and Liquid (kg, ₹/kg — since migration 002) |
+| Demo Login (demo mode only) | admin@narmadaessence.com / admin123 |
+| Seller Login (demo mode only) | seller1@narmadaessence.com / seller123 |
 | Test Command | `npm test` |
+| Build Command | `npm run build` |

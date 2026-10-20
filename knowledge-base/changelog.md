@@ -1,10 +1,24 @@
 # Changelog
 
+## 2026-10-20 - Move Off Vercel: Supabase Edge Function + Cloudflare Pages; KB Refresh; Sidebar Escaping
+**What**: Replaced the Vercel serverless function with a Supabase Edge Function, prepared the app for Cloudflare Pages, escaped the sidebar user name, and brought the knowledge base up to date.
+**Why**: Production has been down since 2026-07-23 (Vercel Hobby team paused, ISSUE-009); the KB was stale since 2026-06-10; the sidebar rendered `full_name` unescaped (ISSUE-014).
+**Impact**: Settings → Create User now calls the `create-user` Edge Function and fails until it is deployed and `ALLOWED_ORIGINS` includes the site origin. `api/create-user.js` is gone (moved to the Recycle Bin locally; recoverable from git).
+**Files Changed**: `supabase/functions/create-user/handler.js` (NEW), `supabase/functions/create-user/index.ts` (NEW), `supabase/config.toml` (NEW), `api/create-user.js` (REMOVED), `js/pages/settings.js`, `js/main.js`, `js/error-tracking.js`, `tests/create-user-function.test.js` (NEW), `tests/app-shell.test.js` (NEW), `knowledge-base/*` (README, architecture, future-scope, changelog, decisions, known-issues, testing, sales-billing, active-context, deployment NEW)
+**Tests**: `npm test` 34/34 pass (22 existing + 11 create-user handler + 1 app shell); `npm run build` passes. The app-shell test was confirmed to fail against the unfixed `main.js`.
+**Commit**: see git log
+
+- Edge Function logic is runtime-agnostic (`createHandler({ env, createClient })`) and keeps the old behavior: admin JWT + role check, validation, best-effort 5 req/IP/min, CORS allow-list (now from the `ALLOWED_ORIGINS` secret).
+- `settings.js` uses `supabase.functions.invoke('create-user')` and reads the error body from `error.context`.
+- Removed a plain-text production admin password from the 2026-04-24 entry (ISSUE-010); the password still needs rotating.
+- KB: README directory map/setup/migration order/quick facts, architecture tables and RPC signatures, future-scope CSV + runbook, real commit hashes for "Pending" entries, new `deployment.md`, hosting ADR, ISSUE-009…014.
+- Investigated and withdrew a suspected bug: below-price sales to Free-to-Use parties are intentional (documented in `sales-billing.md`); no server-side price floor added.
+
 ## 2026-07-23 - Increased AMC Day Limit to 31
 **What**: Increased the AMC Day selection limit from 28 to 31.
 **Why**: Client requested to be able to select dates up to the 31st for AMC refill reminders.
 **Files Changed**: `js/pages/parties.js`, `js/pages/collections.js`, `supabase-schema.sql`, `migrations/014_amc_day_limit_31.sql` (NEW)
-**Commit**: Pending
+**Commit**: `2248559`
 
 - Changed the dropdown loop in `parties.js` to iterate up to 31.
 - Updated the sort dropdown label from '1st → 28th' to '1st → 31st'.
@@ -17,6 +31,7 @@
 **Why**: Client needs to track sell quantity and installed quantity per product alongside existing stock fields.
 **Files Changed**: `supabase-schema.sql`, `migrations/013_product_qty_fields.sql` (NEW), `js/supabase.js`, `js/pages/products.js`, `tests/demo-rpc.test.js`, `knowledge-base/architecture.md`
 **Tests**: `npm test` passed 22/22.
+**Commits**: `a0119d4` (fields), `7ff1978` (Total/Current Stock relabel)
 
 - Added `sell_qty DECIMAL(12,3)` and `installed_qty DECIMAL(12,3)` columns to `products` table (schema + migration 013).
 - Updated demo store seed data with `sell_qty: 0, installed_qty: 0` for all 22 products.
@@ -24,22 +39,26 @@
 - Added columns in table view between "Warehouse Stock" and "Deployed".
 - Added to CSV export headers and row data.
 - Added test case verifying insert/update persistence of these fields.
+- Follow-up commit `7ff1978`: relabelled `current_stock` as "Total Stock" in the Products UI and added a display-only "Current Stock" = Total Stock − Sell Qty − Installed Qty (grid, table, modal live calc, CSV). Not stored; see `architecture.md` → products.
 
 ---
+
 ## 2026-07-14 - Added Counts to Sale Filters
 **What**: Added count numbers next to the filter labels on the Sales page (e.g., "Free to Use (14)").
 **Why**: Client requested to see the number of items that fall under each filter category directly on the buttons.
 **Files Changed**: `js/pages/sales.js`
-**Commit**: Pending
+**Commit**: `8bc6801`
 
 - Computed counts for 'All', 'GST', 'Cash', 'Free to Use', and 'Purchased' based on the active `sales` array.
 - Injected these counts into the inner HTML of their respective filter buttons.
 
----## 2026-07-13 - Added Free to Use and Purchased Filters
+---
+
+## 2026-07-13 - Added Free to Use and Purchased Filters
 **What**: Added "Free to Use" and "Purchased" filters to the Sales page.
 **Why**: Client requested to filter sales by party's machine type, specifically separating "Free to Use" sales from all other sales ("Purchased").
 **Files Changed**: `js/pages/sales.js`
-**Commit**: Pending
+**Commit**: `d6df7ab`
 
 - Added `data-machine-type` attribute to sale rows in the UI to facilitate filtering.
 - Added two new filter buttons to the Sales page: "Free to Use" and "Purchased".
@@ -54,7 +73,7 @@
 **Why**: Client needs to quickly separate GST-billed sales from cash/kaccha sales for accounting and tax reporting purposes.
 **Files Changed**: `js/pages/sales.js`, `js/supabase.js`, `supabase-schema.sql`, `migrations/011_sale_type.sql` (NEW)
 **Tests**: `npm test` passed 21/21; `npm run build` passed.
-**Commit**: Pending
+**Commits**: `70cffd1` (sale type), `a76e5cf` (amount reset on pending), `c118ba6` (migration 012 followup sync), `5702545` (Sales CSV export)
 
 - Added `sale_type` column (`TEXT NOT NULL DEFAULT 'gst'`, CHECK `IN ('gst', 'cash')`) to the `sales` table.
 - Updated `record_sale` and `update_sale` Postgres RPCs to accept and persist `p_sale_type`.
@@ -75,7 +94,7 @@
 **What**: Fixed an `activeInstalls is not defined` reference error on the Reports Stock Valuation tab.
 **Why**: A previous migration changed how deployed machines are tracked (now using `parties.machine_counts` instead of an `installations` array in this specific context), which caused a crash when rendering the 'Deployed (Free-to-Use)' stat card.
 **Files Changed**: `js/pages/reports.js`
-**Commit**: Pending
+**Commit**: `7af0c6c`
 
 - Replaced the missing `activeInstalls` variable with dynamic calculation of `totalDeployedMachines` and `ftuParties` directly from the active `parties` data.
 - The 'Deployed (Free-to-Use)' stat card now correctly shows the total number of machines and locations.
@@ -86,7 +105,7 @@
 **What**: Added a CSV export button on the Products page.
 **Why**: Allows the user to download a comprehensive list of all active products, including stock levels, categories, unit prices, and deployed Free-to-Use machine counts, directly into a spreadsheet for external reporting or auditing.
 **Files Changed**: `js/pages/products.js`
-**Commit**: Pending
+**Commit**: `84c4acd`
 
 - Added an "Export" button to the Products page header toolbar.
 - Implemented client-side CSV generation that formats raw product and stock data (Warehouse vs. Deployed) into an easily consumable format.
@@ -98,7 +117,7 @@
 **What**: Added AMC fixed price toggle and total capping to the Edit Bill modal.
 **Why**: Client requested that when editing a bill for a party with an active AMC, the total bill amount should not exceed the fixed AMC price, matching the behavior of the Record Sale modal.
 **Files Changed**: `js/pages/sales.js`
-**Commit**: Pending
+**Commit**: `00f0d82`
 
 - Added `isAmcSale` toggle to `openEditSaleModal` that automatically checks if the original sale total matched the party's AMC rate.
 - Capped the `totalAmount()` to the AMC rate when `isAmcSale` is active.
@@ -110,7 +129,7 @@
 **What**: Modified sales validation to allow selling items below stock value to parties with 'Free to Use' machines.
 **Why**: Client requested to allow the discount anyway, bypassing the strict unit price enforcement.
 **Files Changed**: `js/pages/sales.js`
-**Commit**: Pending
+**Commit**: `89be5a1`
 
 - Changed the blocking error to a non-blocking warning toast when price is below unit price for a 'Free to Use' machine in `Record Sale` and `Edit Bill` flows.
 
@@ -164,11 +183,13 @@
 **What**: Added validation to prevent selling items below stock value to parties with 'Free to Use' machines.
 **Why**: Client requested that if a machine is free to use, the sale price of refills/items cannot be deducted from (be less than) the Total Stock Value (unit price) to ensure costs are recovered.
 **Files Changed**: `js/pages/sales.js`
-**Commit**: Pending
+**Commit**: `005322d`
 
 - Added validation in `Record Sale` modal when adding items.
 - Added validation in `Edit Bill` modal when adding new items and when updating prices of existing items inline.
 - Shows error toast and prevents saving if price is below product unit price for 'Free to Use' machines.
+
+---
 
 ## 2026-05-29 - Data Consistency Hardening
 **What**: Hardened bill edit/delete, sales validation, payment collections, stock workflows, RLS, schema constraints, demo parity, and tests.
@@ -176,7 +197,7 @@
 **Impact**: Requires running `migrations/010_data_consistency_hardening.sql` in live Supabase before relying on the deployed UI. Migration 010 supersedes 009 for consistency hardening but is safe to run after 009.
 **Files Changed**: `migrations/010_data_consistency_hardening.sql`, `supabase-schema.sql`, `js/supabase.js`, `js/pages/sales.js`, `js/pages/collections.js`, `js/pages/daily-operations.js`, `js/pages/products.js`, `js/pages/settings.js`, `js/pages/damage-loss.js`, `js/pages/rentals.js`, `js/pages/dashboard.js`, `tests/demo-rpc.test.js`, `knowledge-base/*`
 **Tests**: `npm test` passed 21/21; `npm run build` passed.
-**Commit**: Pending
+**Commit**: `65c89b0`
 
 - Added hardened production RPCs for sales, bill edits/deletes, payment followups, stock intake, damage/loss, rentals, admin immediate checkout, and product stock adjustment.
 - Locked direct `sale_items` writes behind RPCs, detached `payment_followups` during sale deletion, and added non-negative/positive-value database guard constraints.
@@ -192,7 +213,7 @@
 **Impact**: No source code behavior changed; KB now records open risks that should be fixed before treating all stock/payment flows as fully atomic.
 **Files Changed**: `knowledge-base/known-issues.md`, `knowledge-base/active-context.md`, `knowledge-base/architecture.md`, `knowledge-base/sales-billing.md`, `knowledge-base/changelog.md`
 **Tests**: `npm test` passed 11/11; `npm run build` passed.
-**Commit**: Pending
+**Commit**: `2817874`
 
 - Logged ISSUE-004 through ISSUE-008 covering delete-with-followups, direct stock writes, production `record_sale` validation, collection atomicity, and ignored Supabase error objects.
 - Marked architecture atomicity documentation as partially aspirational until all legacy direct stock flows move to RPCs.
@@ -205,7 +226,7 @@
 **Impact**: Requires running `migrations/009_edit_bill_and_delete_fix.sql` in the live Supabase project before deploying the UI. The one-off cleanup scripts are destructive and should be run manually only after previewing the matching rows.
 **Files Changed**: `js/pages/sales.js`, `js/pages/inventory-log.js`, `js/supabase.js`, `tests/demo-rpc.test.js`, `migrations/009_edit_bill_and_delete_fix.sql`, `supabase-scripts/clear-18000-sales-data.sql`, `supabase-scripts/clear-all-sales-data-preserve-stock.sql`, `supabase-schema.sql`, `knowledge-base/*`
 **Tests**: `npm test` passed (11 tests). `npm run build` passed. Browser smoke tested local Sales record/edit flow on `http://127.0.0.1:5173`.
-**Commit**: N/A
+**Commits**: `5e3b7bc` (Edit Bill + delete fix + 18000 cleanup script), `b9bc269` (all-sales cleanup script)
 
 - Sales table now shows explicit `Edit Bill` and delete buttons for admins.
 - Edit Bill can change party, sale date, line items, quantities, prices, payment status, amount received, due date, and notes.
@@ -221,7 +242,7 @@
 **Impact**: Documentation-only. Future agents now have explicit commands, coverage expectations, and a recorded demo-mode caveat.
 **Files Changed**: `knowledge-base/testing.md`, `knowledge-base/README.md`, `knowledge-base/decisions.md`, `knowledge-base/known-issues.md`, `knowledge-base/changelog.md`, `knowledge-base/active-context.md`
 **Tests**: `npm test` passed (9 tests). `npm run build` passed.
-**Commit**: N/A
+**Commit**: `5e3b7bc` (committed together with Edit Bill)
 
 - Documented Vitest + happy-dom test conventions and current demo RPC coverage.
 - Added `testing.md` to the README reading order and Quick Facts.
@@ -377,6 +398,8 @@
 - **Done button**: Both admin and seller get ✅ Done button on each refill. Inserts completion record and refreshes dashboard
 - **Auto-clear on month rollover**: New month = no completions yet = all reminders reappear naturally
 - **Seller view**: Call + Done buttons side by side on each refill item
+
+---
 
 ## 2026-05-12 — Multi-Item Sales System (sale_items table)
 **What**: Migrated from single-product-per-sale to multi-item bill/invoice architecture with new `sale_items` table.
@@ -649,7 +672,7 @@ INSERT INTO storage.buckets (id, name, public) VALUES ('product-images', 'produc
 
 ---
 
-
+## 2026-04-24 — Production Deployment + Secure Seller Creation API
 **What**: Deployed to Vercel + connected live Supabase database
 **Why**: Move from demo localStorage to real persistent database
 **Files Changed**: `api/create-user.js`, `js/pages/login.js`, `js/pages/settings.js`, `js/supabase.js`, `supabase-schema.sql`
@@ -658,7 +681,7 @@ INSERT INTO storage.buckets (id, name, public) VALUES ('product-images', 'produc
 - **Vercel URL**: `https://inventory-management-pi-opal.vercel.app/`
 - **Supabase Project ID**: `jnfykpicpttvnihgsckt`
 - **Region**: Mumbai (ap-south-1)
-- **Admin login**: `admin@narmadaessence.com` / `12345678`
+- **Admin login**: `admin@narmadaessence.com` (password removed 2026-10-20 — it was committed here in plain text and must be rotated)
 
 ### Supabase Setup Notes
 - Creating users via raw SQL INSERT into `auth.users` does NOT work — missing `auth.identities` record causes 500 errors
