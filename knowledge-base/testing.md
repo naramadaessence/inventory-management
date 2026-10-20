@@ -44,6 +44,7 @@
   - `record_stock_intake`, `record_damage_loss`, `create_rental`, `return_rental`, `admin_issue_stock`, and `set_product_stock` demo RPC parity
 
 - `tests/app-shell.test.js` (default happy-dom env) imports `js/main.js` with a demo session whose `full_name` contains HTML and asserts the sidebar renders it as text.
+- `tests/dashboard-low-stock.test.js` covers `availableStock()` and that Dashboard low-stock alerts use Current Stock (Total − Sell − Installed), rendering `renderDashboard` against the demo store as admin.
 - `tests/create-user-function.test.js` (`// @vitest-environment node`) tests `supabase/functions/create-user/handler.js` with an injected fake `createClient` and env getter: CORS, method, auth, admin role, validation, Supabase error passthrough, success, rate limit.
 
 ## Known Flaky Tests

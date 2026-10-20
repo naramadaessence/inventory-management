@@ -45,7 +45,7 @@ A `handle_new_user` trigger creates the profile row from `raw_user_meta_data` (r
 - The UI labels `current_stock` as **"Total Stock"** (table column, modal field, CSV header).
 - It shows **"Current Stock"** = `current_stock − sell_qty − installed_qty`. This is computed in the browser for the grid card, the table column, the edit modal (live, "auto-calculated") and the CSV export. It is never stored.
 - `sell_qty` and `installed_qty` are typed in by the admin on the product modal. They are **not** linked to `sales`/`sale_items` or the `installations` table, and no RPC updates them.
-- Stock RPCs, the inventory audit trail, the Products category summary bar, and the **Dashboard low-stock alerts** all use `current_stock`. The Products page's own low-stock highlight (⚠ / red text) uses the derived figure, so the two can disagree.
+- Stock RPCs, sale stock checks, the inventory audit trail, asset valuation and the Products category summary bar use `current_stock`. **Low-stock checks** — the Products page highlight (⚠ / red text) and the Dashboard "Low Stock Alerts" (since 2026-10-20) — both use the derived figure via `availableStock(p)` in `js/utils/helpers.js`.
 - Editing "Total Stock" in the modal calls `set_product_stock`; `sell_qty`/`installed_qty` are saved with a plain `products` update.
 - The "Deployed" column/badge is per category, summed from `parties.machine_counts` of `free_to_use` parties (machine categories only) — not from `installations`.
 

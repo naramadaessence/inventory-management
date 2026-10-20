@@ -164,6 +164,13 @@ export function formatStock(qty, type) {
   return qty + ' pcs';
 }
 
+// "Current Stock": Total Stock (current_stock) minus the manually entered
+// sold / installed machine quantities. Free-install machines never go through
+// Sales, so these are not already deducted from current_stock.
+export function availableStock(p) {
+  return Number(p.current_stock || 0) - Number(p.sell_qty || 0) - Number(p.installed_qty || 0);
+}
+
 // Format price display — ₹/kg for liquids, ₹/pc for units
 export function formatPricePerUnit(price, type) {
   if (type === 'liquid') {

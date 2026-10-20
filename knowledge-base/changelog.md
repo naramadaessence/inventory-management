@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-20 - Dashboard Low-Stock Alerts Use Current Stock
+**What**: Dashboard "Low Stock Alerts" now compare Current Stock (Total − Sell Qty − Installed Qty) against the threshold instead of Total Stock, and show that figure.
+**Why**: Owner request. Free-install machines never go through Sales and installs don't reduce Total Stock, so the Dashboard was counting machines at client sites as warehouse stock and could miss real shortages. The Products page already used Current Stock.
+**Impact**: Only products with non-zero Sell/Installed Qty can change alert status (today AUTOMATIC DISPENCER 329 vs threshold 150 and BIG DIFFUSER 129 — neither alerts). Refills/oils are unaffected (both fields 0).
+**Files Changed**: `js/utils/helpers.js` (new `availableStock()`), `js/pages/dashboard.js`, `js/pages/products.js` (4 inline copies of the formula replaced by the helper), `tests/dashboard-low-stock.test.js` (NEW), `knowledge-base/*`
+**Tests**: 4 new tests; the alert test fails against the old `dashboard.js` and passes with the fix. `npm test` 38/38, `npm run build` passes.
+**Commit**: see git log
+
 ## 2026-10-20 - Migration 015: Drop Old Sale RPC Overloads; Cloudflare Go-Live
 **What**: Added `migrations/015_drop_old_sale_overloads.sql`; production confirmed live on Cloudflare Pages.
 **Why**: A live-DB check showed migrations 002–014 are applied, but `record_sale`/`update_sale` each exist twice (010 version + 011/012 version with `p_sale_type`), and the new versions were never revoked from PUBLIC/anon (ISSUE-015).

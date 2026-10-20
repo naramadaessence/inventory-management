@@ -1,7 +1,7 @@
 ## Current Status
 **Last Updated**: 2026-10-20
 **Last Agent Session**: Production was down (Vercel Hobby team paused since 2026-07-23). Moved `create-user` to a Supabase Edge Function, prepared Cloudflare Pages hosting, escaped the sidebar user name, refreshed the whole KB, documented migration re-run risk and a leaked admin password.
-**Test Suite Status**: Pass — `npm test` 34/34 and `npm run build` pass on 2026-10-20.
+**Test Suite Status**: Pass — `npm test` 38/38 and `npm run build` pass on 2026-10-20.
 
 ## In Progress
 - [x] Cloudflare Pages project `narmada-inventory` live at https://narmada-inventory.pages.dev (Git-connected, branch main). Login page renders, no console errors.
@@ -28,7 +28,7 @@
 ## Next Steps
 1. ISSUE-009 resolved (site live on Cloudflare). Remaining: Pending User Action items below.
 2. No open issues from the 2026-10-20 session.
-3. Optional: make Dashboard low-stock alerts use Current Stock (Total − Sell − Installed) for machines.
+3. Done 2026-10-20: Dashboard low-stock alerts use Current Stock via `availableStock()`.
 
 ## Do Not Touch
 - Do not manually edit `products.current_stock` from browser code; use intent-specific RPCs.

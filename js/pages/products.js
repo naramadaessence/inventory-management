@@ -1,5 +1,5 @@
 import { db, auth, supabase } from '../supabase.js';
-import { formatCurrency, formatStock, formatDate, formatPricePerUnit, showToast, createModal, debounce, escapeHtml, dbOp, withSaving } from '../utils/helpers.js';
+import { formatCurrency, formatStock, availableStock, formatDate, formatPricePerUnit, showToast, createModal, debounce, escapeHtml, dbOp, withSaving } from '../utils/helpers.js';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 
@@ -117,8 +117,8 @@ export async function renderProducts(body, header) {
     if (view === 'grid') {
       container.innerHTML = stockSummaryHtml(filtered) + `<div class="product-grid">${filtered.map(p => {
         const cat = catMap[p.category_id];
-        const availableStock = Number(p.current_stock || 0) - Number(p.sell_qty || 0) - Number(p.installed_qty || 0);
-        const isLow = availableStock <= p.min_stock_threshold;
+        const available = availableStock(p);
+        const isLow = available <= p.min_stock_threshold;
         const dep = isMachineCat(String(p.category_id)) ? deployedByCat[String(p.category_id)] : null;
         const depHtml = dep ? `<span style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;border-radius:10px;background:rgba(20,184,166,0.1);color:#14b8a6;font-size:0.7rem;font-weight:600;" title="Deployed at: ${dep.parties.map(n => escapeHtml(n)).join(', ')}"><i class="fas fa-truck-loading" style="font-size:0.55rem;"></i> ${dep.qty} deployed</span>` : '';
         return `<div class="product-card" data-id="${p.id}">
@@ -127,7 +127,7 @@ export async function renderProducts(body, header) {
             <h4 title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</h4>
             <div style="font-size:0.75rem;color:var(--text-muted);">${escapeHtml(cat?.name || '—')} · ${formatPricePerUnit(p.unit_price, p.type)}</div>
             <div class="product-card-meta">
-              <span class="product-card-stock" style="${isLow ? 'color:var(--red);font-weight:600;' : ''}">${isLow ? '⚠ ' : ''}${formatStock(availableStock, p.type)}</span>
+              <span class="product-card-stock" style="${isLow ? 'color:var(--red);font-weight:600;' : ''}">${isLow ? '⚠ ' : ''}${formatStock(available, p.type)}</span>
               ${depHtml}
               <span class="product-card-type ${p.type}">${p.type}</span>
             </div>
@@ -139,8 +139,8 @@ export async function renderProducts(body, header) {
         <thead><tr><th></th><th>Product</th><th>Category</th><th>Type</th><th>Price</th><th>Total Stock</th><th>Sell Qty</th><th>Installed Qty</th><th>Current Stock</th><th>Deployed</th><th>Threshold</th><th>Expiry</th><th>Actions</th></tr></thead>
         <tbody>${filtered.map(p => {
           const cat = catMap[p.category_id];
-          const availableStock = Number(p.current_stock || 0) - Number(p.sell_qty || 0) - Number(p.installed_qty || 0);
-          const isLow = availableStock <= p.min_stock_threshold;
+          const available = availableStock(p);
+          const isLow = available <= p.min_stock_threshold;
           const imgUrl = getImageUrl(p.image_url);
           const dep = isMachineCat(String(p.category_id)) ? deployedByCat[String(p.category_id)] : null;
           const depCell = dep
@@ -155,7 +155,7 @@ export async function renderProducts(body, header) {
             <td>${formatStock(p.current_stock, p.type)}</td>
             <td>${formatStock(p.sell_qty || 0, p.type)}</td>
             <td>${formatStock(p.installed_qty || 0, p.type)}</td>
-            <td style="${isLow ? 'color:var(--red);font-weight:700;' : ''}">${isLow ? '⚠ ' : ''}${formatStock(availableStock, p.type)}</td>
+            <td style="${isLow ? 'color:var(--red);font-weight:700;' : ''}">${isLow ? '⚠ ' : ''}${formatStock(available, p.type)}</td>
             <td>${depCell}</td>
             <td>${formatStock(p.min_stock_threshold, p.type)}</td>
             <td>${formatDate(p.expiry_date)}</td>
@@ -180,7 +180,7 @@ export async function renderProducts(body, header) {
     const rows = products.filter(p => p.is_active !== false).map(p => {
       const cat = catMap[p.category_id];
       const dep = isMachineCat(String(p.category_id)) ? deployedByCat[String(p.category_id)] : null;
-      const availableStock = Number(p.current_stock || 0) - Number(p.sell_qty || 0) - Number(p.installed_qty || 0);
+      const available = availableStock(p);
       return [
         `"${(p.name || '').replace(/"/g, '""')}"`,
         `"${(p.model_number || '').replace(/"/g, '""')}"`,
@@ -190,7 +190,7 @@ export async function renderProducts(body, header) {
         p.current_stock,
         p.sell_qty || 0,
         p.installed_qty || 0,
-        availableStock,
+        available,
         dep ? dep.qty : 0,
         p.min_stock_threshold,
         p.expiry_date || ''
@@ -275,7 +275,7 @@ function openProductModal(product, categories) {
     <div class="form-row">
       <div class="form-group">
         <label class="form-label" id="prod-currentstock-label" style="color:var(--primary);font-weight:600;">Current Stock (auto-calculated)</label>
-        <div class="form-input" id="prod-currentstock-display" style="background:var(--surface-alt,#f5f5f5);font-weight:700;font-size:1.1rem;cursor:default;">${Number(product?.current_stock || 0) - Number(product?.sell_qty || 0) - Number(product?.installed_qty || 0)}</div>
+        <div class="form-input" id="prod-currentstock-display" style="background:var(--surface-alt,#f5f5f5);font-weight:700;font-size:1.1rem;cursor:default;">${availableStock(product || {})}</div>
       </div>
       <div class="form-group">
       </div>

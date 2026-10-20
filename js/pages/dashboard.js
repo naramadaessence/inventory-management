@@ -1,5 +1,5 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatStock, formatDateTime, daysUntil, showToast, escapeHtml, CONFIG, skeletonHTML, dbOp } from '../utils/helpers.js';
+import { formatCurrency, formatStock, availableStock, formatDateTime, daysUntil, showToast, escapeHtml, CONFIG, skeletonHTML, dbOp } from '../utils/helpers.js';
 
 export async function renderDashboard(body, header) {
   const isAdmin = auth.isAdmin();
@@ -57,7 +57,7 @@ export async function renderDashboard(body, header) {
   const pendingIssues = sessions.filter(s => s.status === 'pending_issue').length;
   const pendingReturns = sessions.filter(s => s.status === 'pending_approval').length;
   const pendingTotal = pendingIssues + pendingReturns;
-  const lowStockProducts = products.filter(p => p.is_active && p.current_stock <= p.min_stock_threshold);
+  const lowStockProducts = products.filter(p => p.is_active && availableStock(p) <= p.min_stock_threshold);
   const expiringProducts = products.filter(p => p.is_active && p.expiry_date && daysUntil(p.expiry_date) <= CONFIG.EXPIRY_WARN_DAYS && daysUntil(p.expiry_date) > 0);
   const expiredProducts = products.filter(p => p.is_active && p.expiry_date && daysUntil(p.expiry_date) <= 0);
   const warehouseStockValue = products.reduce((sum, p) => sum + (p.current_stock * p.unit_price), 0);
@@ -300,9 +300,9 @@ export async function renderDashboard(body, header) {
   } else {
     lowStockEl.innerHTML = '<div class="alert-list">' + lowStockProducts.map(p => {
       const pName = escapeHtml(p.name);
-      const stockStr = formatStock(p.current_stock, p.type);
+      const stockStr = formatStock(availableStock(p), p.type);
       const threshStr = formatStock(p.min_stock_threshold, p.type);
-      const pct = Math.round((p.current_stock / p.min_stock_threshold) * 100);
+      const pct = Math.round((availableStock(p) / p.min_stock_threshold) * 100);
       return `<div class="alert-item danger">
         <i class="fas fa-arrow-down"></i>
         <div style="flex:1;">
