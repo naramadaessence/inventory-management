@@ -116,7 +116,8 @@
 ---
 
 ## ISSUE-010: Production Admin Password Committed To A Public Repo
-**Status**: Open — needs password rotation by the owner
+**Status**: Resolved
+**Resolved**: 2026-10-20 — owner rotated the admin password; the old value remains in public git history but no longer works
 **Severity**: Critical
 **Discovered**: 2026-10-20
 **Symptom**: `knowledge-base/changelog.md` (2026-04-24 entry) contained the live admin email and password in plain text. The GitHub repo is public (clones without auth).

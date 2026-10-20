@@ -10,7 +10,7 @@
 - [x] Smoke test 2026-10-20: admin login and Create User confirmed working by the owner. Record/edit/delete sale not yet re-tested on the new host.
 
 ## Pending User Action
-- **Rotate the production admin password** (ISSUE-010) — it was in the public repo.
+- ~~Rotate the production admin password (ISSUE-010)~~ — done by owner 2026-10-20. Consider making the GitHub repo private.
 - ~~Supabase GitHub integration "Deploy to production" OFF~~ — done by owner 2026-10-20.
 - Paste `VITE_SUPABASE_ANON_KEY` into Cloudflare env vars (agents do not enter keys).
 - Answer: what should Products "Sell Qty" / "Installed Qty" mean? (ISSUE-012)
