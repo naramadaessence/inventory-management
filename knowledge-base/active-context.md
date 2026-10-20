@@ -20,7 +20,7 @@
   select proname, pg_get_function_identity_arguments(oid) from pg_proc where pronamespace='public'::regnamespace and proname in ('record_sale','update_sale','record_payment_followup','set_product_stock','admin_issue_stock') order by 1,2;
   select conname, pg_get_constraintdef(oid) from pg_constraint where conname in ('payment_followups_nonnegative_amount','parties_amc_day_check') or (conrelid='public.payment_followups'::regclass and contype='c');
   ```
-- Set Supabase → Authentication → URL Configuration → Site URL to https://narmada-inventory.pages.dev.
+- ~~Supabase Auth Site URL → https://narmada-inventory.pages.dev~~ — done by owner 2026-10-20 (Redirect URLs left empty; the app only uses email/password sign-in).
 - Optional: delete the Vercel project now that Cloudflare is live; tell staff the new URL.
 
 ## Next Steps

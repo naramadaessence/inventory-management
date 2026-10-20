@@ -39,7 +39,7 @@ npx supabase secrets set ALLOWED_ORIGINS=https://<project>.pages.dev --project-r
 
 ## Known Gotchas
 - Cloudflare preview deployments (`<hash>.<project>.pages.dev`) are not in `ALLOWED_ORIGINS`, so Create User fails there (everything else works).
-- Supabase Auth → URL Configuration → Site URL should point at the Cloudflare URL so any auth emails link to the right host.
+- Supabase Auth → URL Configuration → Site URL is https://narmada-inventory.pages.dev (set 2026-10-20). Redirect URLs are empty because the app only uses email/password sign-in; add them if magic links, OAuth or password-reset emails are ever added.
 - `error.context` on a non-2xx `functions.invoke` result is the raw `Response`; settings.js reads `{ error }` from its JSON for the toast.
 
 ## History
