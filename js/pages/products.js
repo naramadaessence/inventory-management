@@ -1,5 +1,5 @@
 import { db, auth, supabase } from '../supabase.js';
-import { formatCurrency, formatStock, availableStock, formatDate, formatPricePerUnit, showToast, createModal, debounce, escapeHtml, dbOp, withSaving } from '../utils/helpers.js';
+import { formatCurrency, formatStock, availableStock, formatDate, formatDateTime, formatPricePerUnit, showToast, createModal, debounce, escapeHtml, dbOp, withSaving } from '../utils/helpers.js';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 
@@ -37,6 +37,106 @@ function stockSummaryHtml(filtered) {
   return `<div class="stock-summary-bar">${chips.join('')}</div>`;
 }
 
+// Signed stock change, e.g. "+5 pcs" / "−0.250 kg".
+function formatDelta(delta, type) {
+  const d = Number(delta || 0);
+  return `${d > 0 ? '+' : '−'}${formatStock(Math.abs(d), type)}`;
+}
+
+const PENDING_BADGE = '<span class="badge-status amber adj-pending-badge" title="Stock change awaiting approval">pending</span>';
+
+function pendingAdjustmentsHtml(pending, productMap, profileName) {
+  if (pending.length === 0) return '';
+  return `<div class="card" id="pending-adjustments" style="margin-bottom:16px;">
+    <div class="card-header"><h3><i class="fas fa-clipboard-check"></i> Stock adjustments awaiting approval (${pending.length})</h3></div>
+    <div class="table-wrapper"><table class="data-table">
+      <thead><tr><th>Product</th><th>Total Stock now</th><th>Requested</th><th>Change</th><th>Reason</th><th>Requested by</th><th>Date</th><th>Actions</th></tr></thead>
+      <tbody>${pending.map(a => {
+        const p = productMap[a.product_id];
+        const type = p?.type || 'unit';
+        const now = Number(p?.current_stock || 0);
+        // Approval applies the delta, so if stock moved since the request the result differs from "Requested".
+        const moved = Number(a.stock_at_request) !== now;
+        const result = Math.round((now + Number(a.delta || 0)) * 1000) / 1000;
+        return `<tr data-adjustment-id="${a.id}">
+          <td><strong>${escapeHtml(p?.name || `Product #${a.product_id}`)}</strong></td>
+          <td>${formatStock(now, type)}</td>
+          <td>${formatStock(a.requested_stock, type)}${moved ? `<br><small style="color:var(--text-muted);">stock moved since request — becomes ${formatStock(result, type)}</small>` : ''}</td>
+          <td style="font-weight:600;color:${Number(a.delta) > 0 ? 'var(--green)' : 'var(--red)'};">${formatDelta(a.delta, type)}</td>
+          <td>${escapeHtml(a.reason || '')}</td>
+          <td>${escapeHtml(profileName(a.requested_by))}</td>
+          <td>${formatDateTime(a.created_at)}</td>
+          <td style="white-space:nowrap;">
+            <button class="btn btn-sm btn-primary adj-approve-btn" data-id="${a.id}"><i class="fas fa-check"></i> Approve</button>
+            <button class="btn btn-sm btn-danger adj-reject-btn" data-id="${a.id}"><i class="fas fa-times"></i> Reject</button>
+          </td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function openReviewModal(adjustment, approve, product, onDone) {
+  const type = product?.type || 'unit';
+  const content = `
+    <p style="margin-bottom:12px;">${approve ? 'Approve' : 'Reject'} the stock change for <strong>${escapeHtml(product?.name || `Product #${adjustment.product_id}`)}</strong>:
+      ${formatStock(adjustment.stock_at_request, type)} → ${formatStock(adjustment.requested_stock, type)} (${formatDelta(adjustment.delta, type)}).</p>
+    <p style="margin-bottom:12px;font-size:0.85rem;color:var(--text-muted);">Reason: ${escapeHtml(adjustment.reason || '')}</p>
+    <div class="form-group">
+      <label class="form-label">${approve ? 'Note (optional)' : 'Reason for rejecting *'}</label>
+      <textarea class="form-textarea" id="adj-review-note" maxlength="500"></textarea>
+    </div>
+  `;
+  const footer = `
+    <div style="flex:1;"></div>
+    <button class="btn btn-secondary" id="adj-review-cancel">Cancel</button>
+    <button class="btn ${approve ? 'btn-primary' : 'btn-danger'}" id="adj-review-confirm"><i class="fas ${approve ? 'fa-check' : 'fa-times'}"></i> ${approve ? 'Approve' : 'Reject'}</button>
+  `;
+  const { close } = createModal(approve ? 'Approve Stock Adjustment' : 'Reject Stock Adjustment', content, { footer });
+  document.getElementById('adj-review-cancel').onclick = close;
+  document.getElementById('adj-review-confirm').onclick = (e) => withSaving(e.currentTarget, async () => {
+    const note = document.getElementById('adj-review-note').value.trim();
+    if (!approve && !note) { showToast('Give a reason for rejecting', 'error'); return; }
+    const result = await dbOp(db.rpc('review_stock_adjustment', {
+      p_adjustment_id: adjustment.id,
+      p_approve: approve,
+      p_note: note || null,
+      p_reviewer_id: auth.currentUser.id,
+    }), approve ? 'Failed to approve adjustment' : 'Failed to reject adjustment');
+    if (!result) return;
+    showToast(approve ? 'Stock adjustment approved' : 'Stock adjustment rejected', approve ? 'success' : 'warning');
+    close();
+    await onDone();
+  });
+}
+
+function openAdjustmentHistory(adjustments, productMap, profileName) {
+  const reviewed = adjustments
+    .filter(a => a.status === 'approved' || a.status === 'rejected')
+    .sort((a, b) => String(b.reviewed_at || '').localeCompare(String(a.reviewed_at || '')))
+    .slice(0, 50);
+  const content = reviewed.length === 0
+    ? '<div class="empty-state"><i class="fas fa-clock-rotate-left"></i><h3>No reviewed adjustments yet</h3></div>'
+    : `<div class="table-wrapper"><table class="data-table" id="adjustment-history-table">
+      <thead><tr><th>Product</th><th>Status</th><th>Change</th><th>Reason</th><th>Requested by</th><th>Reviewed by</th><th>Reviewed</th><th>Note</th></tr></thead>
+      <tbody>${reviewed.map(a => {
+        const p = productMap[a.product_id];
+        const type = p?.type || 'unit';
+        return `<tr>
+          <td><strong>${escapeHtml(p?.name || `Product #${a.product_id}`)}</strong></td>
+          <td><span class="badge-status ${a.status === 'approved' ? 'green' : 'red'}">${a.status === 'approved' ? 'Approved' : 'Rejected'}</span></td>
+          <td>${formatStock(a.stock_at_request, type)} → ${formatStock(a.requested_stock, type)}<br><small style="color:var(--text-muted);">${formatDelta(a.delta, type)}</small></td>
+          <td>${escapeHtml(a.reason || '')}</td>
+          <td>${escapeHtml(profileName(a.requested_by))}<br><small style="color:var(--text-muted);">${formatDateTime(a.created_at)}</small></td>
+          <td>${escapeHtml(profileName(a.reviewed_by))}</td>
+          <td>${formatDateTime(a.reviewed_at)}</td>
+          <td>${escapeHtml(a.review_note || '—')}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+  createModal('Stock Adjustment History', content, { large: true });
+}
+
 export async function renderProducts(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
 
@@ -47,6 +147,7 @@ export async function renderProducts(body, header) {
       <div class="page-header-subtitle">Manage your product catalog & stock levels</div>
     </div>
     <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" id="btn-adjustment-history" title="Reviewed stock adjustments"><i class="fas fa-clock-rotate-left"></i> Adjustment history</button>
       <button class="btn btn-secondary" id="btn-export-csv" title="Download CSV"><i class="fas fa-download"></i> Export</button>
       <button class="btn btn-secondary" id="btn-manage-cats"><i class="fas fa-tags"></i> Categories</button>
       <button class="btn btn-primary" id="btn-add-product"><i class="fas fa-plus"></i> Add Product</button>
@@ -54,12 +155,22 @@ export async function renderProducts(body, header) {
   `;
   document.getElementById('mobile-toggle')?.addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
 
-  const [{ data: products }, { data: categories }, { data: parties }] = await Promise.all([
+  const [{ data: products }, { data: categories }, { data: parties }, { data: adjustmentRows }, { data: profiles }] = await Promise.all([
     db.getAll('products'),
     db.getAll('categories'),
     db.getAll('parties'),
+    db.getAll('stock_adjustments', { orderBy: ['created_at', 'desc'] }),
+    db.getAll('profiles'),
   ]);
   const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
+  const productMap = Object.fromEntries(products.map(p => [p.id, p]));
+  const profileMap = Object.fromEntries((profiles || []).map(p => [p.id, p]));
+  const profileName = (id) => (id ? (profileMap[id]?.full_name || profileMap[id]?.email || 'Unknown user') : '—');
+  const adjustments = adjustmentRows || [];
+  const pendingAdjustments = adjustments.filter(a => a.status === 'pending');
+  const pendingByProduct = Object.fromEntries(pendingAdjustments.map(a => [a.product_id, a]));
+  const fragrances = [...new Set(products.filter(p => p.is_active !== false && p.fragrance).map(p => p.fragrance))]
+    .sort((a, b) => a.localeCompare(b));
 
   // Machine category filter: only physical machines (diffusers/dispensers), NOT oils or refills
   const isMachineCat = (cid) => { const c = catMap[parseInt(cid)]; if (!c || c.type === 'liquid') return false; const n = c.name.toLowerCase(); return !n.includes('refill') && !n.includes('oil'); };
@@ -78,6 +189,7 @@ export async function renderProducts(body, header) {
   });
 
   body.innerHTML = `
+    ${pendingAdjustmentsHtml(pendingAdjustments, productMap, profileName)}
     <div class="toolbar">
       <div class="toolbar-left">
         <div class="search-input">
@@ -87,6 +199,10 @@ export async function renderProducts(body, header) {
         <select class="form-select" id="product-filter-cat" style="width:180px;">
           <option value="">All Categories</option>
           ${categories.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('')}
+        </select>
+        <select class="form-select" id="product-filter-fragrance" style="width:180px;">
+          <option value="">All fragrances</option>
+          ${fragrances.map(f => `<option value="${escapeHtml(f)}">${escapeHtml(f)}</option>`).join('')}
         </select>
       </div>
       <div class="toolbar-right">
@@ -102,11 +218,13 @@ export async function renderProducts(body, header) {
   let view = 'grid';
   let searchTerm = '';
   let filterCat = '';
+  let filterFragrance = '';
 
   function renderList() {
     let filtered = products.filter(p => p.is_active !== false);
-    if (searchTerm) filtered = filtered.filter(p => p.name.toLowerCase().includes(searchTerm));
+    if (searchTerm) filtered = filtered.filter(p => p.name.toLowerCase().includes(searchTerm) || (p.fragrance || '').toLowerCase().includes(searchTerm));
     if (filterCat) filtered = filtered.filter(p => p.category_id == filterCat);
+    if (filterFragrance) filtered = filtered.filter(p => p.fragrance === filterFragrance);
 
     const container = document.getElementById('products-container');
     if (filtered.length === 0) {
@@ -125,9 +243,10 @@ export async function renderProducts(body, header) {
           ${productImageHtml(p)}
           <div class="product-card-body">
             <h4 title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</h4>
-            <div style="font-size:0.75rem;color:var(--text-muted);">${escapeHtml(cat?.name || '—')} · ${formatPricePerUnit(p.unit_price, p.type)}</div>
+            <div style="font-size:0.75rem;color:var(--text-muted);">${escapeHtml(cat?.name || '—')}${p.fragrance ? ` · <span class="product-fragrance">${escapeHtml(p.fragrance)}</span>` : ''} · ${formatPricePerUnit(p.unit_price, p.type)}</div>
             <div class="product-card-meta">
               <span class="product-card-stock" style="${isLow ? 'color:var(--red);font-weight:600;' : ''}">${isLow ? '⚠ ' : ''}${formatStock(available, p.type)}</span>
+              ${pendingByProduct[p.id] ? PENDING_BADGE : ''}
               ${depHtml}
               <span class="product-card-type ${p.type}">${p.type}</span>
             </div>
@@ -136,7 +255,7 @@ export async function renderProducts(body, header) {
       }).join('')}</div>`;
     } else {
       container.innerHTML = stockSummaryHtml(filtered) + `<div class="table-wrapper"><table class="data-table">
-        <thead><tr><th></th><th>Product</th><th>Category</th><th>Type</th><th>Price</th><th>Total Stock</th><th>Sell Qty</th><th>Installed Qty</th><th>Current Stock</th><th>Deployed</th><th>Threshold</th><th>Expiry</th><th>Actions</th></tr></thead>
+        <thead><tr><th></th><th>Product</th><th>Fragrance</th><th>Category</th><th>Type</th><th>Price</th><th>Total Stock</th><th>Sell Qty</th><th>Installed Qty</th><th>Current Stock</th><th>Deployed</th><th>Threshold</th><th>Expiry</th><th>Actions</th></tr></thead>
         <tbody>${filtered.map(p => {
           const cat = catMap[p.category_id];
           const available = availableStock(p);
@@ -146,9 +265,10 @@ export async function renderProducts(body, header) {
           const depCell = dep
             ? `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:12px;background:rgba(20,184,166,0.1);color:#14b8a6;font-weight:600;font-size:0.8rem;" title="${dep.parties.map(n => escapeHtml(n)).join(', ')}">${formatStock(dep.qty, p.type)}</span>`
             : '<span style="color:var(--text-muted);">—</span>';
-          return `<tr>
+          return `<tr data-id="${p.id}">
             <td style="width:40px;">${imgUrl ? `<img src="${escapeHtml(imgUrl)}" style="width:36px;height:36px;border-radius:6px;object-fit:cover;" />` : `<i class="fas ${p.type === 'liquid' ? 'fa-flask' : 'fa-box'}" style="color:var(--text-muted);font-size:1.2rem;"></i>`}</td>
-            <td><strong>${escapeHtml(p.name)}</strong>${p.model_number ? `<br><small style="color:var(--text-muted);">${escapeHtml(p.model_number)}</small>` : ''}</td>
+            <td><strong>${escapeHtml(p.name)}</strong>${pendingByProduct[p.id] ? ` ${PENDING_BADGE}` : ''}${p.model_number ? `<br><small style="color:var(--text-muted);">${escapeHtml(p.model_number)}</small>` : ''}</td>
+            <td class="product-fragrance">${p.fragrance ? escapeHtml(p.fragrance) : '<span style="color:var(--text-muted);">—</span>'}</td>
             <td>${escapeHtml(cat?.name || '—')}</td>
             <td><span class="badge-status ${p.type === 'liquid' ? 'purple' : 'blue'}">${p.type}</span></td>
             <td>${formatPricePerUnit(p.unit_price, p.type)}</td>
@@ -166,23 +286,34 @@ export async function renderProducts(body, header) {
     }
 
     // Card & row click handlers
-    container.querySelectorAll('.product-card').forEach(el => el.addEventListener('click', () => openProductModal(products.find(p => p.id == el.dataset.id), categories)));
-    container.querySelectorAll('.product-edit-btn').forEach(el => el.addEventListener('click', (e) => { e.stopPropagation(); openProductModal(products.find(p => p.id == el.dataset.id), categories); }));
+    container.querySelectorAll('.product-card').forEach(el => el.addEventListener('click', () => openProductModal(productMap[el.dataset.id], categories, pendingByProduct[el.dataset.id])));
+    container.querySelectorAll('.product-edit-btn').forEach(el => el.addEventListener('click', (e) => { e.stopPropagation(); openProductModal(productMap[el.dataset.id], categories, pendingByProduct[el.dataset.id]); }));
   }
+
+  // Pending stock adjustments: Approve / Reject
+  const rerender = () => renderProducts(body, header);
+  body.querySelectorAll('.adj-approve-btn, .adj-reject-btn').forEach(btn => btn.addEventListener('click', () => {
+    const adjustment = pendingAdjustments.find(a => String(a.id) === btn.dataset.id);
+    if (!adjustment) return;
+    openReviewModal(adjustment, btn.classList.contains('adj-approve-btn'), productMap[adjustment.product_id], rerender);
+  }));
+  document.getElementById('btn-adjustment-history').addEventListener('click', () => openAdjustmentHistory(adjustments, productMap, profileName));
 
   document.getElementById('product-search').addEventListener('input', debounce(e => { searchTerm = e.target.value.toLowerCase().trim(); renderList(); }));
   document.getElementById('product-filter-cat').addEventListener('change', e => { filterCat = e.target.value; renderList(); });
+  document.getElementById('product-filter-fragrance').addEventListener('change', e => { filterFragrance = e.target.value; renderList(); });
   document.getElementById('product-view').addEventListener('change', e => { view = e.target.value; renderList(); });
   document.getElementById('btn-add-product').addEventListener('click', () => openProductModal(null, categories));
   document.getElementById('btn-manage-cats').addEventListener('click', () => openCategoryManager(body, header));
   document.getElementById('btn-export-csv').addEventListener('click', () => {
-    const headers = ['Name', 'Model Number', 'Category', 'Type', 'Unit Price', 'Total Stock', 'Sell Qty', 'Installed Qty', 'Current Stock', 'Deployed', 'Threshold', 'Expiry Date'];
+    const headers = ['Name', 'Fragrance', 'Model Number', 'Category', 'Type', 'Unit Price', 'Total Stock', 'Sell Qty', 'Installed Qty', 'Current Stock', 'Deployed', 'Threshold', 'Expiry Date'];
     const rows = products.filter(p => p.is_active !== false).map(p => {
       const cat = catMap[p.category_id];
       const dep = isMachineCat(String(p.category_id)) ? deployedByCat[String(p.category_id)] : null;
       const available = availableStock(p);
       return [
         `"${(p.name || '').replace(/"/g, '""')}"`,
+        `"${(p.fragrance || '').replace(/"/g, '""')}"`,
         `"${(p.model_number || '').replace(/"/g, '""')}"`,
         `"${(cat?.name || '—').replace(/"/g, '""')}"`,
         p.type,
@@ -211,8 +342,9 @@ export async function renderProducts(body, header) {
   renderList();
 }
 
-function openProductModal(product, categories) {
+function openProductModal(product, categories, pendingAdjustment = null) {
   const isEdit = !!product;
+  const currentTotal = Number(product?.current_stock || 0);
   const title = isEdit ? 'Edit Product' : 'Add New Product';
   const currentImgUrl = getImageUrl(product?.image_url);
 
@@ -226,6 +358,10 @@ function openProductModal(product, categories) {
         <label class="form-label">Model Number</label>
         <input class="form-input" id="prod-model" value="${escapeHtml(product?.model_number || '')}" maxlength="50" />
       </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Fragrance</label>
+      <input class="form-input" id="prod-fragrance" value="${escapeHtml(product?.fragrance || '')}" maxlength="100" placeholder="e.g. Rose, Lavender — leave empty for machines" />
     </div>
     <div class="form-group">
       <label class="form-label">Product Image</label>
@@ -255,13 +391,19 @@ function openProductModal(product, categories) {
     <div class="form-row">
       <div class="form-group">  
         <label class="form-label" id="prod-stock-label">Total Stock *</label>
-        <input class="form-input" type="number" id="prod-stock" value="${product?.current_stock || 0}" min="0" step="${product?.type === 'liquid' ? '0.001' : '1'}" required />
+        <input class="form-input" type="number" id="prod-stock" value="${product?.current_stock || 0}" min="0" step="${product?.type === 'liquid' ? '0.001' : '1'}" required ${pendingAdjustment ? 'disabled' : ''} />
+        ${pendingAdjustment ? `<small style="display:block;margin-top:4px;color:var(--accent);">A change to ${formatStock(pendingAdjustment.requested_stock, product.type)} is awaiting approval.</small>` : ''}
       </div>
       <div class="form-group">
         <label class="form-label">Min Stock Threshold *</label>
         <input class="form-input" type="number" id="prod-threshold" value="${product?.min_stock_threshold || 10}" min="0" required />
       </div>
     </div>
+    ${isEdit ? `<div class="form-group" id="prod-stock-reason-group" style="display:none;">
+      <label class="form-label">Reason for stock change *</label>
+      <textarea class="form-textarea" id="prod-stock-reason" maxlength="500" placeholder="e.g. Physical count found 3 extra pieces"></textarea>
+      <small style="display:block;margin-top:4px;color:var(--text-muted);">Total Stock changes only after an admin approves the request.</small>
+    </div>` : ''}
     <div class="form-row">
       <div class="form-group">
         <label class="form-label" id="prod-sellqty-label">Sell Qty</label>
@@ -369,12 +511,21 @@ function openProductModal(product, categories) {
     }
   }
   document.getElementById('prod-stock').addEventListener('input', recalcCurrentStock);
+
+  // Editing Total Stock needs a reason; the change goes to an approval request.
+  const stockChanged = () => isEdit && parseFloat(document.getElementById('prod-stock').value) !== currentTotal;
+  if (isEdit) {
+    document.getElementById('prod-stock').addEventListener('input', () => {
+      document.getElementById('prod-stock-reason-group').style.display = stockChanged() ? '' : 'none';
+    });
+  }
   document.getElementById('prod-sellqty').addEventListener('input', recalcCurrentStock);
   document.getElementById('prod-installedqty').addEventListener('input', recalcCurrentStock);
 
   document.getElementById('prod-save-btn').onclick = (e) => withSaving(e.currentTarget, async () => {
     const name = document.getElementById('prod-name').value.trim();
     const model = document.getElementById('prod-model').value.trim();
+    const fragrance = document.getElementById('prod-fragrance').value.trim() || null;
     const catId = parseInt(document.getElementById('prod-category').value);
     const cat = categories.find(c => c.id === catId);
     const isLiquid = cat?.type === 'liquid';
@@ -393,6 +544,9 @@ function openProductModal(product, categories) {
     if (isNaN(threshold) || threshold < 0) { showToast('Valid threshold is required', 'error'); return; }
     if (isNaN(sellQty) || sellQty < 0) { showToast('Valid sell quantity is required', 'error'); return; }
     if (isNaN(installedQty) || installedQty < 0) { showToast('Valid installed quantity is required', 'error'); return; }
+    const requestStockChange = stockChanged();
+    const stockReason = isEdit ? document.getElementById('prod-stock-reason').value.trim() : '';
+    if (requestStockChange && !stockReason) { showToast('Give a reason for the stock change', 'error'); return; }
 
     let imageUrl = product?.image_url || null;
 
@@ -416,7 +570,7 @@ function openProductModal(product, categories) {
     }
 
     const record = {
-      name, model_number: model || null, category_id: catId, type: cat?.type || 'unit',
+      name, model_number: model || null, fragrance, category_id: catId, type: cat?.type || 'unit',
       unit_price: price, min_stock_threshold: threshold,
       max_daily_consumption: maxDaily, expiry_date: expiry, is_active: true,
       image_url: imageUrl,
@@ -427,16 +581,18 @@ function openProductModal(product, categories) {
     if (isEdit) {
       const updateResult = await dbOp(db.update('products', product.id, record), 'Failed to update product');
       if (!updateResult) return;
-      if (stock !== Number(product.current_stock || 0)) {
-        const stockResult = await dbOp(db.rpc('set_product_stock', {
+      if (requestStockChange) {
+        const requestResult = await dbOp(db.rpc('request_stock_adjustment', {
           p_product_id: product.id,
           p_new_stock: stock,
-          p_performer_id: auth.currentUser.id,
-          p_notes: 'Product edit stock adjustment',
-        }), 'Failed to update product stock');
-        if (!stockResult) return;
+          p_reason: stockReason,
+          p_requested_by: auth.currentUser.id,
+        }), 'Product saved, but the stock change request failed');
+        if (!requestResult) return;
+        showToast('Product saved — stock change sent for approval', 'success');
+      } else {
+        showToast('Product updated', 'success');
       }
-      showToast('Product updated', 'success');
     } else {
       const createResult = await dbOp(db.insert('products', { ...record, current_stock: 0 }), 'Failed to create product');
       if (!createResult) return;

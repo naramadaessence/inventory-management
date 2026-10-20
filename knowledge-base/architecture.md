@@ -184,7 +184,7 @@ Written via `record_damage_loss`.
 | notes | text | |
 | received_by | UUID (FK→profiles) | |
 
-Written via `record_stock_intake`.
+Written via `record_purchase` since migration 016 (adds `purchase_date`, `purchase_rate`, `total_amount`, `bill_number`; legacy rows NULL). Full model of the reconciliation tables: `stock-reconciliation.md`.
 
 ### refill_completions (monthly refill tracking)
 | Column | Type | Notes |
@@ -242,7 +242,11 @@ Parameters below are listed without their `p_` prefix.
 | `adjust_stock(product_id, delta)` | Internal primitive used by business RPCs; raises if result would be negative. Do not call directly from browser code |
 | `record_sale(party_id, items, payment_status, payment_method, amount_received, expected_payment_date, sale_date, notes, recorded_by, sale_type)` | sale + sale_items + stock deduction + transactions, all in one tx |
 | `approve_issue(session_id, approver_id)` | deduct each issued item + log + flip session status |
-| `approve_return(session_id, approver_id)` | restore each returned item + log + flip session status |
+| `submit_return(session_id, items, notes, submitted_by)` | staff/admin records Returned + Used per item; computes Difference and mismatch (migration 016) |
+| `approve_return(session_id, approver_id, resolutions)` | requires classification of mismatches, restores returned stock, books machine installations, flips status (3-arg since 016) |
+| `reject_return(session_id, reason, approver_id)` | Send back: pending return → in field, no stock change |
+| `record_purchase(...)` | purchase entry with rate/total/bill/date, stock in |
+| `request_stock_adjustment` / `review_stock_adjustment` | stock corrections wait for admin approval; approval applies the delta |
 | `admin_issue_stock(seller_id, items, approver_id)` | create an immediately checked-out admin session, deduct stock, and log checkout transactions |
 | `update_sale(sale_id, party_id, items, payment_status, payment_method, amount_received, expected_payment_date, sale_date, notes, performer_id, sale_type)` | restore old sale stock + replace sale_items + deduct edited items + update header + insert followup correction row if needed |
 | `delete_sale(sale_id, performer_id)` | restore stock + detach payment followups + cascade-delete sale_items + delete sale |

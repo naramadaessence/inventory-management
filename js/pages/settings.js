@@ -1,5 +1,5 @@
 import { db, auth, supabase } from '../supabase.js';
-import { showToast, createModal, esc, formatWeight, formatStock, dbOp, withSaving } from '../utils/helpers.js';
+import { showToast, createModal, esc, formatStock, dbOp, withSaving } from '../utils/helpers.js';
 
 export async function renderSettings(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
@@ -18,7 +18,7 @@ export async function renderSettings(body, header) {
     <div class="tabs">
       <button class="tab-btn active" data-tab="users">Users</button>
       <button class="tab-btn" data-tab="categories">Categories</button>
-      <button class="tab-btn" data-tab="stock">Stock Intake</button>
+      <button class="tab-btn" data-tab="stock-rules">Stock Rules</button>
     </div>
     <div id="settings-content"></div>
   `;
@@ -38,7 +38,7 @@ export async function renderSettings(body, header) {
     const container = document.getElementById('settings-content');
     if (activeTab === 'users') await renderUsersTab(container, body);
     else if (activeTab === 'categories') await renderCategoriesTab(container, body);
-    else if (activeTab === 'stock') await renderStockIntakeTab(container, body);
+    else if (activeTab === 'stock-rules') await renderStockRulesTab(container);
   }
 
   loadTab();
@@ -233,84 +233,79 @@ async function renderCategoriesTab(container, body) {
   });
 }
 
-async function renderStockIntakeTab(container, body) {
-  const { data: products } = await db.getAll('products');
-  const { data: intakes } = await db.getAll('stock_intakes', { orderBy: ['created_at', 'desc'] });
-  const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
-  const activeProducts = products.filter(p => p.is_active);
+const STOCK_RULES = [
+  {
+    key: 'liquid_tolerance_kg',
+    label: 'Liquid tolerance (kg)',
+    unit: 'kg',
+    step: '0.001',
+    help: 'For oils weighed in kg. 0.010 kg = 10 g.',
+  },
+  {
+    key: 'unit_tolerance',
+    label: 'Piece tolerance (pcs)',
+    unit: 'pcs',
+    step: '1',
+    help: 'For machines and refills counted in pieces. 0 means the count must match exactly.',
+  },
+];
+
+async function renderStockRulesTab(container) {
+  container.innerHTML = '<div class="loading-overlay"><div class="spinner" role="status" aria-label="Loading"></div></div>';
+  const res = await dbOp(db.getAll('app_settings'), 'Failed to load stock rules');
+  if (!res) { container.innerHTML = ''; return; }
+  const settings = res.data || [];
+  const rows = STOCK_RULES.map(rule => ({ rule, row: settings.find(s => s.key === rule.key) }));
+
+  if (rows.some(r => !r.row)) {
+    container.innerHTML = '<div class="empty-state"><i class="fas fa-sliders"></i><h3>Stock rules are not set up</h3><p>The app_settings rows are missing. Run migration 016 first.</p></div>';
+    return;
+  }
 
   container.innerHTML = `
-    <div class="toolbar">
-      <div></div>
-      <button class="btn btn-primary" id="btn-stock-intake"><i class="fas fa-plus"></i> Add Stock</button>
+    <div class="card">
+      <div class="card-header"><h3>Return matching tolerance</h3></div>
+      <div class="card-body">
+        <p style="margin:0 0 16px;color:var(--text-secondary);">A return counts as matching when |Issued − Returned − Used| is within this amount. Anything beyond it is flagged as a mismatch and an admin must classify it before approving.</p>
+        <div class="form-row">
+          ${rows.map(({ rule, row }) => `
+          <div class="form-group">
+            <label class="form-label" for="rule-${rule.key}">${esc(rule.label)}</label>
+            <input class="form-input stock-rule-input" type="number" min="0" step="${rule.step}" id="rule-${rule.key}" data-key="${rule.key}" data-id="${esc(String(row.id))}" value="${esc(String(row.value ?? 0))}" />
+            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">${esc(rule.help)}</div>
+          </div>`).join('')}
+        </div>
+        <div style="display:flex;justify-content:flex-end;">
+          <button class="btn btn-primary" id="btn-save-stock-rules"><i class="fas fa-save"></i> Save Stock Rules</button>
+        </div>
+      </div>
     </div>
-    ${intakes.length === 0 ? '<div class="empty-state"><i class="fas fa-truck"></i><h3>No stock intakes yet</h3><p>Record new inventory arrivals here.</p></div>' : `
-    <div class="table-wrapper"><table class="data-table">
-      <thead><tr><th>Date</th><th>Product</th><th>Quantity Added</th><th>Notes</th></tr></thead>
-      <tbody>${intakes.slice(0, 50).map(i => {
-        const prod = prodMap[i.product_id];
-        return `<tr>
-          <td>${new Date(i.created_at).toLocaleDateString('en-IN')}</td>
-          <td>${esc(prod?.name || 'Unknown')}</td>
-          <td style="color:var(--green);font-weight:700;">+${prod?.type === 'liquid' ? formatWeight(i.quantity) : i.quantity + ' pcs'}</td>
-          <td>${esc(i.notes || '—')}</td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table></div>`}
   `;
 
-  document.getElementById('btn-stock-intake').addEventListener('click', () => {
-    const content = `
-      <div class="form-group">
-        <label class="form-label">Product *</label>
-        <select class="form-select" id="intake-product">${activeProducts.map(p => `<option value="${p.id}" data-type="${p.type}">${esc(p.name)} (current: ${p.type === 'liquid' ? formatWeight(p.current_stock) : p.current_stock + ' pcs'})</option>`).join('')}</select>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label class="form-label" id="intake-qty-label">Quantity to Add *</label>
-          <input class="form-input" type="number" id="intake-qty" min="0.001" step="0.001" required />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Supplier / Batch</label>
-          <input class="form-input" id="intake-supplier" maxlength="200" />
-        </div>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Notes</label>
-        <textarea class="form-textarea" id="intake-notes" maxlength="500"></textarea>
-      </div>
-    `;
-    const footer = `<button class="btn btn-secondary" id="intake-cancel">Cancel</button><button class="btn btn-primary" id="intake-save"><i class="fas fa-plus"></i> Add Stock</button>`;
-    const { close } = createModal('Stock Intake', content, { footer });
-
-    // Update label based on product type
-    function updateIntakeLabel() {
-      const opt = document.getElementById('intake-product').selectedOptions[0];
-      const isLiquid = opt?.dataset?.type === 'liquid';
-      document.getElementById('intake-qty-label').textContent = isLiquid ? 'Quantity to Add (kg) *' : 'Quantity to Add (pcs) *';
-      document.getElementById('intake-qty').step = isLiquid ? '0.001' : '1';
+  document.getElementById('btn-save-stock-rules').onclick = (e) => withSaving(e.currentTarget, async () => {
+    const updates = [];
+    for (const { rule, row } of rows) {
+      const raw = document.getElementById(`rule-${rule.key}`).value.trim();
+      const value = Number(raw);
+      if (raw === '' || !Number.isFinite(value) || value < 0) {
+        showToast(`${rule.label} must be zero or more`, 'error');
+        return;
+      }
+      if (rule.unit === 'pcs' && !Number.isInteger(value)) {
+        showToast(`${rule.label} must be a whole number`, 'error');
+        return;
+      }
+      const rounded = rule.unit === 'kg' ? Math.round(value * 1000) / 1000 : value;
+      if (rounded !== Number(row.value)) updates.push({ row, value: rounded });
     }
-    updateIntakeLabel();
-    document.getElementById('intake-product').addEventListener('change', updateIntakeLabel);
+    if (updates.length === 0) { showToast('No changes to save', 'warning'); return; }
 
-    document.getElementById('intake-cancel').onclick = close;
-    document.getElementById('intake-save').onclick = (e) => withSaving(e.currentTarget, async () => {
-      const productId = parseInt(document.getElementById('intake-product').value);
-      const qty = parseFloat(document.getElementById('intake-qty').value);
-      if (isNaN(qty) || qty <= 0) { showToast('Valid quantity required', 'error'); return; }
-
-      const result = await dbOp(db.rpc('record_stock_intake', {
-        p_product_id: productId,
-        p_quantity: qty,
-        p_supplier: document.getElementById('intake-supplier').value.trim(),
-        p_notes: document.getElementById('intake-notes').value.trim(),
-        p_received_by: auth.currentUser.id,
-      }), 'Failed to add stock');
+    for (const { row, value } of updates) {
+      const result = await dbOp(db.update('app_settings', row.id, { value }), 'Failed to save stock rules');
       if (!result) return;
-
-      showToast('Stock added successfully', 'success');
-      close();
-      renderStockIntakeTab(container, body);
-    });
+      row.value = value;
+    }
+    showToast('Stock rules saved', 'success');
+    renderStockRulesTab(container);
   });
 }

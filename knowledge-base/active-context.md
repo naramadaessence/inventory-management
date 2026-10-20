@@ -1,7 +1,7 @@
 ## Current Status
 **Last Updated**: 2026-10-20
-**Last Agent Session**: Production was down (Vercel Hobby team paused since 2026-07-23). Moved `create-user` to a Supabase Edge Function, prepared Cloudflare Pages hosting, escaped the sidebar user name, refreshed the whole KB, documented migration re-run risk and a leaked admin password.
-**Test Suite Status**: Pass — `npm test` 38/38 and `npm run build` pass on 2026-10-20.
+**Last Agent Session**: Built the client's stock reconciliation request (purchases, usage entry, Issued/Returned/Used cross-check, discrepancy + adjustment approvals, fragrance, staff daily ledger) — see `stock-reconciliation.md`. Migration 016 applied in production. Earlier the same day: moved hosting to Cloudflare Pages + Supabase Edge Function, KB refresh, migrations 015.
+**Test Suite Status**: Pass — `npm test` 87/87 and `npm run build` pass on 2026-10-20.
 
 ## In Progress
 - [x] Cloudflare Pages project `narmada-inventory` live at https://narmada-inventory.pages.dev (Git-connected, branch main). Login page renders, no console errors.
@@ -12,7 +12,8 @@
 ## Pending User Action
 - ~~Rotate the production admin password (ISSUE-010)~~ — done by owner 2026-10-20. Consider making the GitHub repo private.
 - ~~Supabase GitHub integration "Deploy to production" OFF~~ — done by owner 2026-10-20.
-- Paste `VITE_SUPABASE_ANON_KEY` into Cloudflare env vars (agents do not enter keys).
+- Review the pre-filled product fragrances on the Products page (guessed from names; typos carry over, machines/accessories have none).
+- Decide whether to fix ISSUE-017 (base schema `CHECK (quantity > 0)` on inventory_transactions) — affects fresh databases only.
 - ~~Sell Qty meaning (ISSUE-012)~~ — answered 2026-10-20: manual figures for free-install machines; correct as-is.
 - ~~Run migration 015~~ — done 2026-10-20, verified (one record_sale + one update_sale). Production is now at migration 015.
 - ~~Sales re-test~~ — done 2026-10-20 on production as admin: Bill #132 (walk-in, PLEASURE REFILL, pending ₹0) recorded ×1 → edited ×2 → deleted. Stock 24 → 23 → 22 → 24; sales totals back to ₹200 / 1; Inventory Log shows sale, sale_edit_restore, sale_edit, sale_delete rows. Pending/₹0 was used so no payment_followups correction rows were created.
@@ -26,7 +27,7 @@
 - Optional: delete the Vercel project now that Cloudflare is live; tell staff the new URL.
 
 ## Next Steps
-1. ISSUE-009 resolved (site live on Cloudflare). Remaining: Pending User Action items below.
+1. Smoke test the reconciliation flows on production after deploy (purchase, issue → return with usage → mismatch approval, adjustment request → approve).
 2. No open issues from the 2026-10-20 session.
 3. Done 2026-10-20: Dashboard low-stock alerts use Current Stock via `availableStock()`.
 

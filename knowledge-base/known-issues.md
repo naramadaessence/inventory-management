@@ -185,3 +185,37 @@
 **Workaround**: None needed for the app — `sales.js` always sends `p_sale_type`, and both new functions raise for unauthenticated callers (`Authentication required` / `Only admins can edit sales`).
 **Fix**: Migration 015 drops the two old overloads and restores REVOKE from PUBLIC/anon + GRANT to authenticated. Lesson: when adding a parameter to an RPC, `DROP FUNCTION` the old signature in the same migration and repeat the grant block.
 **Regression Test**: None automated (SQL-only); verification query at the bottom of migration 015.
+---
+
+## ISSUE-016: Flagging A Pending Return Silently Dropped The Returned Stock
+**Status**: Resolved (in code; production after migration 016 + deploy)
+**Severity**: High
+**Discovered**: 2026-10-20
+**Resolved**: 2026-10-20
+**Symptom**: On Daily Operations, pressing Flag on a "Pending Return" set the session to `flagged` and the returned quantities were never added back to stock — they vanished from inventory with no audit row.
+**Root Cause**: `flagSession()` only changed the session status; only `approve_return` restores stock.
+**Fix**: Pending returns now have **Send back** (`reject_return`), which returns the session to In Field for the staff member to correct. Discrepancies are handled by classification at approval instead of flagging.
+**Regression Test**: `tests/stock-reconciliation.test.js` (reject_return), `tests/daily-ops-return.test.js`
+---
+
+## ISSUE-017: Base Schema Rejects Negative Inventory Transactions (Fresh Databases Only)
+**Status**: Open
+**Severity**: Medium (does not affect production)
+**Discovered**: 2026-10-20
+**Symptom**: A database built from `supabase-schema.sql` rejects every issue, sale, damage and negative adjustment, because those write negative `inventory_transactions.quantity`.
+**Root Cause**: `supabase-schema.sql` still declares `CHECK (quantity > 0)` on `inventory_transactions`; production evidently does not have it (sales and issues work there).
+**Workaround**: When building a fresh database, drop that check after running the base schema.
+**Fix**: Remove the check from `supabase-schema.sql` after confirming on production with `select conname, pg_get_constraintdef(oid) from pg_constraint where conrelid = 'public.inventory_transactions'::regclass;`.
+**Regression Test**: None (found by the PGlite verification of migration 016).
+
+---
+
+## ISSUE-018: Machine Rule Treats Any Non-Refill/Oil Unit Category As A Machine
+**Status**: Accepted Risk
+**Severity**: Low
+**Discovered**: 2026-10-20
+**Symptom**: Products in unit categories whose names don't contain "refill"/"oil" (e.g. Room Cream, accessories such as "battery") count as machines: they got no fragrance pre-fill, and an "installation" usage of them needs a customer and whole numbers and is booked to Installed Qty / Installations on approval.
+**Root Cause**: Shared rule (`isMachineCategory`, `is_machine_product`, and the older `isMachineCat` in dashboard/products) is name-based.
+**Workaround**: Set fragrance manually on such products; record their usage as "Other work" rather than "Installation".
+**Fix**: If it matters, add an explicit `is_machine` flag on categories.
+**Regression Test**: `tests/stock-reconciliation.test.js` (machine vs consumable installation)

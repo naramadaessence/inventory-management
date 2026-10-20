@@ -58,8 +58,63 @@ function saveStore(data) {
   }
 }
 
+// Default matching tolerances for the daily return cross-check
+// (app_settings rows; editable in Settings → Stock Rules).
+const DEFAULT_APP_SETTINGS = [
+  { id: 1, key: 'liquid_tolerance_kg', value: 0.010 },
+  { id: 2, key: 'unit_tolerance', value: 0 },
+];
+
+function isMachineProduct(store, product) {
+  const cat = (store.categories || []).find(c => c.id === product?.category_id);
+  if (!cat || cat.type === 'liquid') return false;
+  return !/refill|oil/i.test(cat.name || '');
+}
+
+// Same rule as the fragrance pre-fill in migration 016: strip leading
+// non-letters and a trailing "Diffuser Oil" / "Refill" / "Oil", title-case.
+function deriveFragrance(name) {
+  const base = String(name || '')
+    .replace(/^[^A-Za-z]+/, '')
+    .replace(/\s*(diffuser\s+oil|refill|oil)\s*$/i, '')
+    .trim()
+    .toLowerCase();
+  return base ? base.replace(/\b[a-z]/g, ch => ch.toUpperCase()) : null;
+}
+
+// Bring a demo store saved by an older app version up to the current shape.
+// Returns true when something was added.
+function ensureStoreShape(store) {
+  let changed = false;
+  const tables = ['checkout_usage', 'stock_adjustments', 'installations', 'app_settings'];
+  for (const table of tables) {
+    if (!Array.isArray(store[table])) {
+      store[table] = table === 'app_settings' ? DEFAULT_APP_SETTINGS.map(s => ({ ...s })) : [];
+      changed = true;
+    }
+  }
+  store._nextId = store._nextId || {};
+  for (const table of tables) {
+    if (store._nextId[table] == null) {
+      store._nextId[table] = store[table].reduce((max, r) => Math.max(max, r.id || 0), 0) + 1;
+      changed = true;
+    }
+  }
+  for (const product of store.products || []) {
+    if (product.fragrance === undefined) {
+      product.fragrance = isMachineProduct(store, product) ? null : deriveFragrance(product.name);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function initStore() {
-  if (getStore()) return;
+  const existing = getStore();
+  if (existing) {
+    if (ensureStoreShape(existing)) saveStore(existing);
+    return;
+  }
   const now = new Date().toISOString();
   saveStore({
     profiles: [
@@ -115,6 +170,9 @@ function initStore() {
     refill_completions: [],
     _nextId: { checkout_sessions: 1, checkout_items: 1, sales: 1, sale_items: 1, rentals: 1, inventory_transactions: 1, damage_reports: 1, stock_intakes: 1, payment_followups: 1, refill_completions: 1, parties: 4, products: 23, categories: 6 }
   });
+  const seeded = getStore();
+  ensureStoreShape(seeded);
+  saveStore(seeded);
 }
 
 // ============================================
@@ -127,6 +185,7 @@ const demo = {
     const store = getStore();
     const nextId = store._nextId[table] || 1;
     const newRecord = { ...record, id: nextId, created_at: new Date().toISOString() };
+    if (!Array.isArray(store[table])) store[table] = [];
     store[table].push(newRecord);
     store._nextId[table] = nextId + 1;
     saveStore(store);
@@ -134,6 +193,7 @@ const demo = {
   },
   update(table, id, updates) {
     const store = getStore();
+    if (!Array.isArray(store[table])) return null;
     const idx = store[table].findIndex(r => r.id === id);
     if (idx === -1) return null;
     store[table][idx] = { ...store[table][idx], ...updates, updated_at: new Date().toISOString() };
@@ -240,6 +300,37 @@ function addInventoryTransaction(store, { product_id, type, quantity, reference_
     created_at,
   });
   store._nextId.inventory_transactions = txnId + 1;
+}
+
+// --- Daily return cross-check (mirror of migration 016) ---------------------
+const USAGE_REASON_KEYS = ['customer_service', 'installation', 'other'];
+const DISCREPANCY_TYPE_KEYS = ['wastage', 'loss', 'staff_shortage', 'counting_error', 'excess_return', 'other'];
+// Fallback daily limit for products without max_daily_consumption (also in migration 016).
+const DEFAULT_DAILY_CONSUMPTION = 30;
+
+function round3(n) {
+  return Math.round(Number(n || 0) * 1000) / 1000;
+}
+
+function todayISODate() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function assertDemoAdmin(store, userId, message) {
+  const profile = (store.profiles || []).find(p => p.id === userId);
+  if (profile?.role !== 'admin') throw new Error(message);
+}
+
+function toleranceFor(store, productType) {
+  const key = productType === 'liquid' ? 'liquid_tolerance_kg' : 'unit_tolerance';
+  const row = (store.app_settings || []).find(s => s.key === key);
+  const value = Number(row?.value);
+  if (Number.isFinite(value) && value >= 0) return value;
+  return DEFAULT_APP_SETTINGS.find(s => s.key === key).value;
+}
+
+function formatQtyText(qty, productType) {
+  return productType === 'liquid' ? `${Number(qty).toFixed(3)} kg` : `${qty} pcs`;
 }
 
 // ============================================
@@ -718,29 +809,190 @@ const demoRpc = {
     return null;
   },
 
-  // approve_return(session_id, approver_id) — admin approves a return.
-  approve_return({ p_session_id, p_approver_id }) {
+  // submit_return(session_id, items, notes, submitted_by) — staff (or admin)
+  // records Returned + Used per item. Computes Difference = Issued − Returned −
+  // Used and marks mismatches beyond the tolerance. No stock change until
+  // approve_return.
+  submit_return({ p_session_id, p_items, p_notes, p_submitted_by }) {
     const store = getStore();
+    const sIdx = store.checkout_sessions.findIndex(s => s.id === p_session_id);
+    if (sIdx === -1) throw new Error(`Session ${p_session_id} not found`);
+    const session = store.checkout_sessions[sIdx];
+    if (session.status !== 'checked_out') throw new Error(`Session ${p_session_id} is not checked out`);
+    const actor = (store.profiles || []).find(p => p.id === p_submitted_by);
+    if (actor?.role !== 'admin' && session.seller_id !== p_submitted_by) {
+      throw new Error('Only the assigned staff member or an admin can submit this return');
+    }
+
+    const sessionItems = store.checkout_items.filter(i => i.session_id === p_session_id);
+    if (!Array.isArray(p_items) || p_items.length !== sessionItems.length) {
+      throw new Error('Every issued item must be included in the return');
+    }
+
+    const now = new Date().toISOString();
+    const seen = new Set();
+    const plans = p_items.map(input => {
+      const item = sessionItems.find(i => i.id === Number(input.item_id));
+      if (!item) throw new Error('Return item does not belong to this session');
+      if (seen.has(item.id)) throw new Error('Return item listed twice');
+      seen.add(item.id);
+      const product = store.products.find(p => p.id === item.product_id);
+      const rawReturned = input.returned_quantity;
+      const returned = round3(rawReturned);
+      if (rawReturned === null || rawReturned === undefined || rawReturned === '' || !Number.isFinite(Number(rawReturned)) || returned < 0) {
+        throw new Error(`Invalid returned quantity for ${product?.name}`);
+      }
+
+      const usage = (input.usage || []).map(u => {
+        if (!USAGE_REASON_KEYS.includes(u.reason)) throw new Error('Invalid usage reason');
+        const quantity = round3(u.quantity);
+        if (!Number.isFinite(Number(u.quantity)) || quantity <= 0) throw new Error('Usage quantity must be greater than zero');
+        const partyId = u.party_id ? Number(u.party_id) : null;
+        if (partyId && !(store.parties || []).some(p => p.id === partyId)) throw new Error(`Customer ${partyId} does not exist`);
+        if (u.reason === 'installation' && isMachineProduct(store, product)) {
+          if (!partyId) throw new Error(`Choose the customer where ${product.name} was installed`);
+          if (!Number.isInteger(quantity)) throw new Error('Installed machines must be whole numbers');
+        }
+        return { reason: u.reason, quantity, party_id: partyId, notes: String(u.notes || '').trim() || null };
+      });
+
+      const issued = Number(item.checkout_quantity || 0);
+      const used = round3(usage.reduce((s, u) => s + u.quantity, 0));
+      const difference = round3(issued - returned - used);
+      const hasMismatch = Math.abs(difference) > toleranceFor(store, product?.type) + 1e-9;
+      const consumed = round3(issued - returned);
+      const limit = Number(product?.max_daily_consumption || DEFAULT_DAILY_CONSUMPTION);
+      const reasons = [];
+      if (hasMismatch) {
+        reasons.push(`${difference > 0 ? 'Shortage' : 'Excess'} of ${formatQtyText(Math.abs(difference), product?.type)}`);
+      }
+      if (consumed > limit) reasons.push(`Consumed ${consumed} exceeds daily limit ${limit}`);
+      return { item, usage, returned, used, difference, hasMismatch, flagReason: reasons.join('; ') || null };
+    });
+
+    const itemIds = new Set(sessionItems.map(i => i.id));
+    store.checkout_usage = store.checkout_usage.filter(u => !itemIds.has(u.item_id));
+    for (const plan of plans) {
+      for (const u of plan.usage) {
+        const usageId = store._nextId.checkout_usage || 1;
+        store.checkout_usage.push({
+          id: usageId,
+          item_id: plan.item.id,
+          session_id: p_session_id,
+          product_id: plan.item.product_id,
+          ...u,
+          created_at: now,
+        });
+        store._nextId.checkout_usage = usageId + 1;
+      }
+      const idx = store.checkout_items.findIndex(i => i.id === plan.item.id);
+      store.checkout_items[idx] = {
+        ...plan.item,
+        checkin_quantity: plan.returned,
+        used_quantity: plan.used,
+        difference: plan.difference,
+        has_mismatch: plan.hasMismatch,
+        is_flagged: Boolean(plan.flagReason),
+        flag_reason: plan.flagReason,
+        discrepancy_type: null,
+        discrepancy_note: null,
+        updated_at: now,
+      };
+    }
+
+    const hasDiscrepancy = plans.some(p => p.hasMismatch);
+    store.checkout_sessions[sIdx] = {
+      ...session,
+      status: 'pending_approval',
+      checkin_time: now,
+      notes: String(p_notes || '').trim(),
+      has_discrepancy: hasDiscrepancy,
+      updated_at: now,
+    };
+    saveStore(store);
+    return { has_discrepancy: hasDiscrepancy };
+  },
+
+  // approve_return(session_id, approver_id, resolutions) — admin approves a
+  // return. Every mismatched item needs { item_id, discrepancy_type, note }.
+  // Restores the returned quantity; machines used for an installation are
+  // counted back into Total Stock and added to Installed Qty + Installations.
+  approve_return({ p_session_id, p_approver_id, p_resolutions }) {
+    const store = getStore();
+    assertDemoAdmin(store, p_approver_id, 'Only admins can approve returns');
     const sIdx = store.checkout_sessions.findIndex(s => s.id === p_session_id);
     if (sIdx === -1) throw new Error(`Session ${p_session_id} not found`);
     const session = store.checkout_sessions[sIdx];
     if (session.status !== 'pending_approval') throw new Error(`Session ${p_session_id} is not pending_approval`);
 
-    const items = store.checkout_items.filter(i => i.session_id === p_session_id && (i.checkin_quantity || 0) > 0);
-    const now = new Date().toISOString();
+    const sessionItems = store.checkout_items.filter(i => i.session_id === p_session_id);
+    const resolutions = new Map((p_resolutions || []).map(r => [Number(r.item_id), r]));
+    for (const item of sessionItems.filter(i => i.has_mismatch)) {
+      const product = store.products.find(p => p.id === item.product_id);
+      const r = resolutions.get(item.id);
+      if (!r || !DISCREPANCY_TYPE_KEYS.includes(r.discrepancy_type) || !String(r.note || '').trim()) {
+        throw new Error(`Classify the difference for ${product?.name || 'item'} and add a note before approving`);
+      }
+    }
 
-    for (const item of items) {
-      applyStockDelta(store, item.product_id, item.checkin_quantity);
+    const now = new Date().toISOString();
+    for (const item of sessionItems) {
+      if ((item.checkin_quantity || 0) > 0) {
+        applyStockDelta(store, item.product_id, item.checkin_quantity);
+        addInventoryTransaction(store, {
+          product_id: item.product_id,
+          type: 'checkin',
+          quantity: item.checkin_quantity,
+          reference_type: 'checkout_session',
+          reference_id: p_session_id,
+          performed_by: p_approver_id,
+          notes: 'Approved return — stock restored',
+          created_at: now,
+        });
+      }
+      if (item.has_mismatch) {
+        const r = resolutions.get(item.id);
+        const idx = store.checkout_items.findIndex(i => i.id === item.id);
+        store.checkout_items[idx] = {
+          ...store.checkout_items[idx],
+          discrepancy_type: r.discrepancy_type,
+          discrepancy_note: String(r.note).trim(),
+          updated_at: now,
+        };
+      }
+    }
+
+    const staff = (store.profiles || []).find(p => p.id === session.seller_id);
+    const installs = store.checkout_usage.filter(u => u.session_id === p_session_id && u.reason === 'installation');
+    for (const u of installs) {
+      const product = store.products.find(p => p.id === u.product_id);
+      if (!isMachineProduct(store, product)) continue;
+      const party = (store.parties || []).find(p => p.id === u.party_id);
+      applyStockDelta(store, u.product_id, u.quantity);
+      product.installed_qty = Number(product.installed_qty || 0) + u.quantity;
       addInventoryTransaction(store, {
-        product_id: item.product_id,
-        type: 'checkin',
-        quantity: item.checkin_quantity,
+        product_id: u.product_id,
+        type: 'installed',
+        quantity: u.quantity,
         reference_type: 'checkout_session',
         reference_id: p_session_id,
         performed_by: p_approver_id,
-        notes: 'Approved return — stock restored',
+        notes: `Installed at ${party?.name || 'customer'} — moved to Installed Qty`,
         created_at: now,
       });
+      const installId = store._nextId.installations || 1;
+      store.installations.push({
+        id: installId,
+        party_id: u.party_id,
+        product_id: u.product_id,
+        quantity: u.quantity,
+        installation_date: todayISODate(),
+        status: 'active',
+        removed_date: null,
+        notes: `Installed by ${staff?.full_name || 'staff'} (Daily Operations session #${p_session_id})`,
+        created_at: now,
+      });
+      store._nextId.installations = installId + 1;
     }
 
     store.checkout_sessions[sIdx] = {
@@ -751,6 +1003,164 @@ const demoRpc = {
       updated_at: now,
     };
 
+    saveStore(store);
+    return null;
+  },
+
+  // reject_return(session_id, reason, approver_id) — admin sends a submitted
+  // return back to the staff member to correct. No stock change.
+  reject_return({ p_session_id, p_reason, p_approver_id }) {
+    const store = getStore();
+    assertDemoAdmin(store, p_approver_id, 'Only admins can send a return back');
+    const sIdx = store.checkout_sessions.findIndex(s => s.id === p_session_id);
+    if (sIdx === -1) throw new Error(`Session ${p_session_id} not found`);
+    const session = store.checkout_sessions[sIdx];
+    if (session.status !== 'pending_approval') throw new Error(`Session ${p_session_id} is not pending_approval`);
+    const reason = String(p_reason || '').trim();
+    if (!reason) throw new Error('Give a reason for sending the return back');
+
+    const now = new Date().toISOString();
+    store.checkout_usage = store.checkout_usage.filter(u => u.session_id !== p_session_id);
+    store.checkout_items = store.checkout_items.map(i => (i.session_id !== p_session_id ? i : {
+      ...i,
+      checkin_quantity: null,
+      used_quantity: null,
+      difference: null,
+      has_mismatch: false,
+      is_flagged: false,
+      flag_reason: null,
+      discrepancy_type: null,
+      discrepancy_note: null,
+      updated_at: now,
+    }));
+    store.checkout_sessions[sIdx] = {
+      ...session,
+      status: 'checked_out',
+      checkin_time: null,
+      has_discrepancy: false,
+      notes: [session.notes, `Return sent back: ${reason}`].filter(Boolean).join('\n'),
+      updated_at: now,
+    };
+    saveStore(store);
+    return null;
+  },
+
+  // record_purchase(...) — purchase entry: supplier, rate and bill on a
+  // stock_intakes row, stock added and logged as stock_in.
+  record_purchase({ p_product_id, p_quantity, p_purchase_rate, p_supplier, p_bill_number, p_purchase_date, p_notes, p_received_by }) {
+    const store = getStore();
+    assertDemoAdmin(store, p_received_by, 'Only admins can record purchases');
+    const product = store.products.find(p => p.id === p_product_id);
+    if (!product) throw new Error(`Product ${p_product_id} does not exist`);
+    const quantity = Number(p_quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('Quantity must be greater than zero');
+    const rate = Number(p_purchase_rate);
+    if (p_purchase_rate === null || p_purchase_rate === undefined || p_purchase_rate === '' || !Number.isFinite(rate) || rate < 0) {
+      throw new Error('Purchase rate must be zero or more');
+    }
+    const supplier = String(p_supplier || '').trim();
+    if (!supplier) throw new Error('Supplier name is required');
+    const billNumber = String(p_bill_number || '').trim() || null;
+
+    const now = new Date().toISOString();
+    const intakeId = store._nextId.stock_intakes || 1;
+    store.stock_intakes.push({
+      id: intakeId,
+      product_id: p_product_id,
+      quantity,
+      supplier,
+      bill_number: billNumber,
+      purchase_date: p_purchase_date || todayISODate(),
+      purchase_rate: rate,
+      total_amount: roundMoney(quantity * rate),
+      notes: p_notes,
+      received_by: p_received_by,
+      created_at: now,
+    });
+    store._nextId.stock_intakes = intakeId + 1;
+    applyStockDelta(store, p_product_id, quantity);
+    addInventoryTransaction(store, {
+      product_id: p_product_id,
+      type: 'stock_in',
+      quantity,
+      reference_type: 'stock_intake',
+      reference_id: intakeId,
+      performed_by: p_received_by,
+      notes: `Purchase from ${supplier}${billNumber ? ` (bill ${billNumber})` : ''}`,
+      created_at: now,
+    });
+    saveStore(store);
+    return intakeId;
+  },
+
+  // request_stock_adjustment(...) — stock corrections wait for approval.
+  request_stock_adjustment({ p_product_id, p_new_stock, p_reason, p_requested_by }) {
+    const store = getStore();
+    assertDemoAdmin(store, p_requested_by, 'Only admins can request stock adjustments');
+    const product = store.products.find(p => p.id === p_product_id);
+    if (!product) throw new Error(`Product ${p_product_id} does not exist`);
+    const newStock = Number(p_new_stock);
+    if (!Number.isFinite(newStock) || newStock < 0) throw new Error('Stock cannot be negative');
+    const reason = String(p_reason || '').trim();
+    if (!reason) throw new Error('Give a reason for the stock adjustment');
+    const current = Number(product.current_stock || 0);
+    const delta = round3(newStock - current);
+    if (delta === 0) throw new Error('New stock is the same as current stock');
+    if (store.stock_adjustments.some(a => a.product_id === p_product_id && a.status === 'pending')) {
+      throw new Error(`${product.name} already has a pending adjustment request`);
+    }
+    const id = store._nextId.stock_adjustments || 1;
+    store.stock_adjustments.push({
+      id,
+      product_id: p_product_id,
+      stock_at_request: current,
+      requested_stock: newStock,
+      delta,
+      reason,
+      status: 'pending',
+      requested_by: p_requested_by,
+      reviewed_by: null,
+      reviewed_at: null,
+      review_note: null,
+      created_at: new Date().toISOString(),
+    });
+    store._nextId.stock_adjustments = id + 1;
+    saveStore(store);
+    return id;
+  },
+
+  // review_stock_adjustment(...) — approve applies the requested change as a
+  // delta (so sales/issues made in between are kept); reject changes nothing.
+  review_stock_adjustment({ p_adjustment_id, p_approve, p_note, p_reviewer_id }) {
+    const store = getStore();
+    assertDemoAdmin(store, p_reviewer_id, 'Only admins can review stock adjustments');
+    const idx = store.stock_adjustments.findIndex(a => a.id === p_adjustment_id);
+    if (idx === -1 || store.stock_adjustments[idx].status !== 'pending') {
+      throw new Error(`Adjustment ${p_adjustment_id} is not pending`);
+    }
+    const adjustment = store.stock_adjustments[idx];
+    const now = new Date().toISOString();
+    const note = String(p_note || '').trim() || null;
+    if (p_approve) {
+      applyStockDelta(store, adjustment.product_id, adjustment.delta);
+      addInventoryTransaction(store, {
+        product_id: adjustment.product_id,
+        type: 'adjustment',
+        quantity: adjustment.delta,
+        reference_type: 'stock_adjustment',
+        reference_id: adjustment.id,
+        performed_by: p_reviewer_id,
+        notes: `Approved adjustment: ${adjustment.reason}`,
+        created_at: now,
+      });
+    }
+    store.stock_adjustments[idx] = {
+      ...adjustment,
+      status: p_approve ? 'approved' : 'rejected',
+      reviewed_by: p_reviewer_id,
+      reviewed_at: now,
+      review_note: note,
+    };
     saveStore(store);
     return null;
   },

@@ -38,6 +38,7 @@ CREATE TABLE products (
   image_url TEXT,
   sell_qty DECIMAL(12,3) NOT NULL DEFAULT 0 CHECK (sell_qty >= 0),
   installed_qty DECIMAL(12,3) NOT NULL DEFAULT 0 CHECK (installed_qty >= 0),
+  fragrance TEXT,
   is_active BOOLEAN DEFAULT true,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
@@ -82,6 +83,7 @@ CREATE TABLE checkout_sessions (
   approved_by UUID REFERENCES profiles(id),
   approved_at TIMESTAMPTZ,
   notes TEXT,
+  has_discrepancy BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -94,6 +96,12 @@ CREATE TABLE checkout_items (
   checkin_quantity DECIMAL(12,3),
   is_flagged BOOLEAN DEFAULT false,
   flag_reason TEXT,
+  -- Return cross-check (migration 016): Difference = Issued - Returned - Used
+  used_quantity NUMERIC(12,3),
+  difference NUMERIC(12,3),
+  has_mismatch BOOLEAN DEFAULT false,
+  discrepancy_type TEXT CHECK (discrepancy_type IN ('wastage', 'loss', 'staff_shortage', 'counting_error', 'excess_return', 'other')),
+  discrepancy_note TEXT,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -158,7 +166,7 @@ CREATE TABLE damage_reports (
 CREATE TABLE inventory_transactions (
   id SERIAL PRIMARY KEY,
   product_id INTEGER REFERENCES products(id),
-  type TEXT NOT NULL CHECK (type IN ('checkout','checkin','sale','sale_edit','sale_edit_restore','sale_delete','rental_out','rental_return','damage','stock_in','adjustment')),
+  type TEXT NOT NULL CHECK (type IN ('checkout','checkin','sale','sale_edit','sale_edit_restore','sale_delete','rental_out','rental_return','damage','stock_in','adjustment','installed')),
   quantity DECIMAL(12,3) NOT NULL CHECK (quantity > 0),
   reference_type TEXT,
   reference_id INTEGER,
@@ -173,6 +181,11 @@ CREATE TABLE stock_intakes (
   product_id INTEGER REFERENCES products(id),
   quantity DECIMAL(12,3) NOT NULL CHECK (quantity > 0),
   supplier TEXT,
+  -- Purchase fields (migration 016); legacy intakes have them NULL
+  purchase_date DATE DEFAULT CURRENT_DATE,
+  purchase_rate NUMERIC(12,2) CHECK (purchase_rate >= 0),
+  total_amount NUMERIC(12,2),
+  bill_number TEXT,
   notes TEXT,
   received_by UUID REFERENCES profiles(id),
   created_at TIMESTAMPTZ DEFAULT now()
@@ -206,6 +219,46 @@ CREATE TABLE refill_completions (
 );
 CREATE INDEX IF NOT EXISTS idx_refill_completions_lookup ON refill_completions(party_id, month, year);
 
+-- 14. CHECKOUT_USAGE (what staff used issued stock for — added in migration 016)
+CREATE TABLE checkout_usage (
+  id SERIAL PRIMARY KEY,
+  item_id INTEGER NOT NULL REFERENCES checkout_items(id) ON DELETE CASCADE,
+  session_id INTEGER NOT NULL REFERENCES checkout_sessions(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  reason TEXT NOT NULL CHECK (reason IN ('customer_service', 'installation', 'other')),
+  quantity NUMERIC(12,3) NOT NULL CHECK (quantity > 0),
+  party_id INTEGER REFERENCES parties(id) ON DELETE SET NULL,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_checkout_usage_session_id ON checkout_usage(session_id);
+CREATE INDEX IF NOT EXISTS idx_checkout_usage_item_id ON checkout_usage(item_id);
+
+-- 15. STOCK_ADJUSTMENTS (stock edits waiting for admin approval — migration 016)
+CREATE TABLE stock_adjustments (
+  id SERIAL PRIMARY KEY,
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  stock_at_request NUMERIC(12,3) NOT NULL,
+  requested_stock NUMERIC(12,3) NOT NULL CHECK (requested_stock >= 0),
+  delta NUMERIC(12,3) NOT NULL,
+  reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  requested_by UUID REFERENCES profiles(id),
+  reviewed_by UUID REFERENCES profiles(id),
+  reviewed_at TIMESTAMPTZ,
+  review_note TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_adjustments_one_pending
+  ON stock_adjustments(product_id) WHERE status = 'pending';
+
+-- 16. APP_SETTINGS (return-matching tolerances — migration 016; seeded below)
+CREATE TABLE app_settings (
+  id SERIAL PRIMARY KEY,
+  key TEXT UNIQUE NOT NULL,
+  value NUMERIC
+);
+
 -- ============================================
 -- ROW LEVEL SECURITY (RLS)
 -- ============================================
@@ -225,6 +278,9 @@ ALTER TABLE inventory_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stock_intakes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_followups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE refill_completions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE checkout_usage ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stock_adjustments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
 
 -- Helper: check if current user is admin
 CREATE OR REPLACE FUNCTION is_admin()
@@ -298,6 +354,26 @@ CREATE POLICY "Authenticated insert refill_completions" ON refill_completions
 CREATE POLICY "Authenticated delete refill_completions" ON refill_completions
   FOR DELETE USING (is_admin() OR completed_by = auth.uid()::text);
 
+-- CHECKOUT_USAGE: read by admins or the session's seller; written only by the
+-- submit_return / reject_return RPCs (migration 016), so no write policies.
+CREATE POLICY "View own or admin usage" ON checkout_usage FOR SELECT USING (
+  is_admin() OR EXISTS (
+    SELECT 1 FROM checkout_sessions
+     WHERE checkout_sessions.id = checkout_usage.session_id
+       AND checkout_sessions.seller_id = auth.uid()
+  )
+);
+
+-- STOCK_ADJUSTMENTS: admins only (requests/reviews go through RPCs).
+CREATE POLICY "Admins manage stock adjustments" ON stock_adjustments
+  FOR ALL USING (is_admin()) WITH CHECK (is_admin());
+
+-- APP_SETTINGS: every signed-in user reads the tolerances, admins edit them.
+CREATE POLICY "Authenticated read app settings" ON app_settings
+  FOR SELECT TO authenticated USING (true);
+CREATE POLICY "Admins manage app settings" ON app_settings
+  FOR ALL USING (is_admin()) WITH CHECK (is_admin());
+
 -- ============================================
 -- AUTO-CREATE PROFILE ON SIGNUP
 -- ============================================
@@ -328,3 +404,11 @@ INSERT INTO categories (name, type) VALUES
   ('Dispenser Refill', 'unit'),
   ('Diffuser Oil', 'liquid'),
   ('Room Cream', 'unit');
+
+-- ============================================
+-- SEED: Return-matching tolerances (migration 016)
+-- ============================================
+INSERT INTO app_settings (key, value) VALUES
+  ('liquid_tolerance_kg', 0.010),
+  ('unit_tolerance', 0)
+ON CONFLICT (key) DO NOTHING;

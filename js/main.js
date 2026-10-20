@@ -15,6 +15,7 @@ import { renderDamageLoss } from './pages/damage-loss.js';
 import { renderInventoryLog } from './pages/inventory-log.js';
 import { renderReports } from './pages/reports.js';
 import { renderSettings } from './pages/settings.js';
+import { renderPurchases } from './pages/purchases.js';
 
 const app = document.getElementById('app');
 let currentPage = 'dashboard';
@@ -27,6 +28,7 @@ const adminNav = [
   { id: 'dashboard', icon: 'fa-th-large', label: 'Dashboard' },
   { section: 'Inventory' },
   { id: 'products', icon: 'fa-boxes-stacked', label: 'Products' },
+  { id: 'purchases', icon: 'fa-truck-ramp-box', label: 'Purchases' },
   { id: 'daily-ops', icon: 'fa-right-left', label: 'Daily Operations' },
   { id: 'inventory-log', icon: 'fa-list-check', label: 'Inventory Log' },
   { section: 'Business' },
@@ -158,6 +160,7 @@ function navigateTo(page) {
   const pages = {
     'dashboard': () => renderDashboard(body, header),
     'products': () => renderProducts(body, header),
+    'purchases': () => renderPurchases(body, header),
     'daily-ops': () => renderDailyOps(body, header),
     'sales': () => renderSales(body, header),
     'collections': () => renderCollections(body, header),

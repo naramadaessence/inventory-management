@@ -45,6 +45,9 @@
 
 - `tests/app-shell.test.js` (default happy-dom env) imports `js/main.js` with a demo session whose `full_name` contains HTML and asserts the sidebar renders it as text.
 - `tests/dashboard-low-stock.test.js` covers `availableStock()` and that Dashboard low-stock alerts use Current Stock (Total − Sell − Installed), rendering `renderDashboard` against the demo store as admin.
+- `tests/stock-reconciliation.test.js` — demo contract for migration 016: record_purchase, submit_return (match, shortage, excess, liquid tolerance, settings tolerance, permissions, machine installation, blank quantity), approve_return (classification required, legacy return), reject_return, stock adjustments, demo store upgrade.
+- `tests/purchases-page.test.js`, `tests/daily-ops-return.test.js`, `tests/products-adjustments.test.js`, `tests/reports-ledger.test.js`, `tests/dashboard-reconciliation.test.js` — page tests rendering into happy-dom against the demo store and driving the DOM.
+- Production SQL for 016 was verified with PGlite (143 checks) using a throwaway script in the session scratchpad; it is not part of `npm test`.
 - `tests/create-user-function.test.js` (`// @vitest-environment node`) tests `supabase/functions/create-user/handler.js` with an injected fake `createClient` and env getter: CORS, method, auth, admin role, validation, Supabase error passthrough, success, rate limit.
 
 ## Known Flaky Tests

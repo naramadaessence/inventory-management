@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-20 - Stock Reconciliation: Purchases, Usage Entry, Cross-Check, Approvals
+**What**: Client feature request (10 points): purchase entry with rates; daily issue/return with usage entry; automatic Issued − Returned − Used cross-check with tolerance; mismatch alerts; admin approval of discrepancies and stock adjustments; staff-wise daily ledger; product- and fragrance-wise records; full history.
+**Why**: Client needs to see daily per-staff stock differences and control adjustments. Decisions confirmed by the owner are in `stock-reconciliation.md` and `decisions.md`.
+**Impact**: Production schema change (migration 016, run and verified by the owner on 2026-10-20). Editing a product's stock now creates an approval request instead of changing stock. Returns with a difference cannot be approved without a classification + note. Pending-return Flag replaced by Send back (ISSUE-016). Settings → Stock Intake replaced by the Purchases page and Settings → Stock Rules.
+**Files Changed**: `migrations/016_stock_reconciliation.sql` (NEW), `supabase-schema.sql`, `js/supabase.js` (demo RPCs + store upgrade), `js/utils/helpers.js` (USAGE_REASONS, DISCREPANCY_TYPES, isMachineCategory, localDay; removed unused CONFIG.DEFAULT_DAILY_CONSUMPTION), `js/pages/purchases.js` (NEW), `js/pages/daily-operations.js`, `js/pages/products.js`, `js/pages/reports.js`, `js/pages/dashboard.js`, `js/pages/inventory-log.js`, `js/pages/settings.js`, `js/main.js`, `js/keyboard-shortcuts.js` (`g u` → Purchases), 6 new test files, `knowledge-base/*` (new `stock-reconciliation.md`)
+**Tests**: `npm test` 87/87 (49 new across `stock-reconciliation`, `purchases-page`, `daily-ops-return`, `products-adjustments`, `reports-ledger`, `dashboard-reconciliation`); `npm run build` passes; migration 016 verified with PGlite (143 checks) and in production with the footer queries.
+**Commit**: see git log
+
+- Built in parallel by five agents with strict file ownership against a contract written first (`stock-reconciliation.md` + demo RPCs + contract tests); integrated and re-verified in the main session.
+- Demo store auto-upgrades old localStorage data (new tables, tolerances, fragrance pre-fill); `demo.insert/update` no longer crash on a missing table (adding an Installation in demo mode used to throw).
+- Fragrances pre-filled from product names in production (79 products); owner to review on the Products page.
+
 ## 2026-10-20 - Dashboard Low-Stock Alerts Use Current Stock
 **What**: Dashboard "Low Stock Alerts" now compare Current Stock (Total − Sell Qty − Installed Qty) against the threshold instead of Total Stock, and show that figure.
 **Why**: Owner request. Free-install machines never go through Sales and installs don't reduce Total Stock, so the Dashboard was counting machines at client sites as warehouse stock and could miss real shortages. The Products page already used Current Stock.

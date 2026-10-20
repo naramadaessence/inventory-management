@@ -14,8 +14,10 @@ Stock workflows keep `products.current_stock` correct while preserving an audit 
 - Never update `products.current_stock` directly from browser code.
 - Prefer intent-specific RPCs over low-level primitives:
   - Sales: `record_sale`, `update_sale`, `delete_sale`
-  - Daily operations: `approve_issue`, `approve_return`, `admin_issue_stock`
-  - Products/settings: `set_product_stock`, `record_stock_intake`
+  - Daily operations: `approve_issue`, `admin_issue_stock`, `submit_return`, `approve_return` (with discrepancy resolutions), `reject_return`
+  - Purchases: `record_purchase` (`record_stock_intake` kept for compatibility)
+  - Products: `request_stock_adjustment` → `review_stock_adjustment` (approval); `set_product_stock` only for a new product's opening stock
+  - See `stock-reconciliation.md` for the cross-check rules
   - Damage/loss: `record_damage_loss`
   - Rentals: `create_rental`, `return_rental`
 - `adjust_stock` is an internal database primitive. Migration 010 revokes direct browser access and keeps stock checks inside business RPCs.

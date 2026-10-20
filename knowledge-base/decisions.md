@@ -93,3 +93,15 @@
 - New Vercel Hobby team: still non-commercial and could count as evading limits.
 **Consequences**: Hosting is free and host-independent (any static host works). Edge Function deploys are manual (CLI or dashboard) and `ALLOWED_ORIGINS` must list the production origin. Supabase's GitHub integration must stay off for migrations until the schema is baselined (see `deployment.md`).
 **Superseded By**:
+## Decision: Daily Stock Reconciliation On Top Of The Issue/Return Flow
+**Date**: 2026-10-20
+**Status**: Accepted
+**Context**: Client asked for purchase entry, usage entry, automatic cross-checking of issued vs returned vs used stock, mismatch alerts, manager approval of discrepancies and adjustments, and staff-/product-/fragrance-wise records. The app already had an issue → return → admin approval flow, stock intake, and an audit log.
+**Decision**: Extend the existing flow instead of building a parallel one (details in `stock-reconciliation.md`): fragrance as a product tag; usage captured on the return form; Difference = Issued − Returned − Used with a configurable tolerance (10 g liquids / 0 pcs); returns with a difference need an admin classification + note before approval; editing stock becomes an approval request applied as a delta; purchases extend `stock_intakes`; machine installations from usage keep Total Stock = all owned machines and add to Installed Qty. All writes are RPCs with demo parity (migration 016).
+**Alternatives Considered**:
+- Restructure products into type × fragrance variants: cleaner model but would migrate every product, sale and history row — rejected by owner.
+- Separate usage log during the day: more taps for staff in the field; can be added later on top of `checkout_usage`.
+- Blocking returns until they match: would push staff to fake numbers; approval with classification keeps the truth visible.
+- New Manager role / maker-checker: owner chose "any admin" (requester and approver are recorded).
+**Consequences**: Production needs migration 016 before the new screens work. The return Flag button (which silently dropped returned stock) is replaced by Send back. Reports can now show shortages per staff per day. Any future stock-changing flow must still go through an RPC and the audit log.
+**Superseded By**:

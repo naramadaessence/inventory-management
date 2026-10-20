@@ -1,5 +1,8 @@
 import { db, auth } from '../supabase.js';
-import { formatStock, formatDateTime, showToast, createModal, esc, dbOp, CONFIG } from '../utils/helpers.js';
+import {
+  formatStock, formatDateTime, showToast, createModal, esc, dbOp, withSaving,
+  USAGE_REASONS, DISCREPANCY_TYPES, isMachineCategory,
+} from '../utils/helpers.js';
 
 export async function renderDailyOps(body, header) {
   const isAdmin = auth.isAdmin();
@@ -14,6 +17,98 @@ export async function renderDailyOps(body, header) {
   document.getElementById('mobile-toggle')?.addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
   await renderSessionsList(body, isAdmin);
   document.getElementById('btn-new-checkout').addEventListener('click', () => openCheckoutModal(body, isAdmin));
+}
+
+// ============================================
+// RETURN CROSS-CHECK HELPERS (Difference = Issued − Returned − Used)
+// ============================================
+// Defaults match migration 016 / demo app_settings.
+const DEFAULT_TOLERANCES = { liquid: 0.010, unit: 0 };
+
+function round3(n) {
+  return Math.round(Number(n || 0) * 1000) / 1000;
+}
+
+async function loadTolerances() {
+  const { data } = await db.getAll('app_settings');
+  const read = (key, fallback) => {
+    const value = Number((data || []).find(s => s.key === key)?.value);
+    return Number.isFinite(value) && value >= 0 ? value : fallback;
+  };
+  return {
+    liquid: read('liquid_tolerance_kg', DEFAULT_TOLERANCES.liquid),
+    unit: read('unit_tolerance', DEFAULT_TOLERANCES.unit),
+  };
+}
+
+// Same rule as submit_return: beyond the tolerance (with float epsilon) is a mismatch.
+function differenceState(diff, type, tolerances) {
+  const tol = type === 'liquid' ? tolerances.liquid : tolerances.unit;
+  if (Math.abs(diff) <= tol + 1e-9) return 'match';
+  return diff > 0 ? 'shortage' : 'excess';
+}
+
+const DIFF_STYLES = {
+  match: { color: 'var(--green)', badge: 'green', label: 'Matches' },
+  shortage: { color: 'var(--red)', badge: 'red', label: 'Shortage' },
+  excess: { color: 'var(--accent)', badge: 'amber', label: 'Excess' },
+};
+
+function differenceHTML(diff, type, state) {
+  const s = DIFF_STYLES[state];
+  return `<span style="color:${s.color};font-weight:700;">${formatStock(round3(Math.abs(diff)), type)}</span>
+    <span class="badge-status ${s.badge}">${s.label}</span>`;
+}
+
+// State of a stored (submitted) return item; null for legacy rows submitted
+// before migration 016 (used_quantity NULL) — those are never a mismatch.
+function storedState(item) {
+  if (item.checkin_quantity == null || item.used_quantity == null) return null;
+  if (!item.has_mismatch) return 'match';
+  return Number(item.difference) > 0 ? 'shortage' : 'excess';
+}
+
+function usageLinesHTML(lines, type, partyMap) {
+  if (!lines.length) return '';
+  return lines.map(u => `<div style="font-size:0.78rem;color:var(--text-secondary);margin-top:2px;">
+      ${esc(USAGE_REASONS[u.reason] || u.reason)}: <strong>${formatStock(Number(u.quantity), type)}</strong>${u.party_id ? ` · ${esc(partyMap[u.party_id]?.name || `Customer #${u.party_id}`)}` : ''}${u.notes ? ` <span style="color:var(--text-muted);">— ${esc(u.notes)}</span>` : ''}
+    </div>`).join('');
+}
+
+// Issued / Returned / Used / Difference cells for a stored return item.
+function storedQtyCells(item, type, lines, partyMap) {
+  const returned = item.checkin_quantity != null ? formatStock(Number(item.checkin_quantity), type) : '—';
+  const state = storedState(item);
+  const used = state ? `${formatStock(Number(item.used_quantity), type)}${usageLinesHTML(lines, type, partyMap)}` : '—';
+  const diff = state ? differenceHTML(Number(item.difference), type, state) : '—';
+  return `<td>${formatStock(Number(item.checkout_quantity), type)}</td><td>${returned}</td><td>${used}</td><td>${diff}</td>`;
+}
+
+async function loadReturnDetails(sessionId) {
+  const [itemsRes, usageRes, productsRes, partiesRes] = await Promise.all([
+    db.getAll('checkout_items', { eq: { session_id: sessionId } }),
+    db.getAll('checkout_usage', { eq: { session_id: sessionId } }),
+    db.getAll('products'),
+    db.getAll('parties'),
+  ]);
+  const items = (itemsRes.data || []).slice().sort((a, b) => a.id - b.id);
+  return {
+    items,
+    usage: usageRes.data || [],
+    prodMap: Object.fromEntries((productsRes.data || []).map(p => [p.id, p])),
+    partyMap: Object.fromEntries((partiesRes.data || []).map(p => [p.id, p])),
+  };
+}
+
+// Small in-app confirmation (replaces native confirm()). Resolves true on confirm.
+function confirmModal(title, messageHTML, confirmLabel, btnClass = 'btn-danger') {
+  return new Promise(resolve => {
+    const footer = `<button class="btn btn-secondary" data-role="cancel">Cancel</button>
+      <button class="btn ${btnClass}" data-role="confirm">${esc(confirmLabel)}</button>`;
+    const { overlay, close } = createModal(title, `<p style="font-size:0.9rem;">${messageHTML}</p>`, { footer });
+    overlay.querySelector('[data-role="cancel"]').onclick = () => { close(); resolve(false); };
+    overlay.querySelector('[data-role="confirm"]').onclick = () => { close(); resolve(true); };
+  });
 }
 
 async function renderSessionsList(body, isAdmin) {
@@ -70,29 +165,31 @@ async function renderSessionsList(body, isAdmin) {
         }
         if (s.status === 'pending_approval' && isAdmin) {
           actions += `<button class="btn btn-sm btn-primary approve-return-btn" data-id="${s.id}" style="background:var(--green);border-color:var(--green);"><i class="fas fa-check-double"></i> Approve Return</button> `;
-          actions += `<button class="btn btn-sm btn-danger flag-btn" data-id="${s.id}"><i class="fas fa-flag"></i> Flag</button>`;
+          actions += `<button class="btn btn-sm btn-secondary send-back-btn" data-id="${s.id}"><i class="fas fa-rotate-left"></i> Send back</button>`;
         }
-        actions += ` <button class="btn btn-sm btn-ghost view-btn" data-id="${s.id}"><i class="fas fa-eye"></i></button>`;
+        actions += ` <button class="btn btn-sm btn-ghost view-btn" data-id="${s.id}" aria-label="View session"><i class="fas fa-eye"></i></button>`;
 
         const colors = { pending_issue: 'purple', checked_out: 'blue', pending_approval: 'amber', checked_in: 'green', flagged: 'red' };
         const labels = { pending_issue: 'Pending Issue', checked_out: 'In Field', pending_approval: 'Pending Return', checked_in: 'Approved', flagged: 'Flagged' };
         const highlight = (s.status === 'pending_issue' || s.status === 'pending_approval') ? ' style="background:var(--accent-soft);"' : '';
+        const mismatch = s.has_discrepancy ? ' <span class="badge-status red mismatch-badge"><i class="fas fa-triangle-exclamation"></i> Mismatch</span>' : '';
 
-        return `<tr${highlight}>
+        return `<tr${highlight} data-session-id="${s.id}">
           <td><strong>${esc(seller?.full_name || 'Unknown')}</strong></td>
           <td>${formatDateTime(s.checkout_time)}</td>
           <td>${s.checkin_time ? formatDateTime(s.checkin_time) : '<span style="color:var(--text-muted);">—</span>'}</td>
           <td>${sItems.length} items</td>
-          <td><span class="badge-status ${colors[s.status]}">${labels[s.status]}</span></td>
+          <td><span class="badge-status ${colors[s.status]}">${labels[s.status]}</span>${mismatch}</td>
           <td>${actions}</td>
         </tr>`;
       }).join('')}</tbody></table></div>`;
 
     container.querySelectorAll('.approve-issue-btn').forEach(el => el.addEventListener('click', () => approveIssue(parseInt(el.dataset.id), body, items, prodMap)));
     container.querySelectorAll('.checkin-btn').forEach(el => el.addEventListener('click', () => openCheckinModal(parseInt(el.dataset.id), body, isAdmin)));
-    container.querySelectorAll('.approve-return-btn').forEach(el => el.addEventListener('click', () => openApproveReturnModal(parseInt(el.dataset.id), body, items, prodMap)));
-    container.querySelectorAll('.flag-btn').forEach(el => el.addEventListener('click', () => flagSession(parseInt(el.dataset.id), body, isAdmin)));
-    container.querySelectorAll('.view-btn').forEach(el => el.addEventListener('click', () => viewSession(parseInt(el.dataset.id), items, prodMap)));
+    container.querySelectorAll('.approve-return-btn').forEach(el => el.addEventListener('click', () => openApproveReturnModal(parseInt(el.dataset.id), body)));
+    container.querySelectorAll('.send-back-btn').forEach(el => el.addEventListener('click', () => openSendBackModal(parseInt(el.dataset.id), body)));
+    container.querySelectorAll('.flag-btn').forEach(el => el.addEventListener('click', () => rejectIssue(parseInt(el.dataset.id), body, isAdmin)));
+    container.querySelectorAll('.view-btn').forEach(el => el.addEventListener('click', () => viewSession(parseInt(el.dataset.id))));
   }
 
   body.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
@@ -104,22 +201,42 @@ async function renderSessionsList(body, isAdmin) {
   renderTab();
 }
 
-function viewSession(sessionId, allItems, prodMap) {
-  const sItems = allItems.filter(i => i.session_id === sessionId);
-  if (!sItems.length) { createModal('Session', '<p style="color:var(--text-muted);">No items.</p>'); return; }
+// Status cell for a stored item: match / mismatch (+ classification once resolved) / legacy flag.
+function itemStatusHTML(item) {
+  if (item.checkin_quantity == null) return '<span style="color:var(--text-muted);">Not returned</span>';
+  const state = storedState(item);
+  if (!state) {
+    return item.is_flagged ? '<span class="badge-status red">⚠ Over</span>' : '<span class="badge-status green">OK</span>';
+  }
+  const s = DIFF_STYLES[state];
+  let html = `<span class="badge-status ${s.badge}">${s.label}</span>`;
+  if (item.discrepancy_type) {
+    html += `<div style="font-size:0.78rem;margin-top:4px;"><strong>${esc(DISCREPANCY_TYPES[item.discrepancy_type] || item.discrepancy_type)}</strong></div>`;
+    if (item.discrepancy_note) html += `<div style="font-size:0.78rem;color:var(--text-secondary);">${esc(item.discrepancy_note)}</div>`;
+  }
+  if (!item.has_mismatch && item.is_flagged && item.flag_reason) {
+    html += `<div style="font-size:0.75rem;color:var(--text-muted);margin-top:4px;">${esc(item.flag_reason)}</div>`;
+  }
+  return html;
+}
+
+async function viewSession(sessionId) {
+  const { items, usage, prodMap, partyMap } = await loadReturnDetails(sessionId);
+  const { data: session } = await db.getById('checkout_sessions', sessionId);
+  if (!items.length) { createModal('Session', '<p style="color:var(--text-muted);">No items.</p>'); return; }
   const content = `<div class="table-wrapper"><table class="data-table">
-    <thead><tr><th>Product</th><th>Issued</th><th>Returned</th><th>Consumed</th><th>Flag</th></tr></thead>
-    <tbody>${sItems.map(i => {
+    <thead><tr><th>Product</th><th>Issued</th><th>Returned</th><th>Used</th><th>Difference</th><th>Status</th></tr></thead>
+    <tbody>${items.map(i => {
       const p = prodMap[i.product_id];
-      const consumed = (i.checkout_quantity||0) - (i.checkin_quantity||0);
-      return `<tr style="${i.is_flagged?'background:var(--red-soft);':''}">
-        <td>${esc(p?.name||'Unknown')}</td>
-        <td>${formatStock(i.checkout_quantity,p?.type)}</td>
-        <td>${i.checkin_quantity!=null?formatStock(i.checkin_quantity,p?.type):'—'}</td>
-        <td style="${i.is_flagged?'color:var(--red);font-weight:700;':''}">${i.checkin_quantity!=null?formatStock(consumed,p?.type):'—'}</td>
-        <td>${i.is_flagged?'<span class="badge-status red">⚠</span>':'<span class="badge-status green">OK</span>'}</td>
+      const lines = usage.filter(u => u.item_id === i.id);
+      return `<tr style="${i.has_mismatch ? 'background:var(--red-soft);' : ''}">
+        <td>${esc(p?.name || 'Unknown')}</td>
+        ${storedQtyCells(i, p?.type, lines, partyMap)}
+        <td>${itemStatusHTML(i)}</td>
       </tr>`;
-    }).join('')}</tbody></table></div>`;
+    }).join('')}</tbody></table></div>
+    ${session?.notes ? `<div style="margin-top:14px;padding:12px;background:var(--bg-input);border-radius:var(--radius-sm);font-size:0.85rem;">
+      <strong>Notes</strong><div style="white-space:pre-wrap;margin-top:4px;">${esc(session.notes)}</div></div>` : ''}`;
   createModal('Session Details', content, { large: true });
 }
 
@@ -194,7 +311,10 @@ async function openCheckoutModal(body, isAdmin) {
           showToast(`Insufficient stock for ${item.product.name} — only ${formatStock(item.product.current_stock, item.product.type)} available`, 'error');
           return;
         }
-        if (!confirm(`⚠ ${item.product.name} only has ${formatStock(item.product.current_stock, item.product.type)} in stock. You are requesting ${item.product.type === 'liquid' ? item.quantity + ' kg' : item.quantity + ' pcs'}.\n\nSubmit anyway? Admin will review.`)) return;
+        const ok = await confirmModal('Low stock',
+          `⚠ <strong>${esc(item.product.name)}</strong> only has ${formatStock(item.product.current_stock, item.product.type)} in stock. You are requesting ${item.product.type === 'liquid' ? item.quantity + ' kg' : item.quantity + ' pcs'}.<br><br>Submit anyway? Admin will review.`,
+          'Submit anyway', 'btn-primary');
+        if (!ok) return;
       }
     }
 
@@ -273,7 +393,7 @@ async function approveIssue(sessionId, body, allItems, prodMap) {
   const { close } = createModal('Approve Stock Issue', content, { footer, large: true });
 
   document.getElementById('ai-cancel').onclick = close;
-  document.getElementById('ai-reject').onclick = async () => { close(); await flagSession(sessionId, body, true); };
+  document.getElementById('ai-reject').onclick = async () => { close(); await rejectIssue(sessionId, body, true); };
 
   if (canApprove) {
     document.getElementById('ai-approve').onclick = async () => {
@@ -298,114 +418,294 @@ async function approveIssue(sessionId, body, allItems, prodMap) {
 }
 
 // ============================================
-// SUBMIT RETURN (Seller/Admin: set pending_approval, NO stock restore)
+// SUBMIT RETURN (Seller/Admin): Returned + usage per item → submit_return RPC.
+// No stock change until an admin approves.
 // ============================================
 async function openCheckinModal(sessionId, body, isAdmin) {
-  const { data: items } = await db.getAll('checkout_items');
-  const sessionItems = items.filter(i => i.session_id === sessionId);
-  const { data: products } = await db.getAll('products');
-  const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
+  const [itemsRes, productsRes, categoriesRes, partiesRes, tolerances] = await Promise.all([
+    db.getAll('checkout_items', { eq: { session_id: sessionId } }),
+    db.getAll('products'),
+    db.getAll('categories'),
+    db.getAll('parties'),
+    loadTolerances(),
+  ]);
+  const prodMap = Object.fromEntries((productsRes.data || []).map(p => [p.id, p]));
+  const catMap = Object.fromEntries((categoriesRes.data || []).map(c => [c.id, c]));
+  const parties = (partiesRes.data || []).slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+  // Form state; quantities are kept as the raw input strings.
+  const rows = (itemsRes.data || []).slice().sort((a, b) => a.id - b.id).map(item => {
+    const product = prodMap[item.product_id];
+    const issued = Number(item.checkout_quantity || 0);
+    return {
+      item, product, type: product?.type,
+      isMachine: isMachineCategory(catMap[product?.category_id]),
+      issued, returned: String(issued), usage: [],
+    };
+  });
+
+  const qtyOf = raw => (String(raw ?? '').trim() === '' ? NaN : Number(raw));
+  const usedOf = row => round3(row.usage.reduce((s, u) => s + (Number.isFinite(qtyOf(u.quantity)) ? qtyOf(u.quantity) : 0), 0));
+  const stepOf = row => (row.type === 'liquid' ? '0.001' : '1');
+
+  function usageLineHTML(row, idx, lineIdx) {
+    const u = row.usage[lineIdx];
+    const customerRequired = u.reason === 'installation' && row.isMachine;
+    return `<div class="ci-usage-line" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;">
+      <select class="form-select ci-u-reason" data-idx="${idx}" data-line="${lineIdx}" aria-label="Usage reason" style="width:auto;min-width:150px;">
+        ${Object.entries(USAGE_REASONS).map(([key, label]) => `<option value="${key}" ${u.reason === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}
+      </select>
+      <input class="form-input ci-u-qty" type="number" data-idx="${idx}" data-line="${lineIdx}" value="${esc(u.quantity)}" min="0" step="${stepOf(row)}" placeholder="Qty (${row.type === 'liquid' ? 'kg' : 'pcs'})" aria-label="Used quantity" style="width:120px;" />
+      <select class="form-select ci-u-party" data-idx="${idx}" data-line="${lineIdx}" aria-label="Customer" style="width:auto;min-width:160px;${customerRequired && !u.party_id ? 'border-color:var(--red);' : ''}">
+        <option value="">${customerRequired ? 'Customer (required)' : 'Customer (optional)'}</option>
+        ${parties.map(p => `<option value="${p.id}" ${String(u.party_id) === String(p.id) ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+      </select>
+      <input class="form-input ci-u-notes" type="text" data-idx="${idx}" data-line="${lineIdx}" value="${esc(u.notes)}" maxlength="200" placeholder="Note (optional)" aria-label="Usage note" style="flex:1;min-width:120px;" />
+      <button type="button" class="btn-remove ci-u-rm" data-idx="${idx}" data-line="${lineIdx}" aria-label="Remove usage line"><i class="fas fa-times"></i></button>
+    </div>`;
+  }
+
+  function itemHTML(row, idx) {
+    return `<div class="ci-item" data-idx="${idx}" style="border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:12px;">
+      <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <div><strong>${esc(row.product?.name || 'Unknown')}</strong><br>
+          <small style="color:var(--text-muted);">${row.type === 'liquid' ? 'Liquid (kg)' : 'Unit (pieces)'}${row.isMachine ? ' · Machine — whole numbers' : ''}</small></div>
+        <div style="font-size:0.85rem;">Issued <strong>${formatStock(row.issued, row.type)}</strong></div>
+      </div>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-top:10px;">
+        <label style="font-size:0.8rem;color:var(--text-secondary);">Returned<br>
+          <input class="form-input ci-returned" type="number" data-idx="${idx}" value="${esc(row.returned)}" min="0" step="${stepOf(row)}" style="width:120px;" /></label>
+        <div style="font-size:0.8rem;color:var(--text-secondary);">Used<br><strong class="ci-used" style="font-size:0.9rem;color:var(--text-primary);"></strong></div>
+        <div style="font-size:0.8rem;color:var(--text-secondary);">Difference<br><span class="ci-diff"></span></div>
+      </div>
+      <div class="ci-usage-lines">${row.usage.map((_, lineIdx) => usageLineHTML(row, idx, lineIdx)).join('')}</div>
+      <button type="button" class="btn btn-sm btn-ghost ci-add-usage" data-idx="${idx}" style="margin-top:8px;"><i class="fas fa-plus"></i> Add usage</button>
+    </div>`;
+  }
 
   const content = `
     <div style="padding:12px 16px;background:var(--blue-soft);border:1px solid var(--blue);border-radius:var(--radius);margin-bottom:16px;font-size:0.85rem;">
-      <i class="fas fa-info-circle" style="color:var(--blue);"></i> Stock will be held until admin approves the return.
+      <i class="fas fa-info-circle" style="color:var(--blue);"></i> Enter what you brought back and what you used (and why).
+      <strong>Difference = Issued − Returned − Used</strong> should be zero. Any difference needs admin approval; stock is held until the admin approves.
     </div>
-    <div class="table-wrapper"><table class="data-table">
-      <thead><tr><th>Product</th><th>Issued Qty</th><th>Return Qty</th></tr></thead>
-      <tbody>${sessionItems.map(i => {
-        const p = prodMap[i.product_id];
-        return `<tr><td>${esc(p?.name||'Unknown')}<br><small style="color:var(--text-muted);">${p?.type==='liquid'?'kg':'pieces'}</small></td>
-          <td>${formatStock(i.checkout_quantity,p?.type)}</td>
-          <td><input class="form-input ci-rq" type="number" data-item-id="${i.id}" value="${i.checkout_quantity}" min="0" max="${i.checkout_quantity}" step="${p?.type==='liquid'?'0.001':'1'}" style="width:120px;" /></td></tr>`;
-      }).join('')}</tbody></table></div>
+    <div id="ci-items"></div>
     <div class="form-group" style="margin-top:16px;"><label class="form-label">Notes</label>
       <textarea class="form-textarea" id="ci-notes" placeholder="Any observations..." maxlength="500"></textarea></div>`;
   const footer = `<button class="btn btn-secondary" id="ci-cancel">Cancel</button>
     <button class="btn btn-primary" id="ci-submit"><i class="fas fa-paper-plane"></i> Submit Return</button>`;
-  const { close } = createModal('Submit Return', content, { footer, large: true });
-  document.getElementById('ci-cancel').onclick = close;
+  const { overlay, close } = createModal('Submit Return', content, { footer, large: true });
+  const list = overlay.querySelector('#ci-items');
 
-  document.getElementById('ci-submit').onclick = async () => {
-    const returnData = [];
-    document.querySelectorAll('.ci-rq').forEach(inp => {
-      const itemId = parseInt(inp.dataset.itemId), rq = parseFloat(inp.value);
-      const item = sessionItems.find(i => i.id === itemId);
-      const p = prodMap[item.product_id];
-      const consumed = (item.checkout_quantity||0) - rq;
-      const flagged = consumed > (p?.max_daily_consumption || CONFIG.DEFAULT_DAILY_CONSUMPTION);
-      if (isNaN(rq)||rq<0) { showToast(`Invalid qty for ${p?.name}`,'error'); return; }
-      returnData.push({ itemId, rq, consumed, flagged, item, p });
-    });
-    if (returnData.length !== sessionItems.length) return;
-
-    for (const rd of returnData) {
-      await dbOp(db.update('checkout_items', rd.itemId, {
-        checkin_quantity: rd.rq, is_flagged: rd.flagged,
-        flag_reason: rd.flagged ? `Consumed ${rd.consumed} exceeds threshold` : null
-      }), 'Failed to update item');
+  function updateComputed(idx) {
+    const row = rows[idx];
+    const block = list.querySelector(`.ci-item[data-idx="${idx}"]`);
+    if (!block) return;
+    const used = usedOf(row);
+    const returned = qtyOf(row.returned);
+    block.querySelector('.ci-used').textContent = formatStock(used, row.type);
+    if (!Number.isFinite(returned)) {
+      block.querySelector('.ci-diff').innerHTML = '<span style="color:var(--text-muted);">Enter returned qty</span>';
+      block.style.borderColor = 'var(--border)';
+      return;
     }
-    await dbOp(db.update('checkout_sessions', sessionId, {
-      checkin_time: new Date().toISOString(), status: 'pending_approval',
-      notes: document.getElementById('ci-notes').value.trim()
-    }), 'Failed to update session');
+    const diff = round3(row.issued - returned - used);
+    const state = differenceState(diff, row.type, tolerances);
+    block.querySelector('.ci-diff').innerHTML = differenceHTML(diff, row.type, state);
+    block.dataset.state = state;
+    block.style.borderColor = DIFF_STYLES[state].color;
+  }
 
-    showToast('Return submitted — waiting for admin approval', 'success');
+  function renderAll() {
+    list.innerHTML = rows.length
+      ? rows.map(itemHTML).join('')
+      : '<p style="color:var(--text-muted);text-align:center;padding:20px;">No items in this session.</p>';
+    rows.forEach((_, idx) => updateComputed(idx));
+  }
+
+  list.addEventListener('input', e => {
+    const t = e.target, idx = Number(t.dataset.idx), row = rows[idx];
+    if (!row) return;
+    if (t.classList.contains('ci-returned')) { row.returned = t.value; updateComputed(idx); }
+    else if (t.classList.contains('ci-u-qty')) { row.usage[Number(t.dataset.line)].quantity = t.value; updateComputed(idx); }
+    else if (t.classList.contains('ci-u-notes')) { row.usage[Number(t.dataset.line)].notes = t.value; }
+  });
+  list.addEventListener('change', e => {
+    const t = e.target, row = rows[Number(t.dataset.idx)];
+    if (!row) return;
+    if (t.classList.contains('ci-u-reason')) { row.usage[Number(t.dataset.line)].reason = t.value; renderAll(); }
+    else if (t.classList.contains('ci-u-party')) { row.usage[Number(t.dataset.line)].party_id = t.value; renderAll(); }
+  });
+  list.addEventListener('click', e => {
+    const btn = e.target.closest('.ci-add-usage, .ci-u-rm');
+    if (!btn) return;
+    const row = rows[Number(btn.dataset.idx)];
+    if (btn.classList.contains('ci-add-usage')) row.usage.push({ reason: 'customer_service', quantity: '', party_id: '', notes: '' });
+    else row.usage.splice(Number(btn.dataset.line), 1);
+    renderAll();
+  });
+  renderAll();
+
+  // Returns the submit_return p_items payload, or null after showing a toast.
+  function buildPayload() {
+    const payload = [];
+    for (const row of rows) {
+      const name = row.product?.name || 'item';
+      const returned = qtyOf(row.returned);
+      if (!Number.isFinite(returned) || returned < 0) { showToast(`Enter the returned quantity for ${name}`, 'error'); return null; }
+      if (row.isMachine && !Number.isInteger(returned)) { showToast(`Returned machines must be whole numbers (${name})`, 'error'); return null; }
+      const usage = [];
+      for (const u of row.usage) {
+        const qty = qtyOf(u.quantity);
+        if (!Number.isFinite(qty) || qty <= 0) { showToast(`Enter a used quantity above zero for ${name}`, 'error'); return null; }
+        if (row.isMachine && !Number.isInteger(qty)) { showToast(`Machines must be whole numbers (${name})`, 'error'); return null; }
+        if (u.reason === 'installation' && row.isMachine && !u.party_id) {
+          showToast(`Choose the customer where ${name} was installed`, 'error'); return null;
+        }
+        usage.push({ reason: u.reason, quantity: qty, party_id: u.party_id ? Number(u.party_id) : null, notes: String(u.notes || '').trim() || null });
+      }
+      payload.push({ item_id: row.item.id, returned_quantity: returned, usage });
+    }
+    return payload;
+  }
+
+  overlay.querySelector('#ci-cancel').onclick = close;
+  overlay.querySelector('#ci-submit').addEventListener('click', e => withSaving(e.currentTarget, async () => {
+    const pItems = buildPayload();
+    if (!pItems) return;
+    const result = await dbOp(db.rpc('submit_return', {
+      p_session_id: sessionId,
+      p_items: pItems,
+      p_notes: overlay.querySelector('#ci-notes').value.trim(),
+      p_submitted_by: auth.currentUser.id,
+    }), 'Failed to submit return');
+    if (!result) return;
+    if (result.data?.has_discrepancy) showToast('Return submitted with a difference — admin must review it', 'warning');
+    else showToast('Return submitted — waiting for admin approval', 'success');
     close();
     await renderSessionsList(body, isAdmin);
-  };
+  }));
 }
 
 // ============================================
-// APPROVE RETURN (Admin: restore stock, set checked_in)
+// APPROVE RETURN (Admin): classify mismatches, then approve_return RPC
+// restores returned stock and records installations.
 // ============================================
-async function openApproveReturnModal(sessionId, body, allItems, prodMap) {
-  const sItems = allItems.filter(i => i.session_id === sessionId);
-  const { data: products } = await db.getAll('products');
-  const freshMap = Object.fromEntries(products.map(p => [p.id, p]));
-  const anyFlagged = sItems.some(i => i.is_flagged);
+async function openApproveReturnModal(sessionId, body) {
+  const { items, usage, prodMap, partyMap } = await loadReturnDetails(sessionId);
+  const mismatched = items.filter(i => i.has_mismatch);
 
   const content = `
-    ${anyFlagged?`<div style="padding:12px 16px;background:var(--red-soft);border:1px solid var(--red);border-radius:var(--radius);margin-bottom:16px;font-size:0.85rem;">
-      <i class="fas fa-exclamation-triangle" style="color:var(--red);"></i> Some items exceed consumption threshold.</div>`:''}
+    ${mismatched.length ? `<div style="padding:12px 16px;background:var(--red-soft);border:1px solid var(--red);border-radius:var(--radius);margin-bottom:16px;font-size:0.85rem;">
+      <i class="fas fa-exclamation-triangle" style="color:var(--red);"></i> ${mismatched.length} item(s) do not match (Issued − Returned − Used ≠ 0). Classify each difference and add a note to approve.</div>` : ''}
     <div class="table-wrapper"><table class="data-table">
-    <thead><tr><th>Product</th><th>Issued</th><th>Returned</th><th>Consumed</th><th>Status</th></tr></thead>
-    <tbody>${sItems.map(i => {
-      const p = freshMap[i.product_id]||prodMap[i.product_id];
-      const c = (i.checkout_quantity||0)-(i.checkin_quantity||0);
-      return `<tr style="${i.is_flagged?'background:var(--red-soft);':''}">
-        <td><strong>${esc(p?.name||'?')}</strong></td>
-        <td>${formatStock(i.checkout_quantity,p?.type)}</td><td>${formatStock(i.checkin_quantity,p?.type)}</td>
-        <td style="${i.is_flagged?'color:var(--red);font-weight:700;':''}">${formatStock(c,p?.type)}</td>
-        <td>${i.is_flagged?'<span class="badge-status red">⚠ Over</span>':'<span class="badge-status green">OK</span>'}</td></tr>`;
+    <thead><tr><th>Product</th><th>Issued</th><th>Returned</th><th>Used</th><th>Difference</th><th>Status</th></tr></thead>
+    <tbody>${items.map(i => {
+      const p = prodMap[i.product_id];
+      const lines = usage.filter(u => u.item_id === i.id);
+      return `<tr style="${i.has_mismatch ? 'background:var(--red-soft);' : ''}">
+        <td><strong>${esc(p?.name || '?')}</strong></td>
+        ${storedQtyCells(i, p?.type, lines, partyMap)}
+        <td>${itemStatusHTML(i)}</td></tr>`;
     }).join('')}</tbody></table></div>
+    ${mismatched.length ? `<div style="margin-top:16px;">
+      <div class="form-label" style="margin-bottom:8px;">Classify each difference *</div>
+      ${mismatched.map(i => {
+        const p = prodMap[i.product_id];
+        const state = storedState(i) || 'shortage';
+        return `<div class="ar-resolution" data-item-id="${i.id}" style="border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:10px;">
+          <div style="margin-bottom:8px;"><strong>${esc(p?.name || '?')}</strong> — ${differenceHTML(Number(i.difference), p?.type, state)}</div>
+          <select class="form-select ar-type" data-item-id="${i.id}" aria-label="Difference classification" style="margin-bottom:8px;">
+            <option value="">Select classification…</option>
+            ${Object.entries(DISCREPANCY_TYPES).map(([key, label]) => `<option value="${key}">${esc(label)}</option>`).join('')}
+          </select>
+          <textarea class="form-textarea ar-note" data-item-id="${i.id}" maxlength="500" placeholder="What happened? (required)" aria-label="Difference note"></textarea>
+        </div>`;
+      }).join('')}
+    </div>` : ''}
     <div style="margin-top:14px;padding:12px;background:var(--green-soft);border:1px solid var(--green);border-radius:var(--radius);font-size:0.85rem;">
-      <i class="fas fa-shield-check" style="color:var(--green);"></i> On approval, returned stock will be added back to inventory.</div>`;
+      <i class="fas fa-shield-check" style="color:var(--green);"></i> On approval, the <strong>returned</strong> quantity goes back into stock.
+      Machines used for an <strong>installation</strong> move to the product's Installed Qty and get an Installations record for that customer.
+      Other usage is recorded as consumed.</div>`;
   const footer = `<button class="btn btn-secondary" id="ar-cancel">Cancel</button>
-    <button class="btn btn-danger" id="ar-flag"><i class="fas fa-flag"></i> Flag</button>
+    <button class="btn btn-secondary" id="ar-send-back"><i class="fas fa-rotate-left"></i> Send back</button>
     <button class="btn btn-primary" id="ar-approve" style="background:var(--green);border-color:var(--green);"><i class="fas fa-check-double"></i> Approve & Restore</button>`;
-  const { close } = createModal('Approve Return', content, { footer, large: true });
+  const { overlay, close } = createModal('Approve Return', content, { footer, large: true });
+  const approveBtn = overlay.querySelector('#ar-approve');
 
-  document.getElementById('ar-cancel').onclick = close;
-  document.getElementById('ar-flag').onclick = async () => { close(); await flagSession(sessionId, body, true); };
-  document.getElementById('ar-approve').onclick = async () => {
-    // Atomic approve_return: restores stock for each item with a non-zero
-    // checkin_quantity, logs inventory_transactions, flips session status.
-    const result = await dbOp(db.rpc('approve_return', {
-      p_session_id: sessionId,
-      p_approver_id: auth.currentUser.id,
-    }), 'Failed to approve return');
-    if (!result) return;
-    showToast('Return approved — stock restored', 'success');
-    close();
-    await renderSessionsList(body, true);
+  const readResolutions = () => mismatched.map(i => ({
+    item_id: i.id,
+    discrepancy_type: overlay.querySelector(`.ar-type[data-item-id="${i.id}"]`).value,
+    note: overlay.querySelector(`.ar-note[data-item-id="${i.id}"]`).value.trim(),
+  }));
+  const isComplete = () => readResolutions().every(r => r.discrepancy_type && r.note);
+  const refreshApprove = () => {
+    const ready = isComplete();
+    approveBtn.disabled = !ready;
+    approveBtn.style.opacity = ready ? '' : '0.6';
+    approveBtn.style.cursor = ready ? '' : 'not-allowed';
   };
+  overlay.querySelectorAll('.ar-type, .ar-note').forEach(el => {
+    el.addEventListener('input', refreshApprove);
+    el.addEventListener('change', refreshApprove);
+  });
+  refreshApprove();
+
+  overlay.querySelector('#ar-cancel').onclick = close;
+  overlay.querySelector('#ar-send-back').onclick = () => { close(); openSendBackModal(sessionId, body); };
+  approveBtn.addEventListener('click', e => {
+    if (!isComplete()) { showToast('Classify every difference and add a note first', 'error'); return; }
+    return withSaving(e.currentTarget, async () => {
+      const result = await dbOp(db.rpc('approve_return', {
+        p_session_id: sessionId,
+        p_approver_id: auth.currentUser.id,
+        p_resolutions: readResolutions(),
+      }), 'Failed to approve return');
+      if (!result) return;
+      showToast('Return approved — stock restored', 'success');
+      close();
+      await renderSessionsList(body, true);
+    });
+  });
 }
 
-async function flagSession(sessionId, body, isAdmin) {
-  if (!confirm('Flag this session? Stock will NOT be affected.')) return;
+// ============================================
+// SEND BACK (Admin): pending return → In Field so staff can correct it.
+// ============================================
+function openSendBackModal(sessionId, body) {
+  const content = `
+    <p style="font-size:0.9rem;margin-bottom:12px;">The return goes back to the staff member as <strong>In Field</strong> so they can correct and resubmit it. No stock changes.</p>
+    <div class="form-group"><label class="form-label" for="sb-reason">Reason *</label>
+      <textarea class="form-textarea" id="sb-reason" maxlength="500" placeholder="What needs correcting?"></textarea></div>`;
+  const footer = `<button class="btn btn-secondary" id="sb-cancel">Cancel</button>
+    <button class="btn btn-danger" id="sb-confirm"><i class="fas fa-rotate-left"></i> Send back</button>`;
+  const { overlay, close } = createModal('Send Return Back', content, { footer });
+  overlay.querySelector('#sb-cancel').onclick = close;
+  overlay.querySelector('#sb-confirm').addEventListener('click', e => {
+    const reason = overlay.querySelector('#sb-reason').value.trim();
+    if (!reason) { showToast('Give a reason for sending the return back', 'error'); return; }
+    return withSaving(e.currentTarget, async () => {
+      const result = await dbOp(db.rpc('reject_return', {
+        p_session_id: sessionId,
+        p_reason: reason,
+        p_approver_id: auth.currentUser.id,
+      }), 'Failed to send return back');
+      if (!result) return;
+      showToast('Return sent back to staff', 'warning');
+      close();
+      await renderSessionsList(body, true);
+    });
+  });
+}
+
+// ============================================
+// REJECT ISSUE (Admin): pending issue → flagged. No stock was deducted yet.
+// ============================================
+async function rejectIssue(sessionId, body, isAdmin) {
+  const ok = await confirmModal('Reject Request', 'Reject this stock request? It moves to <strong>Flagged</strong>. Stock is not affected.', 'Reject');
+  if (!ok) return;
   await dbOp(db.update('checkout_sessions', sessionId, {
     status: 'flagged', approved_by: auth.currentUser.id, approved_at: new Date().toISOString()
-  }), 'Failed to flag');
-  showToast('Session flagged', 'warning');
+  }), 'Failed to reject');
+  showToast('Request rejected', 'warning');
   await renderSessionsList(body, isAdmin);
 }

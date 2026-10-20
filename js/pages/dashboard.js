@@ -1,5 +1,6 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatStock, availableStock, formatDateTime, daysUntil, showToast, escapeHtml, CONFIG, skeletonHTML, dbOp } from '../utils/helpers.js';
+import { formatCurrency, formatStock, availableStock, formatDateTime, daysUntil, showToast, escapeHtml, CONFIG, skeletonHTML, dbOp, localDay } from '../utils/helpers.js';
+
 
 export async function renderDashboard(body, header) {
   const isAdmin = auth.isAdmin();
@@ -36,6 +37,7 @@ export async function renderDashboard(body, header) {
     { data: txns },
     { data: allProfiles },
     { data: categories },
+    { data: pendingAdjustmentRows },
   ] = await Promise.all([
     db.getAll('products'),
     db.fetchAllPaged('checkout_sessions'),
@@ -47,6 +49,7 @@ export async function renderDashboard(body, header) {
     db.getAll('inventory_transactions', { orderBy: ['created_at', 'desc'], limit: 20 }),
     db.getAll('profiles'),
     db.getAll('categories'),
+    db.getAll('stock_adjustments', { eq: { status: 'pending' } }),
   ]);
   // Reuse `amcParties` and `products` below — no second fetch needed.
   const allParties = amcParties;
@@ -57,6 +60,11 @@ export async function renderDashboard(body, header) {
   const pendingIssues = sessions.filter(s => s.status === 'pending_issue').length;
   const pendingReturns = sessions.filter(s => s.status === 'pending_approval').length;
   const pendingTotal = pendingIssues + pendingReturns;
+  // Stock reconciliation alerts (migration 016).
+  const discrepancyReturns = sessions.filter(s => s.status === 'pending_approval' && s.has_discrepancy);
+  const todayLocal = localDay(new Date());
+  const staleCheckouts = sessions.filter(s => s.status === 'checked_out' && localDay(s.checkout_time || s.created_at) < todayLocal);
+  const pendingAdjustments = (pendingAdjustmentRows || []).filter(a => a.status === 'pending');
   const lowStockProducts = products.filter(p => p.is_active && availableStock(p) <= p.min_stock_threshold);
   const expiringProducts = products.filter(p => p.is_active && p.expiry_date && daysUntil(p.expiry_date) <= CONFIG.EXPIRY_WARN_DAYS && daysUntil(p.expiry_date) > 0);
   const expiredProducts = products.filter(p => p.is_active && p.expiry_date && daysUntil(p.expiry_date) <= 0);
@@ -89,7 +97,9 @@ export async function renderDashboard(body, header) {
   const totalAssetValue = warehouseStockValue + ftuDeployedValue;
   const activeRentals = rentals.filter(r => r.status === 'active').length;
   const totalSalesValue = sales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
-  const alertCount = lowStockProducts.length + flaggedSessions + expiredProducts.length + pendingTotal;
+  // Discrepancy returns are pending returns, so they are already inside pendingTotal.
+  const alertCount = lowStockProducts.length + flaggedSessions + expiredProducts.length + pendingTotal
+    + staleCheckouts.length + pendingAdjustments.length;
 
   // AMC Worklist with completion tracking
   const now = new Date();
@@ -203,8 +213,40 @@ export async function renderDashboard(body, header) {
       </div>
     </div>` : '';
 
+  // Stock reconciliation alerts card
+  const profileName = id => allProfiles.find(p => p.id === id)?.full_name || 'Unknown staff';
+  const staleStaff = [...new Set(staleCheckouts.map(s => profileName(s.seller_id)))];
+  const reconAlertRow = (id, count, icon, color, title, detail, page, action) => (count > 0 ? `<div class="alert-item" id="${id}" data-count="${count}" style="background:var(--${color}-soft);">
+            <i class="fas ${icon}" style="color:var(--${color});"></i>
+            <div style="flex:1;"><strong>${title}</strong>
+            <div style="font-size:0.75rem;color:var(--text-muted);">${detail}</div></div>
+            <button class="btn btn-sm btn-primary" onclick="window.navigateTo('${page}')">${action}</button>
+          </div>` : '');
+  const reconTotal = discrepancyReturns.length + staleCheckouts.length + pendingAdjustments.length;
+  const reconHtml = reconTotal > 0 ? `
+    <div class="card" id="reconciliation-alerts" style="margin-bottom:20px;border-left:4px solid var(--red);">
+      <div class="card-header">
+        <h3><i class="fas fa-scale-unbalanced" style="color:var(--red);margin-right:8px;"></i>Stock Reconciliation</h3>
+        <span class="badge-status red">${reconTotal} to review</span>
+      </div>
+      <div class="card-body">
+        <div class="alert-list">
+          ${reconAlertRow('alert-discrepancy-returns', discrepancyReturns.length, 'fa-scale-unbalanced', 'red',
+            `${discrepancyReturns.length} return${discrepancyReturns.length > 1 ? 's' : ''} awaiting discrepancy approval`,
+            'Issued ≠ Returned + Used — classify the difference before approving', 'daily-ops', 'Review')}
+          ${reconAlertRow('alert-stale-checkouts', staleCheckouts.length, 'fa-clock-rotate-left', 'accent',
+            `${staleCheckouts.length} issue${staleCheckouts.length > 1 ? 's' : ''} still out from previous days`,
+            `Not returned yet: ${escapeHtml(staleStaff.slice(0, 3).join(', '))}${staleStaff.length > 3 ? ` +${staleStaff.length - 3} more` : ''}`, 'daily-ops', 'View')}
+          ${reconAlertRow('alert-pending-adjustments', pendingAdjustments.length, 'fa-sliders', 'purple',
+            `${pendingAdjustments.length} stock adjustment${pendingAdjustments.length > 1 ? 's' : ''} awaiting approval`,
+            'Stock will not change until an admin approves', 'products', 'Review')}
+        </div>
+      </div>
+    </div>` : '';
+
   body.innerHTML = `
     ${overdueHtml}
+    ${reconHtml}
     ${pendingHtml}
     ${amcWorklistHtml}
     ${upcomingHtml}
@@ -380,7 +422,7 @@ export async function renderDashboard(body, header) {
     recentEl.innerHTML = recent.map(t => {
       const prod = allProducts.find(p => p.id === t.product_id);
       const user = allProfiles.find(u => u.id === t.performed_by);
-      const icons = { stock_in: 'fa-arrow-down text-green', stock_out: 'fa-arrow-up text-red', checkout: 'fa-sign-out-alt text-blue', checkin: 'fa-sign-in-alt text-green', damage: 'fa-exclamation-triangle text-red', sale: 'fa-indian-rupee-sign text-green', rental_out: 'fa-handshake text-purple', adjustment: 'fa-sliders text-amber' };
+      const icons = { stock_in: 'fa-arrow-down text-green', stock_out: 'fa-arrow-up text-red', checkout: 'fa-sign-out-alt text-blue', checkin: 'fa-sign-in-alt text-green', damage: 'fa-exclamation-triangle text-red', sale: 'fa-indian-rupee-sign text-green', rental_out: 'fa-handshake text-purple', adjustment: 'fa-sliders text-amber', installed: 'fa-screwdriver-wrench text-purple' };
       const iconClass = icons[t.type] || 'fa-circle text-muted';
       return `<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);">
         <i class="fas ${iconClass.split(' ')[0]}" style="width:24px;text-align:center;color:var(--${iconClass.split(' ')[1]?.replace('text-','') || 'text-muted'});"></i>

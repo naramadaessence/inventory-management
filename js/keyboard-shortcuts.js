@@ -8,6 +8,7 @@
 //   ?              — Show shortcuts help modal
 //   g d            — Go to Dashboard (sequence: press 'g', then 'd')
 //   g p            — Go to Products (admin)
+//   g u            — Go to Purchases (admin)
 //   g s            — Go to Sales
 //   g c            — Go to Collections
 //   n              — New item on the current page (clicks the page's primary action button)
@@ -19,6 +20,7 @@ const SHORTCUTS = [
   { keys: '?', label: 'Show this help' },
   { keys: 'g d', label: 'Go to Dashboard' },
   { keys: 'g p', label: 'Go to Products (admin)' },
+  { keys: 'g u', label: 'Go to Purchases (admin)' },
   { keys: 'g s', label: 'Go to Sales' },
   { keys: 'g c', label: 'Go to Collections' },
   { keys: 'g r', label: 'Go to Reports (admin)' },
@@ -30,6 +32,7 @@ const SHORTCUTS = [
 const NAV_MAP = {
   d: 'dashboard',
   p: 'products',
+  u: 'purchases',
   s: 'sales',
   c: 'collections',
   r: 'reports',

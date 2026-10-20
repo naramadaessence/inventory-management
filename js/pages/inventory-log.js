@@ -3,6 +3,19 @@ import { formatDateTime, formatStock, showToast, esc } from '../utils/helpers.js
 
 const PAGE_SIZE = 50;
 
+// Display names for transaction types; anything else shows its key with spaces.
+const TYPE_LABELS = { installed: 'Installed at customer' };
+const TYPE_COLORS = { checkout: 'amber', checkin: 'green', sale: 'green', sale_edit: 'amber', sale_edit_restore: 'blue', sale_delete: 'red', rental_out: 'purple', rental_return: 'blue', damage: 'red', stock_in: 'blue', adjustment: 'amber', installed: 'purple' };
+
+function typeLabel(type) { return TYPE_LABELS[type] || String(type || '').replace(/_/g, ' '); }
+
+// Short "where did this come from" line under the type badge.
+function referenceLabel(t) {
+  if (t.reference_type === 'stock_adjustment') return `Approved adjustment request${t.reference_id ? ` #${t.reference_id}` : ''}`;
+  if (t.reference_type === 'checkout_session' && t.reference_id) return `Daily Ops session #${t.reference_id}`;
+  return '';
+}
+
 export async function renderInventoryLog(body, header) {
   if (!auth.isAdmin()) { body.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Access Denied</h3></div>'; return; }
 
@@ -30,7 +43,7 @@ export async function renderInventoryLog(body, header) {
   body.innerHTML = `
     <div class="toolbar">
       <div class="toolbar-left">
-        <select class="form-select" id="log-filter-type" style="width:160px;">
+        <select class="form-select" id="log-filter-type" style="width:190px;">
           <option value="">All Types</option>
           <option value="checkout">Checkout</option>
           <option value="checkin">Check-in</option>
@@ -43,6 +56,7 @@ export async function renderInventoryLog(body, header) {
           <option value="damage">Damage</option>
           <option value="stock_in">Stock In</option>
           <option value="adjustment">Adjustment</option>
+          <option value="installed">Installed at customer</option>
         </select>
       </div>
       <div class="toolbar-right" id="log-pager"></div>
@@ -82,16 +96,16 @@ export async function renderInventoryLog(body, header) {
       return;
     }
 
-    const typeColors = { checkout: 'amber', checkin: 'green', sale: 'green', sale_edit: 'amber', sale_edit_restore: 'blue', sale_delete: 'red', rental_out: 'purple', rental_return: 'blue', damage: 'red', stock_in: 'blue', adjustment: 'amber' };
     tableEl.innerHTML = `<div class="table-wrapper"><table class="data-table">
       <thead><tr><th>Timestamp</th><th>Type</th><th>Product</th><th>Quantity</th><th>Performed By</th><th>Notes</th></tr></thead>
       <tbody>${txns.map(t => {
         const prod = prodMap[t.product_id];
         const user = userMap[t.performed_by];
-        const color = typeColors[t.type] || 'blue';
+        const color = TYPE_COLORS[t.type] || 'blue';
+        const ref = referenceLabel(t);
         return `<tr>
           <td style="white-space:nowrap;">${formatDateTime(t.created_at)}</td>
-          <td><span class="badge-status ${color}">${esc(t.type.replace(/_/g, ' '))}</span></td>
+          <td><span class="badge-status ${color}">${esc(typeLabel(t.type))}</span>${ref ? `<div style="font-size:0.7rem;color:var(--text-muted);margin-top:2px;">${esc(ref)}</div>` : ''}</td>
           <td>${esc(prod?.name || 'Unknown')}</td>
           <td style="font-weight:700;color:${t.quantity >= 0 ? 'var(--green)' : 'var(--red)'};">${t.quantity >= 0 ? '+' : ''}${t.quantity}</td>
           <td>${esc(user?.full_name || 'System')}</td>

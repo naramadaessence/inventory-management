@@ -17,9 +17,6 @@ export const CONFIG = {
   // Sales whose expected_payment_date is within this many days are flagged
   // urgent (red/amber styling in tables and reminder rows).
   PAYMENT_URGENT_DAYS: 3,
-  // Fallback for a product without a max_daily_consumption set when deciding
-  // whether a return's consumption should be flagged.
-  DEFAULT_DAILY_CONSUMPTION: 30,
 };
 
 // Round a currency amount to 2 decimal places (matches DECIMAL(12,2) in DB).
@@ -162,6 +159,41 @@ export function formatWeight(kg) {
 export function formatStock(qty, type) {
   if (type === 'liquid') return formatWeight(qty);
   return qty + ' pcs';
+}
+
+// Local calendar date (YYYY-MM-DD) of a timestamp — the staff member's day,
+// not the UTC date.
+export function localDay(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// Why staff used stock in the field (checkout_usage.reason). Mirrors the
+// CHECK constraint in migrations/016_stock_reconciliation.sql.
+export const USAGE_REASONS = {
+  customer_service: 'Customer service',
+  installation: 'Installation',
+  other: 'Other work',
+};
+
+// How an admin classifies an Issued ≠ Returned + Used difference
+// (checkout_items.discrepancy_type). Mirrors migration 016.
+export const DISCREPANCY_TYPES = {
+  wastage: 'Wastage / spillage',
+  loss: 'Lost',
+  staff_shortage: 'Staff shortage (staff responsible)',
+  counting_error: 'Counting / weighing error',
+  excess_return: 'Excess returned',
+  other: 'Other',
+};
+
+// Machines (dispensers, diffusers): unit categories that are not refills or
+// oils. Same rule as the SQL in migration 016 (is_machine_product).
+export function isMachineCategory(category) {
+  if (!category || category.type === 'liquid') return false;
+  return !/refill|oil/i.test(category.name || '');
 }
 
 // "Current Stock": Total Stock (current_stock) minus the manually entered
