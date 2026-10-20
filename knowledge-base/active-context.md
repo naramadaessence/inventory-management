@@ -11,7 +11,7 @@
 
 ## Pending User Action
 - **Rotate the production admin password** (ISSUE-010) — it was in the public repo.
-- Supabase → Settings → Integrations → GitHub: turn **"Deploy to production" OFF** (ISSUE-011).
+- ~~Supabase GitHub integration "Deploy to production" OFF~~ — done by owner 2026-10-20.
 - Paste `VITE_SUPABASE_ANON_KEY` into Cloudflare env vars (agents do not enter keys).
 - Answer: what should Products "Sell Qty" / "Installed Qty" mean? (ISSUE-012)
 - Run the read-only checks in ISSUE-013 and the migration-state queries below on the live DB, and record which of 010–014 are applied:
