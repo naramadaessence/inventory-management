@@ -7,7 +7,7 @@
 - [x] Cloudflare Pages project `narmada-inventory` live at https://narmada-inventory.pages.dev (Git-connected, branch main). Login page renders, no console errors.
 - [x] Deploy Edge Function `create-user` to project `jnfykpicpttvnihgsckt` — done 2026-10-20 via CLI (v2, ACTIVE, verify_jwt false). Verified: OPTIONS from localhost → 204 + ACAO; POST without auth → 401 "Unauthorized"; bogus token → 401 "Invalid token".
 - [x] `ALLOWED_ORIGINS=https://narmada-inventory.pages.dev` set; preflight from that origin verified. Add a custom domain here too if one is attached later.
-- [x] Smoke test 2026-10-20: admin login and Create User confirmed working by the owner. Record/edit/delete sale not yet re-tested on the new host.
+- [x] Smoke test 2026-10-20: admin login, Create User, and record → edit → delete sale all confirmed on production.
 
 ## Pending User Action
 - ~~Rotate the production admin password (ISSUE-010)~~ — done by owner 2026-10-20. Consider making the GitHub repo private.
@@ -15,7 +15,7 @@
 - Paste `VITE_SUPABASE_ANON_KEY` into Cloudflare env vars (agents do not enter keys).
 - Answer: what should Products "Sell Qty" / "Installed Qty" mean? (ISSUE-012)
 - ~~Run migration 015~~ — done 2026-10-20, verified (one record_sale + one update_sale). Production is now at migration 015.
-- Re-test record / edit / delete of a small sale on https://narmada-inventory.pages.dev (not yet done after the move and 015).
+- ~~Sales re-test~~ — done 2026-10-20 on production as admin: Bill #132 (walk-in, PLEASURE REFILL, pending ₹0) recorded ×1 → edited ×2 → deleted. Stock 24 → 23 → 22 → 24; sales totals back to ₹200 / 1; Inventory Log shows sale, sale_edit_restore, sale_edit, sale_delete rows. Pending/₹0 was used so no payment_followups correction rows were created.
 - ~~Live-DB migration checks~~ — done 2026-10-20: 010–014 all applied in production (sale_type, sell_qty/installed_qty, 010 RPCs, amc_day 1–31, no followup amount check); duplicate record_sale/update_sale overloads found → migration 015. Queries kept for reference:
   ```sql
   select table_name, column_name from information_schema.columns where table_schema='public' and ((table_name='sales' and column_name='sale_type') or (table_name='products' and column_name in ('sell_qty','installed_qty')));
