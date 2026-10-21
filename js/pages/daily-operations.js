@@ -111,7 +111,15 @@ function confirmModal(title, messageHTML, confirmLabel, btnClass = 'btn-danger')
   });
 }
 
-async function renderSessionsList(body, isAdmin) {
+// Open on the tab that needs attention unless a caller asks for a specific one.
+function defaultTab(counts, isAdmin) {
+  const order = isAdmin
+    ? ['pending_issue', 'pending_approval', 'checked_out']
+    : ['checked_out', 'pending_issue', 'pending_approval'];
+  return order.find(tab => counts[tab] > 0) || 'checked_out';
+}
+
+async function renderSessionsList(body, isAdmin, preferredTab) {
   const { data: sessions } = await db.fetchAllPaged('checkout_sessions', { orderBy: ['created_at', 'desc'] });
   const { data: profiles } = await db.getAll('profiles');
   const { data: items } = await db.fetchAllPaged('checkout_items');
@@ -126,7 +134,7 @@ async function renderSessionsList(body, isAdmin) {
   body.innerHTML = `
     <div class="tabs">
       <button class="tab-btn" data-tab="pending_issue">Pending Issue (${counts.pending_issue})</button>
-      <button class="tab-btn active" data-tab="checked_out">In Field (${counts.checked_out})</button>
+      <button class="tab-btn" data-tab="checked_out">In Field (${counts.checked_out})</button>
       <button class="tab-btn" data-tab="pending_approval">Pending Return (${counts.pending_approval})</button>
       <button class="tab-btn" data-tab="checked_in">Completed</button>
       <button class="tab-btn" data-tab="flagged">Flagged (${counts.flagged})</button>
@@ -137,7 +145,8 @@ async function renderSessionsList(body, isAdmin) {
     </div>` : ''}
     <div id="sessions-list"></div>`;
 
-  let activeTab = 'checked_out';
+  let activeTab = preferredTab || defaultTab(counts, isAdmin);
+  body.querySelector(`.tab-btn[data-tab="${activeTab}"]`)?.classList.add('active');
 
   function renderTab() {
     const filtered = vis.filter(s => s.status === activeTab);
@@ -328,7 +337,7 @@ async function openCheckoutModal(body, isAdmin) {
 
       showToast('Stock issued successfully', 'success');
       close();
-      await renderSessionsList(body, isAdmin);
+      await renderSessionsList(body, isAdmin, 'checked_out');
       return;
     }
 
@@ -347,7 +356,7 @@ async function openCheckoutModal(body, isAdmin) {
 
     showToast('Stock request submitted — waiting for admin approval', 'success');
     close();
-    await renderSessionsList(body, isAdmin);
+    await renderSessionsList(body, isAdmin, 'pending_issue');
   };
 }
 
@@ -582,7 +591,7 @@ async function openCheckinModal(sessionId, body, isAdmin) {
     if (result.data?.has_discrepancy) showToast('Return submitted with a difference — admin must review it', 'warning');
     else showToast('Return submitted — waiting for admin approval', 'success');
     close();
-    await renderSessionsList(body, isAdmin);
+    await renderSessionsList(body, isAdmin, 'pending_approval');
   }));
 }
 

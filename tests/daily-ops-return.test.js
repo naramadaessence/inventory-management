@@ -222,4 +222,31 @@ describe('daily operations returns', () => {
     expect(cells.slice(1, 5)).toEqual(['1.000 kg', '0.400 kg', '—', '—']);
     expect(currentModal().querySelector('.badge-status.red')).toBeNull();
   });
+
+  describe('which tab opens', () => {
+    const activeTab = () => document.querySelector('.tab-btn.active')?.dataset.tab;
+
+    it('opens on Pending Issue for an admin when a staff request is waiting', async () => {
+      await db.insert('checkout_sessions', { seller_id: 'seller-1', status: 'pending_issue', checkout_time: new Date().toISOString() });
+      await renderPage();
+      expect(activeTab()).toBe('pending_issue');
+    });
+
+    it('opens on In Field for a staff member who has stock out', async () => {
+      await issue([[OIL, 1]]);
+      const { data: profiles } = await db.getAll('profiles');
+      auth.currentUser = profiles.find(p => p.id === 'seller-1');
+      await renderPage();
+      expect(activeTab()).toBe('checked_out');
+    });
+
+    it('switches to Pending Return after a return is submitted', async () => {
+      const sessionId = await issue([[OIL, 1]]);
+      const modal = await openSubmitReturn(sessionId);
+      modal.querySelector('#ci-submit').click();
+      await settle();
+      expect(activeTab()).toBe('pending_approval');
+      expect(sessionRow(sessionId)).not.toBeNull();
+    });
+  });
 });

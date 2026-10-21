@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-10-21 - Client Demo Dry Run: Demo Oil Data in kg, Daily Ops Opens on the Right Tab
+**What**: Full dry run of the client demo script (purchase → request → approve issue → return with usage → matching + mismatch approval → send back validation → stock adjustment → ledger/performance → stock rules → dashboard) on the demo build. Fixed what didn't flow.
+**Why**: Owner is demonstrating the system to the client live.
+**Impact**: Demo mode only for the seed fix; Daily Operations tab selection also applies in production.
+**Files Changed**: `js/supabase.js` (demo seed), `js/pages/daily-operations.js`, `tests/purchases-page.test.js`, `tests/daily-ops-return.test.js`, `.claude/launch.json` (NEW: `demo` dev server for the browser pane)
+**Tests**: `npm test` 90/90 (+3 tab tests); `npm run build` passes. Dry run: every step behaved as designed, 0 console errors, final asset value reconciled.
+**Commit**: see git log
+
+- Demo seed oils were still in grams-era values (5000 "kg" at ₹8/kg) — converted like migration 002 (qty and thresholds ÷1000, price ×1000), e.g. Cool Water 5.000 kg at ₹8,000/kg.
+- Daily Operations now opens on the tab needing attention (admin: Pending Issue → Pending Return → In Field; staff: In Field → their pending), and after a request / issue / return submit it lands on the tab where that session now is.
+- Noted, not changed: product edit button is icon-only (no accessible label); approve modal shows "Matches" twice (difference + status columns); auto title-case turns "3N" into "3n".
+
 ## 2026-10-20 - Stock Reconciliation: Purchases, Usage Entry, Cross-Check, Approvals
 **What**: Client feature request (10 points): purchase entry with rates; daily issue/return with usage entry; automatic Issued − Returned − Used cross-check with tolerance; mismatch alerts; admin approval of discrepancies and stock adjustments; staff-wise daily ledger; product- and fragrance-wise records; full history.
 **Why**: Client needs to see daily per-staff stock differences and control adjustments. Decisions confirmed by the owner are in `stock-reconciliation.md` and `decisions.md`.

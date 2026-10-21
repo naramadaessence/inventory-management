@@ -121,7 +121,7 @@ describe('purchases page', () => {
       supplier: 'Oil House', bill_number: 'OH-9', purchase_date: '2026-10-05', received_by: admin.id,
     });
     const { data: product } = await db.getById('products', 17);
-    expect(product.current_stock).toBe(5002.5);
+    expect(product.current_stock).toBe(7.5);
     expect(rowsText()[0]).toContain('+2.500 kg');
   });
 
