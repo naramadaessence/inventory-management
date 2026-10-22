@@ -219,3 +219,14 @@
 **Workaround**: Set fragrance manually on such products; record their usage as "Other work" rather than "Installation".
 **Fix**: If it matters, add an explicit `is_machine` flag on categories.
 **Regression Test**: `tests/stock-reconciliation.test.js` (machine vs consumable installation)
+---
+
+## ISSUE-019: Resubmitting A Sent-Back Return Erased The Send-Back Reason
+**Status**: Resolved in code; production needs `migrations/017_keep_return_notes.sql`
+**Severity**: Medium
+**Discovered**: 2026-10-22 (5-day demo simulation)
+**Resolved**: 2026-10-22
+**Symptom**: After an admin used Send back ("Return sent back: <reason>") and the staff member resubmitted, the session notes showed only the new note — the send-back reason was gone from the history.
+**Root Cause**: `submit_return` (migration 016 and demo) set `notes` to the submitted note instead of appending.
+**Fix**: Demo `submit_return` and migration 017 append the new note after the existing notes (`concat_ws(E'\n', …)`). Verified with PGlite (143 checks incl. full history across submit → send back → resubmit).
+**Regression Test**: `tests/stock-reconciliation.test.js` (reject_return resubmit), `tests/demo-week.test.js`

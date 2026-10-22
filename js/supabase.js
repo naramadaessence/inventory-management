@@ -906,7 +906,8 @@ const demoRpc = {
       ...session,
       status: 'pending_approval',
       checkin_time: now,
-      notes: String(p_notes || '').trim(),
+      // Keep earlier notes (e.g. "Return sent back: …") so the history survives a resubmit.
+      notes: [session.notes, String(p_notes || '').trim()].filter(Boolean).join('\n'),
       has_discrepancy: hasDiscrepancy,
       updated_at: now,
     };

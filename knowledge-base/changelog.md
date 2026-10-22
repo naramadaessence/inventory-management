@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-10-22 - Demo Week Simulation (?demo=week) + Keep Return Notes History
+**What**: Demo build can load a realistic working week: open the demo with `?demo=week`. Five new accounts (Priya Mehta — admin/manager; Kunal Desai, Neha Joshi, Imran Shaikh, Sonal Trivedi — staff; demo passwords admin123 / seller123) plus the existing demo users run the last 5 working days (Sundays skipped) through the app's own db/RPC functions with the clock set to each day. Also fixes return notes being overwritten on resubmit (ISSUE-019, migration 017).
+**Why**: Owner wants a lived-in system to show the client, using every feature; the simulation surfaced ISSUE-019.
+**Impact**: Demo mode only for the simulation (separate lazy-loaded chunk, refuses to run against Supabase). `submit_return` now appends notes — production needs migration 017.
+**Files Changed**: `js/demo/demo-week.js` (NEW), `js/main.js` (loader), `js/supabase.js` (demo submit_return notes), `migrations/017_keep_return_notes.sql` (NEW), `tests/demo-week.test.js` (NEW), `tests/stock-reconciliation.test.js`, `knowledge-base/*`
+**Tests**: `npm test` 99/99 (9 new demo-week tests: dates, logins, stock = opening + logged movements for every product, every feature used, pending work for today); `npm run build` passes (demo-week is its own 13.5 kB chunk); migration 017 verified with PGlite (143 pass; the 1 remaining failure is a harness artifact that also fails without 017). Browser: loaded `?demo=week`, logged in through the UI as Priya, Kunal, Sonal and Imran and checked each view; 0 console errors.
+**Commit**: see git log
+
+- Features exercised: accounts, parties (AMC, Free-to-Use, purchased), new product + fragrance edit, purchases (9, 3 suppliers), staff requests, approvals, a rejected request, direct issues, returns with all three usage reasons, 4 machine installations, shortage / wastage / excess classifications, send back + resubmit, sales (GST, cash, AMC fixed-rate, staff-recorded, partial), bill edit, bill delete, collections (partial → paid, promised), rental out/return, damage (damaged, lost, expired), stock adjustments (approved, rejected, pending), AMC refill done.
+- Today is left with live alerts: Kunal's pending request, Raj's return with a shortage awaiting approval, Sonal's stock out since yesterday, a pending stock correction, Hotel Rivera's AMC refill due.
+
 ## 2026-10-21 - Client Demo Dry Run: Demo Oil Data in kg, Daily Ops Opens on the Right Tab
 **What**: Full dry run of the client demo script (purchase → request → approve issue → return with usage → matching + mismatch approval → send back validation → stock adjustment → ledger/performance → stock rules → dashboard) on the demo build. Fixed what didn't flow.
 **Why**: Owner is demonstrating the system to the client live.

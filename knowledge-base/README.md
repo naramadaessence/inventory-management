@@ -66,7 +66,7 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 
 ## Setup / Migration Order
 - `supabase-schema.sql` is the base schema, but it has been **edited in place** over time, so it already contains many columns and constraints that later migrations also add (e.g. `sales.sale_type`, `products.sell_qty`/`installed_qty`, `amc_day` 1–31). It does **not** contain the RPC functions; those come from migrations 006, 009, 010, 011 and 012.
-- There is no `001` migration. Migrations `002`–`016` are applied **manually, in numeric order**, through the Supabase SQL editor. There is no migration runner or applied-migrations table. Production state 2026-10-20: 002–016 applied (015 and 016 run and verified by the owner).
+- There is no `001` migration. Migrations `002`–`016` are applied **manually, in numeric order**, through the Supabase SQL editor. There is no migration runner or applied-migrations table. Production state 2026-10-22: 002–016 applied (015 and 016 run and verified by the owner); 017 written 2026-10-22, pending.
 - `002_grams_to_kg.sql` divides liquid quantities by 1000 and is **not re-runnable**: running it twice corrupts liquid stock and prices.
 - `002` and `003` are data migrations from older shapes (they reference the legacy `sales.product_id` / `quantity` / `unit_price` columns, which the current base schema no longer has). > ⚠️ Needs verification: the exact fresh-database path (which of 002/003 to skip) has not been tested end to end.
 - `012` drops the constraint named `payment_followups_nonnegative_amount`, but the base schema still declares an inline `CHECK (amount_collected >= 0)` on `payment_followups` (auto-named differently), so a database built from the current base schema may still reject negative correction rows. > ⚠️ Needs verification against the live DB.
@@ -111,6 +111,7 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 | Categories | Dispensers, Diffusers, Refills, Oils, Room Cream |
 | Tracking Types | Unit (pieces) and Liquid (kg, ₹/kg — since migration 002) |
 | Demo Login (demo mode only) | admin@narmadaessence.com / admin123 |
+| Demo week (demo mode only) | Open the demo with `?demo=week` (e.g. http://localhost:3000/?demo=week) to load 5 simulated working days; extra logins priya@ (admin123), kunal@ / neha@ / imran@ / sonal@ (seller123), all `@narmadaessence.com` |
 | Seller Login (demo mode only) | seller1@narmadaessence.com / seller123 |
 | Test Command | `npm test` |
 | Build Command | `npm run build` |

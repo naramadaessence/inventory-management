@@ -1,7 +1,7 @@
-import { auth, assertProductionConfig } from './supabase.js';
+import { auth, db, assertProductionConfig } from './supabase.js';
 import { initErrorTracking, setErrorUser, reportError } from './error-tracking.js';
 import { installKeyboardShortcuts } from './keyboard-shortcuts.js';
-import { esc } from './utils/helpers.js';
+import { esc, showToast } from './utils/helpers.js';
 import { renderLogin } from './pages/login.js';
 import { renderDashboard } from './pages/dashboard.js';
 import { renderProducts } from './pages/products.js';
@@ -213,6 +213,11 @@ async function init() {
     );
   });
 
+  // Demo build only: ?demo=week replaces the demo data with a simulated working week.
+  if (db.isDemoMode && new URLSearchParams(location.search).get('demo') === 'week') {
+    await loadDemoWeek();
+  }
+
   const user = await auth.getSession();
   if (user) {
     setErrorUser(user);
@@ -220,6 +225,21 @@ async function init() {
   } else {
     renderLogin(app, init);
   }
+}
+
+async function loadDemoWeek() {
+  localStorage.removeItem('narmada_essence_data');
+  localStorage.removeItem('narmada_user');
+  await auth.getSession(); // seeds a fresh demo store
+  try {
+    const { simulateDemoWeek } = await import('./demo/demo-week.js');
+    await simulateDemoWeek({ db, auth });
+    showToast('Demo week loaded. Log in as any demo account.', 'success');
+  } catch (err) {
+    reportError(err, { kind: 'demo-week' });
+    showToast(`Could not load the demo week: ${err.message}`, 'error');
+  }
+  history.replaceState(null, '', location.pathname);
 }
 
 init();

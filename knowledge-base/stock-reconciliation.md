@@ -54,6 +54,12 @@ Shared JS (in `js/utils/helpers.js`): `USAGE_REASONS`, `DISCREPANCY_TYPES` (key 
 ## Production Status
 Migration 016 applied and verified by the owner on 2026-10-20 (11 new columns, 3 RLS tables, single 3-arg `approve_return`, 6 functions, tolerances 0.010 / 0, 79 products pre-filled with a fragrance).
 
+## Migration 017
+If a return is sent back and resubmitted, `submit_return` appends the new note to the existing notes so the "Return sent back: …" reason stays in the history (ISSUE-019). Production: run `migrations/017_keep_return_notes.sql` once.
+
+## Demo Week
+`js/demo/demo-week.js` builds a realistic week in demo mode only (`?demo=week`): every screen's flow is used through the same db/RPC calls, with a simulated clock per day. Useful for client demos and as an end-to-end consistency check (`tests/demo-week.test.js`).
+
 ## Known Gotchas
 - Machine detection is name-based (ISSUE-018): Room Cream / accessories count as machines.
 - Dates in the ledger and "stock still out" alert use the local day (`localDay` in helpers), while `getDateRange` presets use UTC-ish boundaries; early-morning IST entries can fall outside "today".

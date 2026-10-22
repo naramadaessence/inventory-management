@@ -223,8 +223,14 @@ describe('reject_return', () => {
     expect(await rows('checkout_usage', u => u.session_id === sessionId)).toHaveLength(0);
     expect((await product(7)).current_stock).toBe(35);
 
-    // Can be resubmitted.
-    expect((await submit(sessionId, [{ item_id: itemFor(7).id, returned_quantity: 5 }])).error).toBeNull();
+    // Can be resubmitted, and the send-back reason stays in the history.
+    const { error: resubmitError } = await db.rpc('submit_return', {
+      p_session_id: sessionId, p_items: [{ item_id: itemFor(7).id, returned_quantity: 5 }],
+      p_notes: 'Recounted: all 5 back', p_submitted_by: 'seller-1',
+    });
+    expect(resubmitError).toBeNull();
+    const [resubmitted] = await rows('checkout_sessions', s => s.id === sessionId);
+    expect(resubmitted.notes).toBe('Return sent back: Recount the refills\nRecounted: all 5 back');
   });
 });
 

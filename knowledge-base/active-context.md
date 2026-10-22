@@ -1,7 +1,7 @@
 ## Current Status
 **Last Updated**: 2026-10-20
 **Last Agent Session**: Built the client's stock reconciliation request (purchases, usage entry, Issued/Returned/Used cross-check, discrepancy + adjustment approvals, fragrance, staff daily ledger) — see `stock-reconciliation.md`. Migration 016 applied in production. Earlier the same day: moved hosting to Cloudflare Pages + Supabase Edge Function, KB refresh, migrations 015.
-**Test Suite Status**: Pass — `npm test` 87/87 and `npm run build` pass on 2026-10-20.
+**Test Suite Status**: Pass — `npm test` 99/99 and `npm run build` pass on 2026-10-20.
 
 ## In Progress
 - [x] Cloudflare Pages project `narmada-inventory` live at https://narmada-inventory.pages.dev (Git-connected, branch main). Login page renders, no console errors.
@@ -10,6 +10,7 @@
 - [x] Smoke test 2026-10-20: admin login, Create User, and record → edit → delete sale all confirmed on production.
 
 ## Pending User Action
+- Run `migrations/017_keep_return_notes.sql` once in the Supabase SQL editor (keeps the send-back reason when a return is resubmitted, ISSUE-019). Verify: `select pg_get_functiondef('submit_return(integer, jsonb, text, uuid)'::regprocedure) like '%concat_ws%';` → true.
 - ~~Rotate the production admin password (ISSUE-010)~~ — done by owner 2026-10-20. Consider making the GitHub repo private.
 - ~~Supabase GitHub integration "Deploy to production" OFF~~ — done by owner 2026-10-20.
 - Review the pre-filled product fragrances on the Products page (guessed from names; typos carry over, machines/accessories have none).
