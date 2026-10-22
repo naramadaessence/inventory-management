@@ -222,7 +222,7 @@
 ---
 
 ## ISSUE-019: Resubmitting A Sent-Back Return Erased The Send-Back Reason
-**Status**: Resolved in code; production needs `migrations/017_keep_return_notes.sql`
+**Status**: Resolved (migration 017 applied in production 2026-10-22; verified `fixed = true`)
 **Severity**: Medium
 **Discovered**: 2026-10-22 (5-day demo simulation)
 **Resolved**: 2026-10-22

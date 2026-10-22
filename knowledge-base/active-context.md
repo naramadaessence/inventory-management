@@ -10,7 +10,7 @@
 - [x] Smoke test 2026-10-20: admin login, Create User, and record → edit → delete sale all confirmed on production.
 
 ## Pending User Action
-- Run `migrations/017_keep_return_notes.sql` once in the Supabase SQL editor (keeps the send-back reason when a return is resubmitted, ISSUE-019). Verify: `select pg_get_functiondef('submit_return(integer, jsonb, text, uuid)'::regprocedure) like '%concat_ws%';` → true.
+- ~~Run migration 017~~ — done by owner 2026-10-22, verified (`fixed = true`). Production is at migration 017.
 - ~~Rotate the production admin password (ISSUE-010)~~ — done by owner 2026-10-20. Consider making the GitHub repo private.
 - ~~Supabase GitHub integration "Deploy to production" OFF~~ — done by owner 2026-10-20.
 - Review the pre-filled product fragrances on the Products page (guessed from names; typos carry over, machines/accessories have none).
