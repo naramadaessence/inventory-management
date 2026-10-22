@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-10-22 - Staff Daily Ledger Fixes Found In The Demo Week
+**What**: (1) Staff Daily Ledger crashed (blank report) when a staff member had a numeric id; (2) the ledger counted **rejected** stock requests as issued stock.
+**Why**: Found while showing the `?demo=week` ledger. (1) demo `insert` replaced caller-supplied ids with its counter, so demo accounts created via Settings or the demo week got numeric ids and `a.staffId.localeCompare` threw; (2) rejected requests also have status `flagged`, and the ledger included every flagged session (Imran's rejected 60-piece request showed as "68 pcs issued").
+**Impact**: (1) demo mode only — demo `insert` now keeps a caller-supplied text id (like Supabase auth UUIDs), so demo accounts behave like real ones. (2) also production: ledger now counts a flagged session only if a return was submitted (`checkin_time` set); rejected requests no longer inflate Issued.
+**Files Changed**: `js/supabase.js`, `js/demo/demo-week.js`, `js/pages/reports.js`, `tests/demo-week.test.js`
+**Tests**: `npm test` 101/101 (+2: ledger builds for the week with a staff filter on a new account and Imran's day-1 Green Apple = 8 issued; accounts keep text ids). Both fail without their fix. `npm run build` passes. Browser: ledger renders for all 5 staff with 0 console errors.
+**Commit**: see git log
+
 ## 2026-10-22 - Demo Week Simulation (?demo=week) + Keep Return Notes History
 **What**: Demo build can load a realistic working week: open the demo with `?demo=week`. Five new accounts (Priya Mehta — admin/manager; Kunal Desai, Neha Joshi, Imran Shaikh, Sonal Trivedi — staff; demo passwords admin123 / seller123) plus the existing demo users run the last 5 working days (Sundays skipped) through the app's own db/RPC functions with the clock set to each day. Also fixes return notes being overwritten on resubmit (ISSUE-019, migration 017).
 **Why**: Owner wants a lived-in system to show the client, using every feature; the simulation surfaced ISSUE-019.

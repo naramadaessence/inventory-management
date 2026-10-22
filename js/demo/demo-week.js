@@ -65,7 +65,7 @@ export async function simulateDemoWeek({ db, auth, today = new Date() }) {
   const dateOf = i => localDate(days[i]);
 
   const profiles = {};
-  // Demo mode assigns its own ids to new rows, so the accounts' ids are known only after they are created.
+  // Filled in once the accounts exist (an account created earlier keeps its own id).
   let PRIYA, KUNAL, NEHA, IMRAN, SONAL;
   const as = (userId) => { auth.currentUser = profiles[userId]; tick(); };
 
@@ -212,10 +212,10 @@ export async function simulateDemoWeek({ db, auth, today = new Date() }) {
     as(ADMIN);
     // Settings → Users → Create Seller Account (demo mode inserts the profile).
     const accountIds = {};
-    for (const { id: key, ...account } of DEMO_WEEK_ACCOUNTS) {
+    for (const account of DEMO_WEEK_ACCOUNTS) {
       const created = existing.find(p => p.email === account.email) || await insert('profiles', { ...account, is_active: true });
       profiles[created.id] = created;
-      accountIds[key] = created.id;
+      accountIds[account.id] = created.id;
     }
     ({ 'demo-priya': PRIYA, 'demo-kunal': KUNAL, 'demo-neha': NEHA, 'demo-imran': IMRAN, 'demo-sonal': SONAL } = accountIds);
 

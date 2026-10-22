@@ -185,10 +185,12 @@ const demo = {
   insert(table, record) {
     const store = getStore();
     const nextId = store._nextId[table] || 1;
-    const newRecord = { ...record, id: nextId, created_at: new Date().toISOString() };
+    // A caller-supplied text id (profiles, like Supabase auth UUIDs) is kept; otherwise use the counter.
+    const keepId = typeof record.id === 'string' && record.id !== '';
+    const newRecord = { ...record, id: keepId ? record.id : nextId, created_at: new Date().toISOString() };
     if (!Array.isArray(store[table])) store[table] = [];
     store[table].push(newRecord);
-    store._nextId[table] = nextId + 1;
+    if (!keepId) store._nextId[table] = nextId + 1;
     saveStore(store);
     return newRecord;
   },

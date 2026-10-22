@@ -391,6 +391,8 @@ export function buildStaffLedger({ sessions, checkoutItems, usage = [], prodMap,
   const sessionInfo = new Map();
   sessions.forEach(s => {
     if (!LEDGER_SESSION_STATUSES.includes(s.status)) return;
+    // "flagged" is also a rejected request (never issued, no return): only count flagged returns.
+    if (s.status === 'flagged' && !s.checkin_time) return;
     if (staffId && s.seller_id !== staffId) return;
     const day = localDay(s.checkout_time || s.created_at);
     if (!day || day < startDate || day > endDate) return;

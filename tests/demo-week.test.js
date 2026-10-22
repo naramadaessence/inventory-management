@@ -4,6 +4,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { db, auth } from '../js/supabase.js';
 import { simulateDemoWeek, lastWorkingDays, DEMO_WEEK_ACCOUNTS } from '../js/demo/demo-week.js';
+import { buildStaffLedger } from '../js/pages/reports.js';
 
 const TODAY = new Date(2026, 9, 22, 15, 0); // Thursday 22 Oct 2026, 3 pm
 const all = async table => (await db.getAll(table)).data;
@@ -103,6 +104,34 @@ describe('demo week simulation', () => {
     const products = await all('products');
     expect(products.find(p => p.name === 'Oud Royale Refill')).toBeTruthy();
     expect(products.find(p => p.id === 20).fragrance).toBe('White Musk 3N');
+  });
+
+  it('builds the Staff Daily Ledger for the week, including a staff filter on a new account', async () => {
+    const data = {
+      sessions: await all('checkout_sessions'),
+      checkoutItems: await all('checkout_items'),
+      usage: await all('checkout_usage'),
+      prodMap: Object.fromEntries((await all('products')).map(p => [p.id, p])),
+      profiles: await all('profiles'),
+      parties: await all('parties'),
+      startDate: result.days[0],
+      endDate: result.days[4],
+    };
+    const rows = buildStaffLedger(data);
+    expect(new Set(rows.map(r => r.staffName))).toEqual(new Set(['Raj Patel', 'Kunal Desai', 'Neha Joshi', 'Imran Shaikh', 'Sonal Trivedi']));
+    // Imran's rejected request for 60 Green Apple never left the warehouse; only the 8 issued count.
+    const imranDay1 = buildStaffLedger({ ...data, staffId: 'demo-imran' })
+      .find(r => r.day === result.days[0] && /Green Apple/.test(r.label));
+    expect(imranDay1.issued).toBe(8);
+
+    const kunal = buildStaffLedger({ ...data, staffId: 'demo-kunal' });
+    expect(kunal.length).toBeGreaterThan(0);
+    expect(new Set(kunal.map(r => r.staffName))).toEqual(new Set(['Kunal Desai']));
+  });
+
+  it('keeps the text ids of accounts it creates, like real logins', async () => {
+    const ids = (await all('profiles')).map(p => p.id);
+    for (const account of DEMO_WEEK_ACCOUNTS) expect(ids).toContain(account.id);
   });
 
   it('refuses to run outside demo mode', async () => {
