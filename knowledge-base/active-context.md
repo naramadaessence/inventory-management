@@ -28,7 +28,7 @@
 - Optional: delete the Vercel project now that Cloudflare is live; tell staff the new URL.
 
 ## Next Steps
-0. Help centre (2026-11-01): uncommitted until the owner reviews it. Owner decisions waiting: ISSUE-020 (inactive users can log in — High), ISSUE-021 (seller Add Party vs RLS — check live `pg_policies`), ISSUE-023 (how sellers should record field sales). When any screen changes, update its guide and re-shoot (`help-centre.md`).
+0. Help centre (2026-11-01): live in production (commit `c2ea460`, Cloudflare deploy verified: Help chunk and screenshots served). Owner decisions waiting: ISSUE-020 (inactive users can log in — High), ISSUE-021 (seller Add Party vs RLS — check live `pg_policies`), ISSUE-023 (how sellers should record field sales). When any screen changes, update its guide and re-shoot (`help-centre.md`).
 1. Smoke test the reconciliation flows on production after deploy (purchase, issue → return with usage → mismatch approval, adjustment request → approve).
 2. No open issues from the 2026-10-20 session.
 3. Done 2026-10-20: Dashboard low-stock alerts use Current Stock via `availableStock()`.
