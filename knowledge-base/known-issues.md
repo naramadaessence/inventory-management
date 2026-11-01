@@ -230,3 +230,83 @@
 **Root Cause**: `submit_return` (migration 016 and demo) set `notes` to the submitted note instead of appending.
 **Fix**: Demo `submit_return` and migration 017 append the new note after the existing notes (`concat_ws(E'\n', …)`). Verified with PGlite (143 checks incl. full history across submit → send back → resubmit).
 **Regression Test**: `tests/stock-reconciliation.test.js` (reject_return resubmit), `tests/demo-week.test.js`
+---
+
+## ISSUE-020: Inactive Users Can Still Log In
+**Status**: Open
+**Severity**: High
+**Discovered**: 2026-11-01 (writing the Help guides)
+**Symptom**: Settings → Users → Deactivate marks a user Inactive, but they can still sign in and use the app. Inactive only hides them from the seller list when issuing stock and from Collections.
+**Root Cause**: `auth.login` in `js/supabase.js` (production branch) signs in with Supabase Auth and loads the profile without checking `profiles.is_active`; the demo branch doesn't check it either. RLS policies don't check it.
+**Workaround**: To block someone today, change their password or remove them in the Supabase dashboard (Authentication → Users). The Help guide `settings-deactivate-user` warns about this.
+**Fix**:
+**Regression Test**:
+---
+
+## ISSUE-021: Sellers See "Add Party" But The Base Schema Only Lets Admins Insert Parties
+**Status**: Open — needs a check on the live database
+**Severity**: Medium
+**Discovered**: 2026-11-01
+**Symptom**: Expected in production: a seller fills in Add Party and gets "Failed to add party". Works in demo mode.
+**Root Cause**: `supabase-schema.sql` has only `"Admins manage parties" FOR ALL USING (is_admin())` and `"Sellers read parties" FOR SELECT`; no migration adds a seller insert policy. `js/pages/parties.js` shows **Add Party** to every role.
+**Workaround**: Admin adds the party. The Help guide `parties-add-party` tells sellers to ask an admin if they see the error.
+**Fix**: Decide: either hide the button for sellers or add a seller INSERT policy. Verify the live policies first: `select policyname, cmd from pg_policies where tablename = 'parties';`
+**Regression Test**:
+---
+
+## ISSUE-022: Daily Operations And Sales Check Total Stock, Not Current Stock
+**Status**: Open
+**Severity**: Medium
+**Discovered**: 2026-11-01
+**Symptom**: Machines counted in Sell Qty or installed at customers (Installed Qty) can still be requested, issued and billed. The Products page and low-stock alerts use Current Stock (Total − Sell − Installed); Daily Operations and Sales use `products.current_stock` (= Total Stock).
+**Root Cause**: `js/pages/daily-operations.js` (stock checks around lines 269–383) and the sale form/RPCs compare against `current_stock`, not `availableStock()`.
+**Workaround**: Admins check the Products page before approving machine requests. Explained to users in Help `products-faq-different-stock`.
+**Fix**:
+**Regression Test**:
+---
+
+## ISSUE-023: Possible Double Stock Deduction When A Seller Bills Stock Issued To Them
+**Status**: Open — business process question for the owner
+**Severity**: Medium (unverified)
+**Discovered**: 2026-11-01
+**Symptom**: Not observed yet. `record_sale` always deducts warehouse stock. If a seller takes stock out (the issue already deducted it), sells it, and records the bill on Record Sale, the same pieces may leave stock twice — unless the process expects sellers to report such sales only as "Customer service" usage on the return.
+**Root Cause**: The issue/return flow and the sale flow both move stock and are not linked.
+**Workaround**: Ask the owner how sellers are meant to record field sales. The Help guides describe each screen as it behaves and do not explain how the two flows combine.
+**Fix**:
+**Regression Test**:
+---
+
+## ISSUE-024: Several Pages Overflow Sideways On Phones
+**Status**: Open
+**Severity**: Medium
+**Discovered**: 2026-11-01
+**Symptom**: At 390 px width, Daily Operations (~579 px wide), Parties (~918 px), Sales, Collections, Products and Reports are wider than the screen; header buttons such as **Request Stock**, **Record Sale**, **Log Visit**, **Add Party** sit off-screen to the right and windows open off-centre. The phone menu also can't be closed without choosing a page (no backdrop; the open menu covers the menu button).
+**Root Cause**: Wide tables without a scroll container that limits page width; page headers don't wrap.
+**Workaround**: Help guides tell sellers to scroll right, and to tap the current page to close the menu.
+**Fix**:
+**Regression Test**:
+---
+
+## ISSUE-025: Smaller Issues Found While Writing The Help Guides
+**Status**: Open
+**Severity**: Low (each)
+**Discovered**: 2026-11-01. Reported by the guide writers from source reading and screenshots; not each re-verified.
+**Symptom / Root Cause** (one line each):
+- Unpaid **walk-in** bills can't be collected: Collections fails with "Party is required for a followup"; only an admin's Edit Bill can settle them.
+- A party name typed but not picked from the list saves the bill as **Walk-in**.
+- An admin-edited "amount received" creates a correction line that ignores money taken at billing time (e.g. ₹2,000 → ₹1,500 logged +₹1,500).
+- AMC refill day 29–31 never shows as due in shorter months; overdue refills drop off on the 1st; the 7-day upcoming list doesn't cross into next month.
+- No password reset anywhere in the app (no "forgot password", no password field in Edit User).
+- Products → Categories window says **Liquid (g)** (stock is kg) and blocks duplicates; Settings → Categories says kg and allows duplicates. Changing a category's tracking type switches each product's unit on its next save.
+- Edit Product shows float noise for liquids (e.g. `1.7000000000000002`).
+- Product **Delete** says "cannot be undone" but only deactivates; nothing in the app reactivates it.
+- Rejecting a stock request has no reason box; a rejected request stays in Flagged and keeps adding to the Alerts count.
+- The return form pre-fills Returned = Issued; a seller who forgets to change it reports zero usage.
+- Seller Performance "Sessions" counts pending/rejected requests (the Staff Daily Ledger doesn't). Stock Details "Deployed" repeats the category count on every product row.
+- New Rental's machine list includes refill/oil products whose category name contains "dispenser"/"diffuser"; rentals can't be edited.
+- The Keyboard Shortcuts window omits `g i` and `g l` (both work). Badges say "1 items" / "1 visits". The "Free to Use" below-price warning shows as a green success message.
+- Access Denied pages keep the previous page's title in the header.
+- `architecture.md` / `stock-workflows.md` still say editing Total Stock changes it directly; the app now sends it for approval.
+**Workaround**: Documented in the relevant Help guides where users would hit them.
+**Fix**:
+**Regression Test**:

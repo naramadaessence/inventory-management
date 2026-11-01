@@ -105,3 +105,16 @@
 - New Manager role / maker-checker: owner chose "any admin" (requester and approver are recorded).
 **Consequences**: Production needs migration 016 before the new screens work. The return Flag button (which silently dropped returned stock) is replaced by Send back. Reports can now show shortages per staff per day. Any future stock-changing flow must still go through an RPC and the audit log.
 **Superseded By**:
+
+## Decision: In-App Help Centre With Content As Data And Generated Screenshots
+**Date**: 2026-11-01
+**Status**: Accepted
+**Context**: Owner wanted a tutorial for every action with screenshots, searchable and available to everyone: "if someone has a question how do I do this, they find the answer here". Users are sellers in the field (phones) and admins in the warehouse.
+**Decision**: A Help page inside the app (`help-centre.md`) instead of an external document. Guides are plain JS data files per topic (`js/help/sections/`), rendered and searched client-side with a small custom scorer; the page module is lazy-loaded. Screenshots are WebP files in `public/help/`, generated from the demo build with `?demo=week` data by a headless-Edge harness kept in `scripts/help-screenshots/`. Six writer agents drafted one topic each against a shared style guide (vocabulary, format, anchor ids).
+**Alternatives Considered**:
+- External doc (Google Doc / PDF): not searchable in context, goes stale, sellers wouldn't find it. Rejected by the owner.
+- Markdown files + a markdown/search library: adds dependencies for little gain; structured blocks give a consistent layout and testable links.
+- Screenshots of production: would expose real parties and money; demo data is realistic and reproducible.
+- puppeteer-core as a devDependency: the harness is run rarely; documented as `npm i --no-save` instead.
+**Consequences**: Every UI change should update the matching guide and re-shoot its screenshots (no test can detect a guide that no longer matches the screen). `public/help` adds ~4.8 MB to the deploy, loaded lazily per image. Content integrity (links, images, anchors, roles) is test-enforced.
+**Superseded By**:

@@ -49,6 +49,7 @@
 - `tests/purchases-page.test.js`, `tests/daily-ops-return.test.js`, `tests/products-adjustments.test.js`, `tests/reports-ledger.test.js`, `tests/dashboard-reconciliation.test.js` — page tests rendering into happy-dom against the demo store and driving the DOM.
 - Production SQL for 016 was verified with PGlite (143 checks) using a throwaway script in the session scratchpad; it is not part of `npm test`.
 - `tests/demo-week.test.js` runs the `?demo=week` simulation for a pinned Thursday and checks dates, logins, per-product stock conservation (stock = opening + Σ inventory_transactions), feature coverage and the pending state left for "today".
+- `tests/help-page.test.js` — Help centre: content integrity (sections, anchor ids, unique ids, roles, page ids, every `[[link]]`/`related` resolves, every screenshot file exists, no raw HTML), search ranking for common questions, sellers never see admin-only guides, rendering (search → article, context card, topic view, empty search). Uses `resetHelpState()` because Help keeps its state in module memory.
 - `tests/create-user-function.test.js` (`// @vitest-environment node`) tests `supabase/functions/create-user/handler.js` with an injected fake `createClient` and env getter: CORS, method, auth, admin role, validation, Supabase error passthrough, success, rate limit.
 
 ## Known Flaky Tests

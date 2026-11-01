@@ -1,7 +1,7 @@
 ## Current Status
-**Last Updated**: 2026-10-20
-**Last Agent Session**: Built the client's stock reconciliation request (purchases, usage entry, Issued/Returned/Used cross-check, discrepancy + adjustment approvals, fragrance, staff daily ledger) — see `stock-reconciliation.md`. Migration 016 applied in production. Earlier the same day: moved hosting to Cloudflare Pages + Supabase Edge Function, KB refresh, migrations 015.
-**Test Suite Status**: Pass — `npm test` 99/99 and `npm run build` pass on 2026-10-20.
+**Last Updated**: 2026-11-01
+**Last Agent Session**: Built the in-app Help centre (161 guides, 166 screenshots, search) — see `help-centre.md`. Also fixed the sidebar menu button styling. Logged ISSUE-020 – ISSUE-025 found while writing the guides.
+**Test Suite Status**: Pass — `npm test` 126/126 and `npm run build` pass on 2026-11-01.
 
 ## In Progress
 - [x] Cloudflare Pages project `narmada-inventory` live at https://narmada-inventory.pages.dev (Git-connected, branch main). Login page renders, no console errors.
@@ -28,6 +28,7 @@
 - Optional: delete the Vercel project now that Cloudflare is live; tell staff the new URL.
 
 ## Next Steps
+0. Help centre (2026-11-01): uncommitted until the owner reviews it. Owner decisions waiting: ISSUE-020 (inactive users can log in — High), ISSUE-021 (seller Add Party vs RLS — check live `pg_policies`), ISSUE-023 (how sellers should record field sales). When any screen changes, update its guide and re-shoot (`help-centre.md`).
 1. Smoke test the reconciliation flows on production after deploy (purchase, issue → return with usage → mismatch approval, adjustment request → approve).
 2. No open issues from the 2026-10-20 session.
 3. Done 2026-10-20: Dashboard low-stock alerts use Current Stock via `availableStock()`.

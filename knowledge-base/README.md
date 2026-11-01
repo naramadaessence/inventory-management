@@ -59,7 +59,11 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 │       ├── inventory-log.js    # Paginated audit trail
 │       ├── reports.js          # Date-range reports + Chart.js charts + Staff Daily Ledger
 │       ├── purchases.js        # Purchase entry, supplier/product/fragrance totals, CSV
-│       └── settings.js         # Users, categories, stock rules (tolerances)
+│       ├── settings.js         # Users, categories, stock rules (tolerances)
+│       └── help.js             # In-app Help centre (lazy-loaded): search, topics, guides
+│   └── help/                   # Help content: index.js (registry + search), sections/*.js (guides)
+├── public/help/                # Help screenshots (WebP, generated — see help-centre.md)
+├── scripts/help-screenshots/   # Headless-Edge screenshot harness + per-topic specs
 ├── dist/                       # Build output (gitignored)
 └── knowledge-base/             # This folder
 ```
@@ -86,6 +90,7 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 | 10 | sales-billing.md | Sales, bills, sale_items, edit/delete behavior |
 | 11 | deployment.md | Hosting, Edge Function deploy, env vars, Supabase GitHub integration risk |
 | 12 | stock-reconciliation.md | Purchases, usage entry, Issued/Returned/Used cross-check, discrepancy + adjustment approvals, fragrance |
+| 13 | help-centre.md | In-app Help page: guide format, search, screenshot harness, keeping guides in sync with the UI |
 
 ## Critical Rules
 - **Demo mode**: App works fully without Supabase via localStorage. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` env vars for production. Production builds hard-fail if env vars are missing (no silent fallback).
@@ -93,10 +98,11 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 - **Stock consistency**: Every stock change (checkout, checkin, sale, rental, damage, purchase, approved adjustment, installation) creates a corresponding `inventory_transactions` entry for full audit trail.
 - **Atomic stock writes**: All stock-mutating flows go through intent-specific Postgres RPCs (`record_sale`, `update_sale`, `delete_sale`, `approve_issue`, `approve_return`, `admin_issue_stock`, `record_stock_intake`, `record_damage_loss`, `create_rental`, `return_rental`, `set_product_stock`). Never update `products.current_stock` directly from browser code.
 - **Pagination**: Aggregations over high-volume tables use `db.fetchAllPaged()` to avoid silent 1000-row truncation. Display lists use `limit:N` or true server-side pagination.
-- **Role-based access**: Admin sees all pages. Seller nav is Dashboard, Daily Operations, Record Sale, Collections, Parties; sellers see only their own sessions, sales and followups (RLS-enforced).
+- **Role-based access**: Admin sees all pages. Seller nav is Dashboard, Daily Operations, Record Sale, Collections, Parties, Help (Help is in both navs); sellers see only their own sessions, sales and followups (RLS-enforced).
 - **User creation**: Production accounts are created only through the `create-user` Supabase Edge Function (admin JWT + role check inside the function, service role key from Supabase's built-in env, CORS allow-list from the `ALLOWED_ORIGINS` secret, best-effort 5 req/IP/min). Never create users by raw SQL insert into `auth.users`.
 - **Input validation**: All forms validate on client side. Supabase RLS enforces on server side.
 - **Soft deletes**: Products are deactivated (`is_active: false`), never hard-deleted.
+- **Help guides**: When you change a screen, update its guide in `js/help/sections/` and re-shoot its screenshots (`help-centre.md`).
 - **Tests/build**: Run `npm test` for the full Vitest suite. Run `npm run build` for production bundle verification.
 
 ## Quick Facts

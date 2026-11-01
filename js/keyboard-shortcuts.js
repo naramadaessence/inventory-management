@@ -11,6 +11,7 @@
 //   g u            — Go to Purchases (admin)
 //   g s            — Go to Sales
 //   g c            — Go to Collections
+//   g h            — Go to Help
 //   n              — New item on the current page (clicks the page's primary action button)
 //   /              — Focus the search/filter input on the current page (if any)
 
@@ -24,6 +25,7 @@ const SHORTCUTS = [
   { keys: 'g s', label: 'Go to Sales' },
   { keys: 'g c', label: 'Go to Collections' },
   { keys: 'g r', label: 'Go to Reports (admin)' },
+  { keys: 'g h', label: 'Go to Help' },
   { keys: 'n', label: 'New item on the current page' },
   { keys: '/', label: 'Focus search / filter on the current page' },
   { keys: 'Esc', label: 'Close modal' },
@@ -38,6 +40,7 @@ const NAV_MAP = {
   r: 'reports',
   i: 'inventory-log',
   l: 'damage-loss', // 'l' for loss
+  h: 'help',
 };
 
 function isTypingInForm(target) {

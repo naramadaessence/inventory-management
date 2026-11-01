@@ -42,6 +42,7 @@ const adminNav = [
   { id: 'reports', icon: 'fa-chart-line', label: 'Reports' },
   { section: 'System' },
   { id: 'settings', icon: 'fa-gear', label: 'Settings' },
+  { id: 'help', icon: 'fa-circle-question', label: 'Help' },
 ];
 
 const sellerNav = [
@@ -53,6 +54,8 @@ const sellerNav = [
   { section: 'Business' },
   { id: 'collections', icon: 'fa-money-bill-wave', label: 'Collections' },
   { id: 'parties', icon: 'fa-users', label: 'Parties' },
+  { section: 'Support' },
+  { id: 'help', icon: 'fa-circle-question', label: 'Help' },
 ];
 
 // ============================================
@@ -141,6 +144,7 @@ function renderShell() {
 // PAGE ROUTER
 // ============================================
 function navigateTo(page) {
+  const previousPage = currentPage;
   currentPage = page;
 
   // Update active nav (visual + ARIA)
@@ -171,6 +175,8 @@ function navigateTo(page) {
     'inventory-log': () => renderInventoryLog(body, header),
     'reports': () => renderReports(body, header),
     'settings': () => renderSettings(body, header),
+    // Loaded on demand: the guide text is large and most visits never open Help.
+    'help': () => import('./pages/help.js').then(m => m.renderHelp(body, header, { from: previousPage })),
   };
 
   if (pages[page]) {
