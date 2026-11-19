@@ -32,6 +32,8 @@ export const shots = [
     },
     target: '.ledger-staff' },
   { name: 'reports-staff-ledger-in-field', login: 'admin', page: 'reports', run: ledgerFor('Sonal'), target: '.ledger-staff' },
+  // Neha is out today with "Any Dispenser Refill × 6"; Imran's Any return (day 4) is split per product.
+  { name: 'reports-staff-ledger-any', login: 'admin', page: 'reports', run: ledgerFor('Neha'), target: '.ledger-staff' },
   { name: 'reports-staff-ledger-fragrance', login: 'admin', page: 'reports',
     run: async (h) => { await tab('ledger')(h); await h.click('#ledger-group-fragrance'); await h.wait(300); } },
   { name: 'reports-staff-ledger-export', login: 'admin', page: 'reports',

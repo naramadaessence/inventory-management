@@ -1,7 +1,14 @@
 ## Current Status
-**Last Updated**: 2026-11-01
-**Last Agent Session**: Built the in-app Help centre (161 guides, 166 screenshots, search) — see `help-centre.md`. Also fixed the sidebar menu button styling. Logged ISSUE-020 – ISSUE-025 found while writing the guides.
-**Test Suite Status**: Pass — `npm test` 126/126 and `npm run build` pass on 2026-11-01.
+**Last Updated**: 2026-11-19
+**Last Agent Session**: "Any <category>" issue lines (types named on return), bills from field stock, new Issue/Request Stock window, Help guides + screenshots — see `category-issue.md` and the 2026-11-19 changelog entry. Migration 018 run in production by the owner (final file). **Not committed or deployed yet.**
+**Test Suite Status**: Pass — `npm test` 189/189 and `npm run build` pass on 2026-11-19. Migration 018 PGlite harness 156/156 (session scratchpad, not in repo).
+
+## Next Steps (2026-11-19 feature)
+1. Owner: run the three read-only verification queries at the bottom of migration 018 (expect 4 columns, one 11-arg `record_sale`, 0 holds).
+2. Commit, push, let Cloudflare deploy; then smoke test on production: admin issues "Any Dispenser Refill" to a staff member → field bill from that stock → return naming every piece → approve; check stock per product and that the hold disappears.
+3. Tell staff: goods they carry must be billed with **Stock source: Field stock** (otherwise stock comes off twice).
+4. Small UI notes from the Help agent (not fixed): "1 pcs" singular everywhere (`formatStock`); seller Low stock window shows "Insufficient stock for X" without numbers (red line in the form has them); kg line over stock shows a negative "after" value; locked field-bill quantity boxes are disabled but look normal.
+5. Owner decisions waiting: ISSUE-026 (drop sellers' old UPDATE policies), ISSUE-024 (phone overflow, likely `.main-content { min-width: 0 }`).
 
 ## In Progress
 - [x] Cloudflare Pages project `narmada-inventory` live at https://narmada-inventory.pages.dev (Git-connected, branch main). Login page renders, no console errors.

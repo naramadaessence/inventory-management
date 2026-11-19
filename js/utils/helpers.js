@@ -176,6 +176,8 @@ export const USAGE_REASONS = {
   customer_service: 'Customer service',
   installation: 'Installation',
   other: 'Other work',
+  // Written only by submit_return from bills linked to the session (migration 018). Display only.
+  sold: 'Sold (bill)',
 };
 
 // How an admin classifies an Issued ≠ Returned + Used difference

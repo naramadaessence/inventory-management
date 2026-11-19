@@ -79,6 +79,49 @@ const seedWrongCollection = (h) => h.eval(async () => {
   });
 });
 
+// Bills from field stock (demo week): Neha is in field today with Any Dispenser
+// Refill × 6 and has billed 1 Black Touch Refill to Sahara Darbar from it.
+// Choose her open session in "Stock source" (the only non-warehouse option for her;
+// for an admin, the option whose text names Neha).
+const chooseFieldSource = async (h, staff) => {
+  await h.eval((staff) => {
+    const sel = document.getElementById('sale-source');
+    const opt = [...sel.options].find(o => o.value && (!staff || o.textContent.includes(staff)));
+    sel.value = opt.value;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  }, staff);
+  await h.wait(200);
+};
+
+// Neha's return for today's session, submitted through the app's own function:
+// the field bill for Black Touch shows as Sold, so its bill is now locked.
+const submitNehaReturn = (h) => h.eval(async () => {
+  const { db, auth } = await import('/js/supabase.js');
+  const { data: sessions } = await db.getAll('checkout_sessions', { eq: { status: 'checked_out', seller_id: 'demo-neha' } });
+  const session = sessions[0];
+  const { data: items } = await db.getAll('checkout_items', { eq: { session_id: session.id } });
+  const anyLine = items.find(i => i.product_id == null);
+  const oil = items.find(i => i.product_id != null);
+  await db.rpc('submit_return', {
+    p_session_id: session.id,
+    p_items: [
+      { item_id: anyLine.id, breakdown: [
+        { product_id: 7, returned_quantity: 1, lost_quantity: 0, usage: [] },
+        { product_id: 15, returned_quantity: 2, lost_quantity: 0, usage: [] },
+        { product_id: 8, returned_quantity: 0, lost_quantity: 0, usage: [{ reason: 'customer_service', quantity: 1, party_id: 2 }] },
+        { product_id: 10, returned_quantity: 0, lost_quantity: 1, usage: [] },
+      ] },
+      { item_id: oil.id, returned_quantity: 0.1, usage: [{ reason: 'customer_service', quantity: 0.2, party_id: 2 }] },
+    ],
+    p_notes: '', p_submitted_by: auth.currentUser.id,
+  });
+});
+
+const fieldBillRow = (h) => h.eval(() => {
+  const row = [...document.querySelectorAll('tbody tr')].find(r => r.querySelector('.field-stock-badge') && r.textContent.includes('Sahara'));
+  row.id = 'help-field-bill-row';
+});
+
 export const shots = [
   // ── Sales page ──
   {
@@ -160,7 +203,11 @@ export const shots = [
     name: 'sales-edit-bill-form', login: 'admin', page: 'sales', target: 'modal',
     run: async (h) => {
       await tall(h);
-      await h.clickText('Edit Bill', '.edit-sale-btn');
+      // The newest warehouse bill (the field-stock bill has its own shot).
+      await h.eval(() => [...document.querySelectorAll('tbody tr')]
+        .find(r => r.querySelector('.edit-sale-btn') && !r.querySelector('.field-stock-badge'))
+        .querySelector('.edit-sale-btn').click());
+      await h.settle();
     },
   },
   {
@@ -171,6 +218,51 @@ export const shots = [
       await h.click('#sale-save');
     },
   },
+  // ── Bills from field stock ──
+  {
+    name: 'sales-field-stock-form', login: 'admin', page: 'sales', target: 'modal',
+    run: async (h) => {
+      await tall(h);
+      await h.click('#btn-new-sale');
+      await chooseFieldSource(h, 'Neha');
+      await pickParty(h, 'Orbit Co-working');
+      await addItem(h, 'Rose Refill', 2, 450);
+      await h.select('#sale-type', 'cash');
+      await h.select('#sale-method', 'cash');
+    },
+  },
+  {
+    name: 'sales-field-stock-mobile', login: 'neha@narmadaessence.com', page: 'sales', mobile: true, target: 'modal',
+    run: async (h) => {
+      // Hide the wide table behind the window so the phone layout does not widen (shot shows only the window).
+      await h.eval(() => { document.getElementById('page-body').style.display = 'none'; window.scrollTo(0, 0); });
+      await tallPhone(h, 1700);
+      await jsClick(h, '#btn-new-sale');
+      await chooseFieldSource(h);
+      await h.eval(() => document.getElementById('sale-party-input').focus());
+      await h.clickText('Fern Spa', '.party-opt');
+      await h.selectText('#add-item-product', 'Pleasure Refill');
+      await h.type('#add-item-qty', 1);
+      await jsClick(h, '#btn-add-item');
+      await h.select('#sale-method', 'upi');
+      await h.eval(() => { window.scrollTo(0, 0); document.querySelector('.modal-overlay .modal-body').scrollTop = 0; });
+      await h.wait(200);
+    },
+  },
+  {
+    name: 'sales-field-stock-badge', login: 'admin', page: 'sales',
+    run: async (h) => { await fieldBillRow(h); await h.highlight('#help-field-bill-row .field-stock-badge'); },
+  },
+  {
+    name: 'sales-edit-bill-field-locked', login: 'admin', page: 'sales', target: 'modal',
+    run: async (h) => {
+      await submitNehaReturn(h);
+      await h.go('sales');
+      await tall(h);
+      await fieldBillRow(h);
+      await h.click('#help-field-bill-row .edit-sale-btn');
+    },
+  },
   // ── Seller (phone) ──
   {
     name: 'sales-seller-page-mobile', login: 'seller', page: 'sales', mobile: true,
@@ -178,7 +270,9 @@ export const shots = [
   {
     name: 'sales-seller-form-mobile', login: 'neha@narmadaessence.com', page: 'sales', mobile: true, target: 'modal',
     run: async (h) => {
-      await tallPhone(h);
+      // Hide the wide table behind the window so the phone layout does not widen (shot shows only the window).
+      await h.eval(() => { document.getElementById('page-body').style.display = 'none'; window.scrollTo(0, 0); });
+      await tallPhone(h, 1700);
       await jsClick(h, '#btn-new-sale');
       await h.eval(() => document.getElementById('sale-party-input').focus());
       await h.clickText('Walk-in customer', '.party-opt');
@@ -187,6 +281,8 @@ export const shots = [
       await jsClick(h, '#btn-add-item');
       await h.select('#sale-type', 'cash');
       await h.select('#sale-method', 'cash');
+      await h.eval(() => { window.scrollTo(0, 0); document.querySelector('.modal-overlay .modal-body').scrollTop = 0; });
+      await h.wait(200);
     },
   },
   // ── Collections ──

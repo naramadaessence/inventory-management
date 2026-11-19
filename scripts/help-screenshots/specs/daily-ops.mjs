@@ -1,11 +1,14 @@
 // Screenshots for the Help section "Daily Operations (Issue & Return)".
 // Demo-week states used: Kunal = pending stock request, Raj (seller) = return
 // awaiting approval with a 1 pc Lavender shortage, Sonal = stock still out from
-// a previous day, Imran = one rejected (Flagged) request + a sent-back return.
+// a previous day, Imran = one rejected (Flagged) request + a sent-back return +
+// an approved "Any Dispenser Refill" return with 1 lost Green Apple (day 4),
+// Neha = in field today with Any Dispenser Refill × 6 and one field-stock bill.
 
 const SONAL = 'sonal@narmadaessence.com';
 const KUNAL = 'kunal@narmadaessence.com';
 const IMRAN = 'imran@narmadaessence.com';
+const NEHA = 'neha@narmadaessence.com';
 
 // Set an input/select value and fire the events the page listens to.
 async function setVal(h, selector, value, index = 0) {
@@ -57,12 +60,37 @@ async function tab(h, key) {
   await clickNth(h, `.tab-btn[data-tab="${key}"]`);
 }
 
-async function addProduct(h, name, qty) {
-  await h.selectText('#co-product-select', name);
-  await h.page.waitForSelector('.co-qty');
-  const count = await h.eval(() => document.querySelectorAll('.co-qty').length);
-  await setVal(h, '.co-qty', qty, count - 1);
+// Issue / Request Stock window: search the picker, click the row, set its quantity.
+// `keepSearch` leaves the search text in the box (for shots of the search).
+async function pickRow(h, rowSelector, search, qty, keepSearch = false) {
+  await setVal(h, '.sp-search', search);
+  await h.eval(sel => {
+    const row = typeof sel === 'string' ? document.querySelector(sel) : null;
+    if (!row) throw new Error(`pickRow: no ${sel}`);
+    row.click();
+  }, rowSelector);
+  await h.wait(150);
+  const count = await h.eval(() => document.querySelectorAll('.co-line').length);
+  if (qty != null) await setVal(h, '.co-qty', qty, count - 1);
+  if (!keepSearch) await setVal(h, '.sp-search', '');
 }
+
+async function addProduct(h, name, qty, keepSearch = false) {
+  await setVal(h, '.sp-search', name);
+  const id = await h.eval(name => {
+    const row = [...document.querySelectorAll('.sp-row[data-kind="product"]')]
+      .find(r => r.querySelector('.sp-row-name').textContent.trim().startsWith(name));
+    return row ? row.dataset.id : null;
+  }, name);
+  if (!id) throw new Error(`addProduct: no picker row for ${name}`);
+  await pickRow(h, `.sp-row[data-kind="product"][data-id="${id}"]`, name, qty, keepSearch);
+}
+
+// "Any <category>" line (category 3 = Dispenser Refill in the demo).
+async function addAny(h, categoryId, qty, search = 'any refill', keepSearch = false) {
+  await pickRow(h, `.sp-row[data-kind="any"][data-id="${categoryId}"]`, search, qty, keepSearch);
+}
+const REFILLS = 3;
 
 async function relogin(h, email, password) {
   await clickNth(h, '#btn-logout');
@@ -110,6 +138,56 @@ async function setReturned(h, idx, value) {
   await setVal(h, `.ci-returned[data-idx="${idx}"]`, value);
 }
 
+// ---------- "Any <category>" return block ----------
+// Neha (demo week, today): item 0 = Any Dispenser Refill × 6 with a field bill
+// for 1 Black Touch Refill (fixed entry 0, Sold), item 1 = Western Lavender Oil 0.3 kg.
+const anyEntry = (cls, idx, entry) => `.${cls}[data-idx="${idx}"][data-entry="${entry}"]`;
+
+async function addAnyProduct(h, idx, productName) {
+  await clickNth(h, `.ci-any-add[data-idx="${idx}"]`);
+  const entry = await h.eval(i => document.querySelectorAll(`.ci-item[data-idx="${i}"] .ci-any-entry`).length - 1, idx);
+  const value = await h.eval((sel, name) => {
+    const el = document.querySelector(sel);
+    return [...el.options].find(o => o.textContent.includes(name))?.value;
+  }, anyEntry('ci-a-product', idx, entry), productName);
+  if (!value) throw new Error(`addAnyProduct: no option ${productName}`);
+  await setVal(h, anyEntry('ci-a-product', idx, entry), value);
+  return entry;
+}
+
+async function addAnyUsage(h, idx, entry, { reason, qty, party }) {
+  await clickNth(h, anyEntry('ci-add-usage', idx, entry));
+  const base = `[data-idx="${idx}"][data-entry="${entry}"]`;
+  const line = await h.eval(b => document.querySelectorAll(`.ci-u-reason${b}`).length - 1, base);
+  const at = cls => `.${cls}${base}[data-line="${line}"]`;
+  if (reason) await setVal(h, at('ci-u-reason'), reason);
+  if (party) {
+    const value = await h.eval((sel, p) => [...document.querySelector(sel).options].find(o => o.textContent.includes(p))?.value, at('ci-u-party'), party);
+    await setVal(h, at('ci-u-party'), value);
+  }
+  if (qty != null) await setVal(h, at('ci-u-qty'), qty);
+}
+
+// Black Touch: 1 sold + 1 back; Rose: 2 back.  → Accounted 3 of 6.
+async function fillNehaPartial(h) {
+  await openFirstReturn(h);
+  await setVal(h, anyEntry('ci-a-returned', 0, 0), 1);
+  const rose = await addAnyProduct(h, 0, 'Rose Refill');
+  await setVal(h, anyEntry('ci-a-returned', 0, rose), 2);
+}
+
+// …then Pleasure: 1 used at Sahara Darbar; Green Apple: 1 lost → 6 of 6. Oil matches.
+async function fillNehaComplete(h) {
+  await fillNehaPartial(h);
+  const pleasure = await addAnyProduct(h, 0, 'Pleasure Refill');
+  await addAnyUsage(h, 0, pleasure, { reason: 'customer_service', qty: 1, party: 'Sahara Darbar' });
+  const apple = await addAnyProduct(h, 0, 'Green Apple Refill');
+  await setVal(h, anyEntry('ci-a-lost', 0, apple), 1);
+  await setReturned(h, 1, 0.1);
+  await addUsage(h, 1, { reason: 'customer_service', qty: 0.2, party: 'Sahara Darbar' });
+  await setVal(h, '#ci-notes', 'One Green Apple refill missing from the bag');
+}
+
 // Sonal: Sandal Refill (5 pcs) is item 0, Decor Refill (3 pcs) is item 1.
 async function fillSonalMatching(h) {
   await openFirstReturn(h);
@@ -135,6 +213,7 @@ const rawShots = [
   {
     name: 'daily-ops-request-stock-form', login: 'seller', page: 'daily-ops', target: 'modal',
     run: async h => {
+      await tall(h);
       await clickNth(h, '#btn-new-checkout');
       await addProduct(h, 'Lavender Refill', 4);
       await addProduct(h, 'Cool Water Diffuser Oil', 0.3);
@@ -175,10 +254,102 @@ const rawShots = [
   {
     name: 'daily-ops-issue-stock-form', login: 'admin', page: 'daily-ops', target: 'modal',
     run: async h => {
+      await tall(h);
       await clickNth(h, '#btn-new-checkout');
       await h.selectText('#co-seller', 'Neha');
       await addProduct(h, 'Pleasure Refill', 5);
       await addProduct(h, 'Cherry Blossom Diffuser Oil', 0.4);
+    },
+  },
+  {
+    name: 'daily-ops-issue-stock-search', login: 'admin', page: 'daily-ops', target: 'modal',
+    run: async h => {
+      await tall(h);
+      await clickNth(h, '#btn-new-checkout');
+      await h.selectText('#co-seller', 'Kunal');
+      await setVal(h, '.sp-search', 'oud');
+    },
+  },
+  {
+    name: 'daily-ops-issue-stock-over', login: 'admin', page: 'daily-ops', target: 'modal',
+    run: async h => {
+      await tall(h);
+      await clickNth(h, '#btn-new-checkout');
+      await h.selectText('#co-seller', 'Kunal');
+      await addProduct(h, 'Gucci Oud Diffuser Oil', 10);
+      await addProduct(h, 'Rose Refill', 2);
+    },
+  },
+
+  // ---------- "Any <category>" lines ----------
+  {
+    name: 'daily-ops-any-issue-form', login: 'admin', page: 'daily-ops', target: 'modal',
+    run: async h => {
+      await tall(h);
+      await clickNth(h, '#btn-new-checkout');
+      await h.selectText('#co-seller', 'Kunal');
+      await clickNth(h, `.sp-chip[data-cat="${REFILLS}"]`);
+      await h.eval(id => document.querySelector(`.sp-row[data-kind="any"][data-id="${id}"]`).click(), REFILLS);
+      await h.wait(150);
+      await setVal(h, '.co-qty', 10, 0);
+      await addProduct(h, 'Rose Refill', 2);
+      await h.eval(() => { document.querySelector('.sp-results').scrollTop = 0; });
+    },
+  },
+  {
+    name: 'daily-ops-any-request-form', login: 'seller', page: 'daily-ops', target: 'modal',
+    run: async h => {
+      await tall(h);
+      await clickNth(h, '#btn-new-checkout');
+      await addAny(h, REFILLS, 10, 'any refill', true);
+      await addProduct(h, 'Cool Water Diffuser Oil', 0.3);
+      await setVal(h, '.sp-search', 'any refill');
+    },
+  },
+  {
+    name: 'daily-ops-any-approve-issue', login: KUNAL, page: 'daily-ops', target: 'modal',
+    run: async h => {
+      await clickNth(h, '#btn-new-checkout');
+      await addAny(h, REFILLS, 10);
+      await addProduct(h, 'Rose Refill', 2);
+      await clickNth(h, '#co-submit');
+      await relogin(h, 'admin@narmadaessence.com', 'admin123');
+      await h.go('daily-ops');
+      await h.eval(() => document.querySelectorAll('.toast').forEach(t => t.remove()));
+      await clickNth(h, '.approve-issue-btn', 0);
+    },
+  },
+  { name: 'daily-ops-any-return-partial', login: NEHA, page: 'daily-ops', target: 'modal', run: async h => { await tall(h); await fillNehaPartial(h); } },
+  {
+    name: 'daily-ops-any-return-complete', login: NEHA, page: 'daily-ops', target: 'modal',
+    run: async h => { await h.page.setViewport({ width: 1366, height: 2000, deviceScaleFactor: 1 }); await fillNehaComplete(h); },
+  },
+  {
+    name: 'daily-ops-any-approve-return', login: NEHA, page: 'daily-ops', target: 'modal',
+    run: async h => {
+      await h.page.setViewport({ width: 1366, height: 1400, deviceScaleFactor: 1 });
+      await fillNehaComplete(h);
+      await clickNth(h, '#ci-submit');
+      await relogin(h, 'admin@narmadaessence.com', 'admin123');
+      await h.go('daily-ops');
+      await tab(h, 'pending_approval');
+      await h.eval(() => document.querySelectorAll('.toast').forEach(t => t.remove()));
+      await h.eval(() => [...document.querySelectorAll('tr[data-session-id]')]
+        .find(tr => tr.textContent.includes('Neha')).querySelector('.approve-return-btn').click());
+      await h.settle();
+      await setVal(h, '.ar-type', 'loss');
+      await setVal(h, '.ar-note', 'Green Apple fell out of the bag — Neha to pay');
+    },
+  },
+  {
+    name: 'daily-ops-any-view-details', login: 'admin', page: 'daily-ops', target: 'modal',
+    run: async h => {
+      await tab(h, 'checked_in');
+      const id = await h.eval(() => {
+        const store = JSON.parse(localStorage.getItem('narmada_essence_data'));
+        return store.checkout_items.find(i => i.parent_item_id != null && i.discrepancy_type).session_id;
+      });
+      await clickNth(h, `tr[data-session-id="${id}"] .view-btn`);
     },
   },
 
@@ -193,7 +364,13 @@ const rawShots = [
       await openFirstReturn(h);
       await setReturned(h, 0, 1);
       await addUsage(h, 0, { reason: 'customer_service', qty: 4, party: 'Grand Bhagwati' });
-      await h.eval(() => { const b = document.querySelector('.modal-overlay .modal-body'); b.scrollTop = 0; });
+      // The wide table behind the window widens the phone page; hide it so the window fits.
+      await h.eval(() => {
+        document.getElementById('page-body').style.display = 'none';
+        window.scrollTo(0, 0);
+        document.querySelector('.modal-overlay .modal-body').scrollTop = 0;
+      });
+      await h.wait(200);
     },
   },
   {

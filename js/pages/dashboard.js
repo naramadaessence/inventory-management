@@ -1,5 +1,6 @@
 import { db, auth } from '../supabase.js';
 import { formatCurrency, formatStock, availableStock, formatDateTime, daysUntil, showToast, escapeHtml, CONFIG, skeletonHTML, dbOp, localDay } from '../utils/helpers.js';
+import { holdsMap } from '../utils/field-stock.js';
 
 
 export async function renderDashboard(body, header) {
@@ -38,6 +39,7 @@ export async function renderDashboard(body, header) {
     { data: allProfiles },
     { data: categories },
     { data: pendingAdjustmentRows },
+    { data: holdRows },
   ] = await Promise.all([
     db.getAll('products'),
     db.fetchAllPaged('checkout_sessions'),
@@ -50,6 +52,7 @@ export async function renderDashboard(body, header) {
     db.getAll('profiles'),
     db.getAll('categories'),
     db.getAll('stock_adjustments', { eq: { status: 'pending' } }),
+    db.rpc('get_category_holds', {}),
   ]);
   // Reuse `amcParties` and `products` below — no second fetch needed.
   const allParties = amcParties;
@@ -223,11 +226,21 @@ export async function renderDashboard(body, header) {
             <button class="btn btn-sm btn-primary" onclick="window.navigateTo('${page}')">${action}</button>
           </div>` : '');
   const reconTotal = discrepancyReturns.length + staleCheckouts.length + pendingAdjustments.length;
-  const reconHtml = reconTotal > 0 ? `
+  // Stock out on open "Any <category>" lines: information only, not counted as an alert.
+  const holds = holdsMap(holdRows);
+  const heldText = Object.keys(holds).map(Number).filter(id => holds[id] > 0)
+    .map(id => `${formatStock(holds[id], catMap[id]?.type === 'liquid' ? 'liquid' : 'unit')} ${escapeHtml(catMap[id]?.name || 'stock')}`);
+  const heldHtml = heldText.length ? `<div class="alert-item" id="alert-category-holds" data-count="${heldText.length}" style="background:var(--blue-soft);">
+            <i class="fas fa-person-walking-luggage" style="color:var(--blue);"></i>
+            <div style="flex:1;"><strong>${heldText.join(', ')} out with staff as Any</strong>
+            <div style="font-size:0.75rem;color:var(--text-muted);">Types named on return — product stock changes when the return is approved</div></div>
+            <button class="btn btn-sm btn-primary" onclick="window.navigateTo('products')">View</button>
+          </div>` : '';
+  const reconHtml = reconTotal > 0 || heldHtml ? `
     <div class="card" id="reconciliation-alerts" style="margin-bottom:20px;border-left:4px solid var(--red);">
       <div class="card-header">
         <h3><i class="fas fa-scale-unbalanced" style="color:var(--red);margin-right:8px;"></i>Stock Reconciliation</h3>
-        <span class="badge-status red">${reconTotal} to review</span>
+        ${reconTotal > 0 ? `<span class="badge-status red">${reconTotal} to review</span>` : ''}
       </div>
       <div class="card-body">
         <div class="alert-list">
@@ -240,6 +253,7 @@ export async function renderDashboard(body, header) {
           ${reconAlertRow('alert-pending-adjustments', pendingAdjustments.length, 'fa-sliders', 'purple',
             `${pendingAdjustments.length} stock adjustment${pendingAdjustments.length > 1 ? 's' : ''} awaiting approval`,
             'Stock will not change until an admin approves', 'products', 'Review')}
+          ${heldHtml}
         </div>
       </div>
     </div>` : '';

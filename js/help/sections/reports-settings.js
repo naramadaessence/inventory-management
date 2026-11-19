@@ -179,8 +179,15 @@ export default {
         { type: 'p', text: 'The badge at the top right of each seller card shows how many open mismatches that seller has, or **No open mismatches**.' },
         { type: 'note', text: 'A row is shown on the day the stock was **requested or issued**, even if the seller returned it on a later day. Only stock that actually left the warehouse is shown: requests still waiting for approval and rejected requests are not in the ledger.' },
         { type: 'tip', text: 'A small difference can still show **Matching**. For example `0.005 kg short` is within the default oil tolerance of 0.010 kg. See [[settings-stock-rules]].' },
+        { type: 'h', text: 'Any lines (for example any 6 refills)' },
+        { type: 'list', items: [
+          'While the seller is out, the ledger shows one row such as **Any Dispenser Refill** with status **In field**.',
+          'Once the return is submitted, that row is replaced by one row per product the seller named. Pieces sold on a bill count as **Used**; a lost piece shows as short.',
+          'An Any row that is still in the field has no fragrance. It keeps its own row in **Fragrance-wise** view, and choosing a fragrance in **All fragrances** hides it.',
+        ] },
+        { type: 'img', src: 'reports-staff-ledger-any.webp', alt: 'Ledger card for Neha Joshi: today Any Dispenser Refill 6 pcs and Western Lavender Diffuser Oil 0.300 kg, both In field', caption: 'Neha is out today with any 6 refills.' },
       ],
-      related: ['reports-staff-ledger-statuses', 'reports-staff-ledger-filter', 'reports-export-ledger', 'daily-ops-submit-return', 'daily-ops-approve-return', 'settings-stock-rules'],
+      related: ['reports-staff-ledger-statuses', 'reports-staff-ledger-filter', 'reports-export-ledger', 'daily-ops-submit-return', 'daily-ops-approve-return', 'daily-ops-any-return', 'settings-stock-rules'],
     },
     {
       id: 'reports-staff-ledger-statuses',

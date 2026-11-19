@@ -1,5 +1,64 @@
 import { db, auth } from '../supabase.js';
-import { formatCurrency, formatDate, formatWeight, formatStock, showToast, createModal, daysUntil, esc, dbOp, roundCurrency, withSaving } from '../utils/helpers.js';
+import { formatCurrency, formatDate, formatDateTime, formatWeight, formatStock, showToast, createModal, daysUntil, esc, dbOp, roundCurrency, withSaving } from '../utils/helpers.js';
+import { fieldBillProblem, fieldStockRemaining, isAnyLine, anyLineLabel } from '../utils/field-stock.js';
+
+// Bills from field stock (knowledge-base/category-issue.md "Field sales").
+const FIELD_PENDING_MSG = 'Part of a submitted field return — send the return back to change items';
+const FIELD_SETTLED_MSG = 'Settled by an approved return';
+
+// Open (checked_out) sessions the current user may bill from: sellers their
+// own, admins every staff member's. Returns [{ session, items, label, staffName }].
+async function loadFieldSources(isAdmin, userId) {
+  const { data: open } = await db.getAll('checkout_sessions', { eq: { status: 'checked_out' } });
+  const sessions = (open || []).filter(s => isAdmin || s.seller_id === userId);
+  if (!sessions.length) return { sources: [], categories: [] };
+  const [itemResults, { data: categories }, { data: profiles }] = await Promise.all([
+    Promise.all(sessions.map(s => db.getAll('checkout_items', { eq: { session_id: s.id } }))),
+    db.getAll('categories'),
+    isAdmin ? db.getAll('profiles') : Promise.resolve({ data: [] }),
+  ]);
+  const staffMap = Object.fromEntries((profiles || []).map(p => [p.id, p]));
+  const sources = sessions.map((session, idx) => {
+    const staffName = isAdmin ? (staffMap[session.seller_id]?.full_name || 'Unknown staff') : 'My field stock';
+    return {
+      session,
+      items: (itemResults[idx].data || []).filter(i => i.parent_item_id == null),
+      staffName,
+      label: `${staffName} · issued ${formatDateTime(session.checkout_time || session.created_at)} (#${session.id})`,
+    };
+  });
+  return { sources, categories: categories || [] };
+}
+
+// Products that can be billed from a session: its own lines, or any product
+// of a category it carries an Any line for.
+function fieldProductAllowed(items) {
+  const own = new Set(items.filter(i => i.product_id != null).map(i => i.product_id));
+  const anyCats = new Set(items.filter(isAnyLine).map(i => i.category_id));
+  return p => own.has(p.id) || anyCats.has(p.category_id);
+}
+
+function fieldRemainingHtml(items, soldItems, products, categories) {
+  const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
+  const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
+  const rem = fieldStockRemaining({ items, soldItems, products });
+  const lines = [
+    ...Object.entries(rem.products).map(([pid, qty]) => {
+      const p = prodMap[pid];
+      return `<li class="field-remaining-line" data-product-id="${pid}">${esc(p?.name || 'Unknown product')}: <strong>${formatStock(qty, p?.type)}</strong> left</li>`;
+    }),
+    ...Object.entries(rem.categories).map(([cid, qty]) => {
+      const c = catMap[cid];
+      return `<li class="field-remaining-line" data-category-id="${cid}">${esc(anyLineLabel(c))}: <strong>${formatStock(qty, c?.type)}</strong> left</li>`;
+    }),
+  ];
+  return lines.length ? `<ul style="margin:6px 0 0 18px;padding:0;">${lines.join('')}</ul>` : '<div>Nothing left on this session.</div>';
+}
+
+async function fieldSessionStatus(sale) {
+  const { data } = await db.getById('checkout_sessions', sale.checkout_session_id);
+  return data?.status || null;
+}
 
 // Helper: summarize sale items for table display
 function itemsSummary(items, prodMap) {
@@ -38,14 +97,25 @@ function priceForProduct(product, rates = {}) {
   return custom !== null ? Number(custom) : Number(product?.unit_price || 0);
 }
 
-async function deleteSale(sale, body, header) {
-  if (!confirm('Delete this bill? Stock will be restored for all items.')) return false;
+async function deleteSale(sale, body, header, fieldStatus) {
+  let question = 'Delete this bill? Stock will be restored for all items.';
+  let done = 'Bill deleted - stock restored';
+  if (sale.checkout_session_id) {
+    // Field-stock bills move no stock on delete (delete_sale contract).
+    const status = fieldStatus !== undefined ? fieldStatus : await fieldSessionStatus(sale);
+    if (status === 'pending_approval') { showToast(FIELD_PENDING_MSG, 'error'); return false; }
+    question = status === 'checked_out'
+      ? 'Delete this field-stock bill? No warehouse stock changes; the pieces count as still with the staff member until their return.'
+      : 'Delete this field-stock bill? It was settled by an approved return, so no stock changes.';
+    done = 'Bill deleted - no stock changed (field stock)';
+  }
+  if (!confirm(question)) return false;
   const result = await dbOp(db.rpc('delete_sale', {
     p_sale_id: sale.id,
     p_performer_id: auth.currentUser.id,
   }), 'Failed to delete bill');
   if (!result) return false;
-  showToast('Bill deleted - stock restored', 'success');
+  showToast(done, 'success');
   renderSales(body, header);
   return true;
 }
@@ -77,6 +147,13 @@ export async function renderSales(body, header) {
     if (!itemsBySale[si.sale_id]) itemsBySale[si.sale_id] = [];
     itemsBySale[si.sale_id].push(si);
   });
+
+  // sale_items of bills already linked to a field session (optionally minus one bill).
+  const soldItemsOf = (sessionId, exceptSaleId = null) => allSales
+    .filter(s => s.checkout_session_id === sessionId && s.id !== exceptSaleId)
+    .flatMap(s => itemsBySale[s.id] || []);
+  const field = await loadFieldSources(isAdmin, userId);
+  field.soldItemsOf = soldItemsOf;
 
   // Sellers see only their own sales
   const sales = isAdmin ? allSales : allSales.filter(s => s.recorded_by === userId);
@@ -121,7 +198,7 @@ export async function renderSales(body, header) {
         return `<tr class="sale-row" data-id="${s.id}" data-sale-type="${saleType}" data-machine-type="${machineType}" style="cursor:pointer;">
           <td>${formatDate(s.sale_date || s.created_at)}</td>
           <td><strong>${esc(party?.name || 'Walk-in')}</strong></td>
-          <td><span class="badge-status ${saleType === 'gst' ? 'blue' : 'amber'}" style="font-size:0.7rem;">${saleType === 'gst' ? '<i class="fas fa-file-invoice"></i> GST' : '<i class="fas fa-money-bill-wave"></i> Cash'}</span></td>
+          <td><span class="badge-status ${saleType === 'gst' ? 'blue' : 'amber'}" style="font-size:0.7rem;">${saleType === 'gst' ? '<i class="fas fa-file-invoice"></i> GST' : '<i class="fas fa-money-bill-wave"></i> Cash'}</span>${s.checkout_session_id ? ` <span class="badge-status purple field-stock-badge" style="font-size:0.7rem;" title="Billed from field stock (session #${s.checkout_session_id})"><i class="fas fa-person-walking-luggage"></i> Field stock</span>` : ''}</td>
           <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;">${itemsSummary(sItems, prodMap)}</td>
           <td style="font-weight:600;color:var(--green);">${formatCurrency(s.total_amount)}</td>
           <td>${s.amount_received ? formatCurrency(s.amount_received) : '—'}</td>
@@ -136,7 +213,7 @@ export async function renderSales(body, header) {
     </table></div>`}
   `;
 
-  document.getElementById('btn-new-sale').addEventListener('click', () => openSaleModal(parties, products, body, header));
+  document.getElementById('btn-new-sale').addEventListener('click', () => openSaleModal(parties, products, body, header, field));
 
   // Sale type filter buttons
   let currentFilter = 'all';
@@ -171,7 +248,7 @@ export async function renderSales(body, header) {
       return;
     }
 
-    const headers = ['Date', 'Party', 'Type', 'Items', 'Amount', 'Received', 'Payment Status', 'Due Date'];
+    const headers = ['Date', 'Party', 'Type', 'Source', 'Items', 'Amount', 'Received', 'Payment Status', 'Due Date'];
     const rows = [headers];
 
     exportSales.forEach(s => {
@@ -183,6 +260,7 @@ export async function renderSales(body, header) {
         formatDate(s.sale_date || s.created_at),
         party?.name || 'Walk-in',
         saleType,
+        s.checkout_session_id ? `Field stock (#${s.checkout_session_id})` : 'Warehouse',
         itemsText,
         s.total_amount,
         s.amount_received || 0,
@@ -209,14 +287,14 @@ export async function renderSales(body, header) {
     document.querySelectorAll('.sale-row').forEach(row => {
       row.addEventListener('click', () => {
         const sale = allSales.find(s => s.id == row.dataset.id);
-        if (sale) openEditSaleModal(sale, itemsBySale[sale.id] || [], parties, products, body, header);
+        if (sale) openEditSaleModal(sale, itemsBySale[sale.id] || [], parties, products, body, header, field);
       });
     });
     document.querySelectorAll('.edit-sale-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
         const sale = allSales.find(s => s.id == btn.dataset.id);
-        if (sale) openEditSaleModal(sale, itemsBySale[sale.id] || [], parties, products, body, header);
+        if (sale) openEditSaleModal(sale, itemsBySale[sale.id] || [], parties, products, body, header, field);
       });
     });
     document.querySelectorAll('.delete-sale-btn').forEach(btn => {
@@ -229,15 +307,28 @@ export async function renderSales(body, header) {
   }
 }
 
-function openSaleModal(parties, products, body, header) {
+function openSaleModal(parties, products, body, header, field = { sources: [], categories: [] }) {
   const activeProducts = products.filter(p => p.is_active);
   let lineItems = [];
   let selectedCatRates = {};
   let selectedPartyId = null;
   let isAmcSale = false;
   let selectedPartyAmcRate = 0;
+  let fieldSource = null; // chosen open session, null = warehouse
+  const productOption = p => `<option value="${p.id}" data-price="${p.unit_price}" data-type="${p.type}" data-catid="${p.category_id}">${esc(p.name)}</option>`;
+
+  const sourceControl = field.sources.length ? `
+    <div class="form-group" id="sale-source-group">
+      <label class="form-label" for="sale-source">Stock source</label>
+      <select class="form-select" id="sale-source">
+        <option value="">Warehouse</option>
+        ${field.sources.map(src => `<option value="${src.session.id}">Field stock — ${esc(src.label)}</option>`).join('')}
+      </select>
+      <div id="field-stock-panel" style="display:none;margin-top:8px;background:var(--primary-soft);border:1px solid var(--primary);border-radius:8px;padding:10px 14px;font-size:0.82rem;"></div>
+    </div>` : '';
 
   const content = `
+    ${sourceControl}
     <div class="form-row">
       <div class="form-group" style="position:relative;z-index:50;">
         <label class="form-label">Party / Customer *</label>
@@ -270,7 +361,7 @@ function openSaleModal(parties, products, body, header) {
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
         <div style="flex:2;min-width:180px;">
           <label style="font-size:0.7rem;color:var(--text-muted);display:block;margin-bottom:4px;">Product</label>
-          <select class="form-select" id="add-item-product" style="font-size:0.85rem;">${activeProducts.map(p => `<option value="${p.id}" data-price="${p.unit_price}" data-type="${p.type}" data-catid="${p.category_id}">${esc(p.name)}</option>`).join('')}</select>
+          <select class="form-select" id="add-item-product" style="font-size:0.85rem;">${activeProducts.map(productOption).join('')}</select>
         </div>
         <div style="width:80px;"><label style="font-size:0.7rem;color:var(--text-muted);display:block;margin-bottom:4px;" id="add-item-qty-label">Qty</label><input class="form-input" type="number" id="add-item-qty" value="1" min="0.001" step="1" style="font-size:0.85rem;" /></div>
         <div style="width:100px;"><label style="font-size:0.7rem;color:var(--text-muted);display:block;margin-bottom:4px;">Price (₹)</label><input class="form-input" type="number" id="add-item-price" value="${activeProducts[0]?.unit_price || 0}" min="0" step="0.01" style="font-size:0.85rem;" /></div>
@@ -380,6 +471,21 @@ function openSaleModal(parties, products, body, header) {
   document.getElementById('add-item-product').addEventListener('change', updPrice);
   updPrice();
 
+  // Stock source: warehouse (default) or an open field session.
+  document.getElementById('sale-source')?.addEventListener('change', (e) => {
+    fieldSource = field.sources.find(src => src.session.id === Number(e.target.value)) || null;
+    const panel = document.getElementById('field-stock-panel');
+    const list = fieldSource ? activeProducts.filter(fieldProductAllowed(fieldSource.items)) : activeProducts;
+    document.getElementById('add-item-product').innerHTML = list.map(productOption).join('');
+    updPrice();
+    if (!fieldSource) { panel.style.display = 'none'; panel.innerHTML = ''; return; }
+    const sold = field.soldItemsOf(fieldSource.session.id);
+    panel.style.display = 'block';
+    panel.innerHTML = `<div><i class="fas fa-person-walking-luggage" style="color:var(--primary);"></i> <strong>Billing from field stock</strong> — no warehouse stock moves; the return shows these as Sold.${auth.isAdmin() ? ` The bill is recorded under ${esc(fieldSource.staffName)}.` : ''}</div>
+      <div style="margin-top:6px;color:var(--text-muted);">Still available to bill:</div>
+      ${fieldRemainingHtml(fieldSource.items, sold, products, field.categories)}`;
+  });
+
   // AMC toggle
   document.getElementById('sale-amc-toggle').addEventListener('change', (e) => {
     isAmcSale = e.target.checked;
@@ -437,18 +543,33 @@ function openSaleModal(parties, products, body, header) {
       });
     })();
 
-    // Client-side stock pre-check for fast UX. The RPC also enforces it
-    // atomically, so this is just to fail before sending the request.
-    const qtyByProd = {};
-    lineItems.forEach(i => { qtyByProd[i.product_id] = (qtyByProd[i.product_id] || 0) + i.quantity; });
-    for (const [pid, totalQty] of Object.entries(qtyByProd)) {
-      const pr = products.find(p => p.id === parseInt(pid));
-      if (pr && totalQty > pr.current_stock) { showToast(`Insufficient stock for ${pr.name} — only ${formatStock(pr.current_stock, pr.type)} available`, 'error'); return; }
+    if (fieldSource) {
+      // Field bill: capacity of the session replaces the warehouse stock check.
+      const problem = fieldBillProblem({
+        items: fieldSource.items,
+        soldItems: field.soldItemsOf(fieldSource.session.id),
+        products,
+        billItems: lineItems.map(i => ({ product_id: i.product_id, quantity: i.quantity })),
+      });
+      if (problem) { showToast(problem, 'error'); return; }
+    } else {
+      // Client-side stock pre-check for fast UX. The RPC also enforces it
+      // atomically, so this is just to fail before sending the request.
+      const qtyByProd = {};
+      lineItems.forEach(i => { qtyByProd[i.product_id] = (qtyByProd[i.product_id] || 0) + i.quantity; });
+      for (const [pid, totalQty] of Object.entries(qtyByProd)) {
+        const pr = products.find(p => p.id === parseInt(pid));
+        if (pr && totalQty > pr.current_stock) { showToast(`Insufficient stock for ${pr.name} — only ${formatStock(pr.current_stock, pr.type)} available`, 'error'); return; }
+      }
     }
 
     // Atomic record_sale: inserts sale + sale_items + deducts stock + logs
     // inventory_transactions in one transaction (Postgres) or one demoRpc call.
+    // With p_checkout_session_id the bill comes from field stock (no stock
+    // change, recorded under the session's staff member). Omitted for
+    // warehouse bills.
     const result = await dbOp(db.rpc('record_sale', {
+      ...(fieldSource ? { p_checkout_session_id: fieldSource.session.id } : {}),
       p_party_id: partyId,
       p_items: rpcItems,
       p_payment_status: payStatus,
@@ -462,19 +583,38 @@ function openSaleModal(parties, products, body, header) {
     }), 'Failed to record sale');
     if (!result) return;
 
-    showToast(`Sale recorded — ${lineItems.length} item${lineItems.length > 1 ? 's' : ''}`, 'success');
+    const itemsText = `${lineItems.length} item${lineItems.length > 1 ? 's' : ''}`;
+    showToast(fieldSource
+      ? `Sale recorded from field stock — ${itemsText}. It will show as Sold on the return.`
+      : `Sale recorded — ${itemsText}`, 'success');
     close(); renderSales(body, header);
   });
 }
 
-function openEditSaleModal(sale, saleItems, parties, products, body, header) {
+async function openEditSaleModal(sale, saleItems, parties, products, body, header, field = { soldItemsOf: () => [] }) {
   const prodMap = Object.fromEntries(products.map(p => [p.id, p]));
   const oldQtyByProd = {};
   saleItems.forEach(item => {
     oldQtyByProd[item.product_id] = (oldQtyByProd[item.product_id] || 0) + Number(item.quantity || 0);
   });
 
-  const activeProducts = products.filter(p => p.is_active || oldQtyByProd[p.id]);
+  // Field-stock bill: its session's status decides whether products and
+  // quantities may change (update_sale / delete_sale contract).
+  let fieldStatus;
+  let fieldItems = [];
+  if (sale.checkout_session_id) {
+    const [{ data: session }, { data: items }] = await Promise.all([
+      db.getById('checkout_sessions', sale.checkout_session_id),
+      db.getAll('checkout_items', { eq: { session_id: sale.checkout_session_id } }),
+    ]);
+    fieldStatus = session?.status || null;
+    fieldItems = (items || []).filter(i => i.parent_item_id == null);
+  }
+  const itemsLocked = !!sale.checkout_session_id && fieldStatus !== 'checked_out';
+  const lockNote = fieldStatus === 'pending_approval' ? FIELD_PENDING_MSG : FIELD_SETTLED_MSG;
+
+  const allowedForField = sale.checkout_session_id ? fieldProductAllowed(fieldItems) : () => true;
+  const activeProducts = products.filter(p => (p.is_active && allowedForField(p)) || oldQtyByProd[p.id]);
   let selectedPartyId = sale.party_id ? Number(sale.party_id) : null;
   let selectedRates = getPartyRates(parties, selectedPartyId);
   const initialParty = parties.find(p => p.id === selectedPartyId);
@@ -493,8 +633,10 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
 
   const content = `
     <div style="background:var(--bg-secondary);border-radius:8px;padding:12px 16px;margin-bottom:16px;">
-      <strong>Bill #${sale.id}</strong>
-      <div style="font-size:0.8rem;color:var(--text-muted);">Edit products, quantities, prices, payment, and customer details.</div>
+      <strong>Bill #${sale.id}</strong>${sale.checkout_session_id ? ` <span class="badge-status purple field-stock-badge" style="font-size:0.7rem;"><i class="fas fa-person-walking-luggage"></i> Field stock #${sale.checkout_session_id}</span>` : ''}
+      <div style="font-size:0.8rem;color:var(--text-muted);">${itemsLocked ? 'Edit prices, payment, and customer details.' : 'Edit products, quantities, prices, payment, and customer details.'}</div>
+      ${sale.checkout_session_id && !itemsLocked ? '<div style="font-size:0.8rem;color:var(--text-muted);">Billed from field stock — changes move no warehouse stock.</div>' : ''}
+      ${itemsLocked ? `<div id="edit-field-lock-note" style="margin-top:8px;font-size:0.82rem;color:var(--accent);font-weight:600;"><i class="fas fa-lock"></i> ${esc(lockNote)}. Products and quantities can't change.</div>` : ''}
     </div>
     <div class="form-row">
       <div class="form-group">
@@ -515,7 +657,7 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
         </div>
       </label>
     </div>
-    <div style="background:var(--bg-secondary);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
+    <div id="edit-add-section" style="display:${itemsLocked ? 'none' : 'block'};background:var(--bg-secondary);border-radius:8px;padding:14px 16px;margin-bottom:16px;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;"><i class="fas fa-cart-plus" style="color:var(--primary);"></i><strong style="font-size:0.9rem;">Add / Change Items</strong></div>
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
         <div style="flex:2;min-width:180px;">
@@ -585,10 +727,10 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
         <thead><tr><th>Product</th><th style="width:110px;">Qty</th><th style="width:120px;">Price</th><th>Total</th><th></th></tr></thead>
         <tbody>${lineItems.map((item, i) => `<tr>
           <td>${esc(item.prodName)}</td>
-          <td><input class="form-input edit-item-qty" data-idx="${i}" type="number" min="0.001" step="${item.prodType === 'liquid' ? '0.001' : '1'}" value="${item.quantity}" style="font-size:0.85rem;" /></td>
+          <td><input class="form-input edit-item-qty" data-idx="${i}" type="number" min="0.001" step="${item.prodType === 'liquid' ? '0.001' : '1'}" value="${item.quantity}" style="font-size:0.85rem;" ${itemsLocked ? 'disabled' : ''} /></td>
           <td><input class="form-input edit-item-price" data-idx="${i}" type="number" min="0" step="0.01" value="${item.unit_price}" style="font-size:0.85rem;" /></td>
           <td style="font-weight:600;color:var(--green);">${formatCurrency(item.line_total)}</td>
-          <td><button class="btn btn-sm btn-ghost edit-rm-item" data-idx="${i}" style="color:var(--red);"><i class="fas fa-times"></i></button></td>
+          <td>${itemsLocked ? '' : `<button class="btn btn-sm btn-ghost edit-rm-item" data-idx="${i}" style="color:var(--red);"><i class="fas fa-times"></i></button>`}</td>
         </tr>`).join('')}</tbody>
       </table>`;
     }
@@ -692,6 +834,19 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
   }
 
   function assertEditedStockAvailable() {
+    if (sale.checkout_session_id) {
+      // Locked bills keep their quantities; open ones are checked against the
+      // session's field stock (other linked bills count, this one doesn't).
+      if (itemsLocked) return true;
+      const problem = fieldBillProblem({
+        items: fieldItems,
+        soldItems: field.soldItemsOf(sale.checkout_session_id, sale.id),
+        products,
+        billItems: lineItems.map(i => ({ product_id: i.product_id, quantity: i.quantity })),
+      });
+      if (problem) { showToast(problem, 'error'); return false; }
+      return true;
+    }
     const qtyByProd = {};
     lineItems.forEach(item => {
       qtyByProd[item.product_id] = (qtyByProd[item.product_id] || 0) + item.quantity;
@@ -767,7 +922,7 @@ function openEditSaleModal(sale, saleItems, parties, products, body, header) {
   });
   document.getElementById('edit-sale-cancel').onclick = close;
   document.getElementById('edit-sale-delete').onclick = (e) => withSaving(e.currentTarget, async () => {
-    const deleted = await deleteSale(sale, body, header);
+    const deleted = await deleteSale(sale, body, header, fieldStatus);
     if (deleted) close();
   });
   document.getElementById('edit-sale-save').onclick = (e) => withSaving(e.currentTarget, async () => {

@@ -18,6 +18,7 @@ Stock workflows keep `products.current_stock` correct while preserving an audit 
   - Purchases: `record_purchase` (`record_stock_intake` kept for compatibility)
   - Products: `request_stock_adjustment` → `review_stock_adjustment` (approval); `set_product_stock` only for a new product's opening stock
   - See `stock-reconciliation.md` for the cross-check rules
+  - "Any <category>" issue lines (held, no product stock change at issue; types named on return) and bills from field stock (no stock change): `category-issue.md`, migration 018. Helper `get_category_holds()` for held quantities
   - Damage/loss: `record_damage_loss`
   - Rentals: `create_rental`, `return_rental`
 - `adjust_stock` is an internal database primitive. Migration 010 revokes direct browser access and keeps stock checks inside business RPCs.

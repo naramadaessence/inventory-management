@@ -29,6 +29,11 @@ export const shots = [
     },
     target: '#products-container',
   },
+  // Neha is out today with "Any Dispenser Refill × 6" (demo week).
+  {
+    name: 'products-any-held-notice', login: 'admin', page: 'products',
+    run: async (h) => { await h.selectText('#product-filter-cat', 'Dispenser Refill'); await h.wait(400); await h.highlight('#category-holds-notice'); },
+  },
   {
     name: 'products-find-product-search', login: 'admin', page: 'products',
     run: async (h) => { await h.type('#product-search', 'rose'); await h.wait(600); await h.highlight('#product-search'); },

@@ -23,6 +23,9 @@ const P = {
   COOL_WATER_OIL: 17, WESTERN_LAVENDER_OIL: 18, GUCCI_OUD_OIL: 19, WHITE_MUSK_OIL: 20, ROYAL_OUD_OIL: 21, CHERRY_OIL: 22,
 };
 const GRAND_BHAGWATI = 1, SAHARA_DARBAR = 2, CITY_PULSE = 3;
+const REFILLS = 3; // "Dispenser Refill" category
+// An "Any <category>" issue line: [ANY(REFILLS), 8] = any 8 refills, types named on return.
+const ANY = categoryId => ({ category_id: categoryId });
 const ADMIN = 'admin-1', RAJ = 'seller-1';
 
 function localDate(d) {
@@ -103,12 +106,16 @@ export async function simulateDemoWeek({ db, auth, today = new Date() }) {
     const session = await insert('checkout_sessions', {
       seller_id: staff, checkout_time: new Date().toISOString(), checkin_time: null, status: 'pending_issue', notes: '',
     });
-    for (const [product_id, quantity] of items) {
+    for (const [what, quantity] of items) {
       await insert('checkout_items', {
-        session_id: session.id, product_id, checkout_quantity: quantity, checkin_quantity: null, is_flagged: false, flag_reason: null,
+        session_id: session.id, ...lineOf(what), checkout_quantity: quantity, checkin_quantity: null, is_flagged: false, flag_reason: null,
       });
     }
     return session.id;
+  }
+  // Issue line target: a product id, or ANY(categoryId).
+  function lineOf(what) {
+    return typeof what === 'object' ? { product_id: null, category_id: what.category_id } : { product_id: what };
   }
   async function approveIssue(approver, sessionId) {
     as(approver);
@@ -122,23 +129,30 @@ export async function simulateDemoWeek({ db, auth, today = new Date() }) {
     as(admin);
     return rpc('admin_issue_stock', {
       p_seller_id: staff,
-      p_items: items.map(([product_id, quantity]) => ({ product_id, quantity })),
+      p_items: items.map(([what, quantity]) => (typeof what === 'object' ? { category_id: what.category_id, quantity } : { product_id: what, quantity })),
       p_approver_id: admin,
     });
   }
-  // spec: { [productId]: [returned, [[reason, qty, partyId?, note?], ...]] }
+  // spec: { [productId]: [returned, [[reason, qty, partyId?, note?], ...]],
+  //         ['any:<categoryId>']: [[productId, returned, lost, [[reason, qty, partyId?, note?], ...]], ...] }
+  // Sold pieces (bills from field stock) are added by submit_return itself.
   async function submitReturn(staff, sessionId, spec, notes = '') {
     as(staff);
-    const items = await itemsOf(sessionId);
+    const items = (await itemsOf(sessionId)).filter(i => i.parent_item_id == null);
+    const usageOf = usage => usage.map(([reason, quantity, party_id = null, note = null]) => ({ reason, quantity, party_id, notes: note }));
     return rpc('submit_return', {
       p_session_id: sessionId,
       p_items: items.map(item => {
+        if (item.product_id == null) {
+          return {
+            item_id: item.id,
+            breakdown: spec[`any:${item.category_id}`].map(([product_id, returned, lost, usage = []]) => ({
+              product_id, returned_quantity: returned, lost_quantity: lost, usage: usageOf(usage),
+            })),
+          };
+        }
         const [returned, usage = []] = spec[item.product_id];
-        return {
-          item_id: item.id,
-          returned_quantity: returned,
-          usage: usage.map(([reason, quantity, party_id = null, note = null]) => ({ reason, quantity, party_id, notes: note })),
-        };
+        return { item_id: item.id, returned_quantity: returned, usage: usageOf(usage) };
       }),
       p_notes: notes,
       p_submitted_by: staff,
@@ -169,14 +183,15 @@ export async function simulateDemoWeek({ db, auth, today = new Date() }) {
       p_bill_number: bill, p_purchase_date: dateOf(dayIndex), p_notes: notes, p_received_by: admin,
     });
   }
-  async function sale(user, dayIndex, { party = null, items, status = 'paid', method = 'cash', received = 0, due = null, type = 'gst', notes = '' }) {
+  // session: bill from that staff member's field stock (no stock change; Sold on the return).
+  async function sale(user, dayIndex, { party = null, items, status = 'paid', method = 'cash', received = 0, due = null, type = 'gst', notes = '', session = null }) {
     as(user);
     return rpc('record_sale', {
       p_party_id: party,
       p_items: items.map(([product_id, quantity, unit_price]) => ({ product_id, quantity, unit_price })),
       p_payment_status: status, p_payment_method: method, p_amount_received: received,
       p_expected_payment_date: due, p_sale_date: dateOf(dayIndex), p_notes: notes,
-      p_recorded_by: user, p_sale_type: type,
+      p_recorded_by: user, p_sale_type: type, p_checkout_session_id: session,
     });
   }
   async function collect(user, saleId, partyId, status, amount, method, due, notes) {
@@ -431,6 +446,9 @@ export async function simulateDemoWeek({ db, auth, today = new Date() }) {
     const d4Kunal = await issue(ADMIN, KUNAL, [[P.LAVENDER, 4]]);
     const d4Neha = await issue(ADMIN, NEHA, [[P.COOL_WATER_OIL, 0.6]]);
     await issue(ADMIN, SONAL, [[P.SANDAL, 5], [P.DECOR, 3]]); // not returned: still out on day 5
+    // Imran asks for any 8 refills (types named on return).
+    const d4Imran = await request(IMRAN, [[ANY(REFILLS), 8]]);
+    await approveIssue(PRIYA, d4Imran);
 
     at(3, '11:40');
     const duplicateBill = await sale(NEHA, 3, {
@@ -443,6 +461,11 @@ export async function simulateDemoWeek({ db, auth, today = new Date() }) {
     at(3, '12:05');
     as(ADMIN);
     await rpc('delete_sale', { p_sale_id: duplicateBill, p_performer_id: ADMIN });
+    at(3, '12:40');
+    // Imran bills Orbit for 2 Rose refills from the stock he carries.
+    await sale(IMRAN, 3, {
+      party: orbit.id, items: [[P.ROSE, 2, 450]], status: 'paid', method: 'upi', type: 'gst', notes: 'Sold on site', session: d4Imran,
+    });
 
     at(3, '13:30');
     const lavenderAdj = await requestAdjustment(ADMIN, P.LAVENDER, (await stockOf(P.LAVENDER)) + 2, 'Found 2 extra on the returns shelf');
@@ -459,8 +482,17 @@ export async function simulateDemoWeek({ db, auth, today = new Date() }) {
     await submitReturn(NEHA, d4Neha, {
       [P.COOL_WATER_OIL]: [0.1, [['customer_service', 0.5, CITY_PULSE]]],
     });
+    // 8 refills: 2 Rose sold (bill), 3 Pleasure used, 2 Mischief back, 1 Green Apple lost.
+    await submitReturn(IMRAN, d4Imran, {
+      [`any:${REFILLS}`]: [
+        [P.PLEASURE, 0, 0, [['customer_service', 3, CITY_PULSE]]],
+        [P.MISCHIEF, 2, 0],
+        [P.GREEN_APPLE, 0, 1],
+      ],
+    }, 'One Green Apple fell out of the bag at City Pulse');
     at(3, '18:40');
     for (const s of [d4Raj, d4Kunal, d4Neha]) await approveReturn(PRIYA, s);
+    await approveReturn(PRIYA, d4Imran, { [P.GREEN_APPLE]: ['loss', 'Lost at City Pulse Mall — Imran to pay'] });
     await collect(ADMIN, orbitBill, orbit.id, 'paid', 350, 'upi', null, 'Balance cleared');
 
     // ======================= DAY 5 (today) =======================
@@ -469,6 +501,8 @@ export async function simulateDemoWeek({ db, auth, today = new Date() }) {
     at(4, '08:45');
     await request(KUNAL, [[P.ROSE, 5], [P.PLEASURE, 4]]); // left waiting: Pending Issue
     const d5Raj = await issue(PRIYA, RAJ, [[P.LAVENDER, 4], [P.COOL_WATER_OIL, 0.5]]);
+    // Neha is out with any 6 refills today; she has already billed one from them.
+    const d5Neha = await issue(PRIYA, NEHA, [[ANY(REFILLS), 6], [P.WESTERN_LAVENDER_OIL, 0.3]]);
     at(4, '09:30');
     const oudStock = await stockOf(P.ROYAL_OUD_OIL);
     await requestAdjustment(ADMIN, P.ROYAL_OUD_OIL, Math.round((oudStock - 0.05) * 1000) / 1000, 'Weighed bottle: 50 g evaporated'); // left pending
@@ -477,6 +511,11 @@ export async function simulateDemoWeek({ db, auth, today = new Date() }) {
       [P.LAVENDER]: [1, [['customer_service', 2, GRAND_BHAGWATI]]],
       [P.COOL_WATER_OIL]: [0.2, [['customer_service', 0.3, GRAND_BHAGWATI]]],
     }, 'Short morning visit'); // shortage of 1 Lavender: awaiting approval
+    at(4, '11:00');
+    await sale(NEHA, 4, {
+      party: SAHARA_DARBAR, items: [[P.BLACK_TOUCH, 1, 450]], status: 'pending', method: 'cash', received: 0,
+      due: dueIn(4, 7), type: 'cash', notes: 'Billed from field stock', session: d5Neha,
+    });
   } finally {
     globalThis.Date = RealDate;
     auth.currentUser = null;

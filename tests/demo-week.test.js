@@ -65,19 +65,34 @@ describe('demo week simulation', () => {
     const count = status => sessions.filter(s => s.status === status).length;
     expect(count('flagged')).toBe(1);           // rejected oversized request
     expect(count('pending_issue')).toBe(1);     // Kunal's request today
-    expect(count('checked_out')).toBe(1);       // Sonal still out since yesterday
+    expect(count('checked_out')).toBe(2);       // Sonal still out since yesterday + Neha's Any refills today
     const pendingReturn = sessions.filter(s => s.status === 'pending_approval');
     expect(pendingReturn).toHaveLength(1);
     expect(pendingReturn[0].has_discrepancy).toBe(true);
 
     expect(items.filter(i => i.discrepancy_type).map(i => i.discrepancy_type).sort())
-      .toEqual(['excess_return', 'staff_shortage', 'wastage']);
+      .toEqual(['excess_return', 'loss', 'staff_shortage', 'wastage']);
     for (const i of items.filter(i => i.used_quantity != null)) {
       expect(Math.round((i.checkout_quantity - i.checkin_quantity - i.used_quantity) * 1000) / 1000).toBe(i.difference);
     }
     expect(sessions.some(s => /Return sent back/.test(s.notes || ''))).toBe(true);
     const reasons = new Set((await all('checkout_usage')).map(u => u.reason));
-    expect([...reasons].sort()).toEqual(['customer_service', 'installation', 'other']);
+    expect([...reasons].sort()).toEqual(['customer_service', 'installation', 'other', 'sold']);
+  });
+
+  it('uses Any-refill issues: types named on return, field bill as Sold, lost piece classified, today still held', async () => {
+    const items = await all('checkout_items');
+    const anyLines = items.filter(i => i.product_id == null);
+    expect(anyLines.map(i => i.checkout_quantity).sort()).toEqual([6, 8]);
+    const imranAny = anyLines.find(i => i.checkout_quantity === 8);
+    const children = items.filter(i => i.parent_item_id === imranAny.id);
+    expect(children.map(c => [c.product_id, c.checkout_quantity, c.checkin_quantity, c.difference]).sort((a, b) => a[0] - b[0]))
+      .toEqual([[8, 3, 0, 0], [10, 1, 0, 1], [12, 2, 2, 0], [15, 2, 0, 0]]);
+    expect(children.find(c => c.product_id === 10).discrepancy_type).toBe('loss');
+    const sold = (await all('checkout_usage')).filter(u => u.reason === 'sold');
+    expect(sold.map(u => [u.product_id, u.quantity])).toEqual([[15, 2]]);
+    const { data: holds } = await db.rpc('get_category_holds', {});
+    expect(holds).toEqual([{ category_id: 3, held: 6 }]); // Neha's line, still out today
   });
 
   it('books machine installations to customers and Installed Qty', async () => {
@@ -90,7 +105,8 @@ describe('demo week simulation', () => {
 
   it('uses sales, collections, rentals, damage, adjustments, AMC refills and product edits', async () => {
     const sales = await all('sales');
-    expect(sales).toHaveLength(5); // 6 recorded, 1 deleted
+    expect(sales).toHaveLength(7); // 8 recorded, 1 deleted
+    expect(sales.filter(s => s.checkout_session_id).length).toBe(2); // billed from field stock
     expect(sales.some(s => s.sale_type === 'cash') && sales.some(s => s.sale_type === 'gst')).toBe(true);
     expect(sales.find(s => /\+1 added later/.test(s.notes)).total_amount).toBe(2250);
     expect(sales.find(s => s.payment_status === 'paid' && s.total_amount === 1350)).toBeTruthy(); // Orbit bill fully collected

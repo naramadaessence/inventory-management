@@ -1,5 +1,6 @@
 import { db, auth } from '../supabase.js';
 import { formatCurrency, formatStock, formatDate, getDateRange, showToast, esc, localDay, USAGE_REASONS, DISCREPANCY_TYPES } from '../utils/helpers.js';
+import { reportableItems, isAnyLine, anyLineLabel } from '../utils/field-stock.js';
 import Chart from 'chart.js/auto';
 
 let chartInstances = [];
@@ -107,7 +108,7 @@ export async function renderReports(body, header) {
     else if (activeTab === 'sellers') renderSellerReport(container, sessions, checkoutItems, profiles, prodMap, startDate, endDate);
     else if (activeTab === 'ledger') {
       const { data: usage } = await db.fetchAllPaged('checkout_usage');
-      renderLedgerReport(container, { sessions, checkoutItems, usage: usage || [], products, prodMap, profiles, parties, startDate, endDate }, ledgerState);
+      renderLedgerReport(container, { sessions, checkoutItems, usage: usage || [], products, prodMap, categories, profiles, parties, startDate, endDate }, ledgerState);
     }
     else if (activeTab === 'movers') renderMoversReport(container, filteredItems, products, prodMap);
   }
@@ -312,9 +313,11 @@ function renderStockReport(container, products, catMap, parties, prodMap) {
 
 function renderSellerReport(container, sessions, checkoutItems, profiles, prodMap, startDate, endDate) {
   const sellers = profiles.filter(p => p.role === 'seller');
+  // An "Any <category>" line is replaced by its per-product child rows once returned.
+  const items = reportableItems(checkoutItems);
   const sellerStats = sellers.map(s => {
     const sSessions = sessions.filter(ss => ss.seller_id === s.id && (ss.checkout_time || ss.created_at || '').split('T')[0] >= startDate && (ss.checkout_time || ss.created_at || '').split('T')[0] <= endDate);
-    const sItems = checkoutItems.filter(i => sSessions.some(ss => ss.id === i.session_id));
+    const sItems = items.filter(i => sSessions.some(ss => ss.id === i.session_id));
     const flagged = sItems.filter(i => i.is_flagged).length;
     // Legacy items (used_quantity null) are never counted as mismatches.
     const mismatched = sItems.filter(i => i.has_mismatch && i.used_quantity != null);
@@ -351,6 +354,9 @@ function renderSellerReport(container, sessions, checkoutItems, profiles, prodMa
 // Difference = Issued − Returned − Used (positive = shortage), stored on
 // checkout_items by submit_return. Legacy returns (used_quantity null) show
 // "—" for Used / Difference and are never counted as mismatches.
+// "Any <category>" lines (knowledge-base/category-issue.md) are counted once:
+// as one "Any <category>" row while out, as their per-product child rows
+// once the return is submitted (reportableItems).
 // ============================================
 
 // Only sessions where stock actually left the warehouse.
@@ -383,8 +389,9 @@ function addToTotals(totals, row) {
 }
 
 // Build ledger rows, grouped staff → day → product/fragrance. Pure; exported for tests.
-export function buildStaffLedger({ sessions, checkoutItems, usage = [], prodMap, profiles = [], parties = [], startDate, endDate, staffId = '', fragrance = '', groupBy = 'product' }) {
+export function buildStaffLedger({ sessions, checkoutItems, usage = [], prodMap, categories = [], profiles = [], parties = [], startDate, endDate, staffId = '', fragrance = '', groupBy = 'product' }) {
   const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
+  const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
   const partyMap = Object.fromEntries(parties.map(p => [p.id, p]));
   const wantFragrance = normFragrance(fragrance);
 
@@ -403,16 +410,19 @@ export function buildStaffLedger({ sessions, checkoutItems, usage = [], prodMap,
   usage.forEach(u => { (usageByItem[u.item_id] = usageByItem[u.item_id] || []).push(u); });
 
   const rowMap = new Map();
-  checkoutItems.forEach(item => {
+  reportableItems(checkoutItems).forEach(item => {
     const info = sessionInfo.get(item.session_id);
     if (!info) return;
-    const product = prodMap[item.product_id];
+    // An Any line not yet split into products has no fragrance: own row, excluded by a fragrance filter.
+    const anyLine = isAnyLine(item);
+    const category = anyLine ? catMap[item.category_id] : null;
+    const product = anyLine ? null : prodMap[item.product_id];
     if (wantFragrance && normFragrance(product?.fragrance) !== wantFragrance) return;
-    const type = product?.type === 'liquid' ? 'liquid' : 'unit';
-    const byFragrance = groupBy === 'fragrance' && normFragrance(product?.fragrance);
+    const type = (anyLine ? category?.type : product?.type) === 'liquid' ? 'liquid' : 'unit';
+    const byFragrance = !anyLine && groupBy === 'fragrance' && normFragrance(product?.fragrance);
     // Fragrance rows never mix kg with pcs: same fragrance, different unit → separate rows.
-    const groupKey = byFragrance ? `f:${normFragrance(product.fragrance)}:${type}` : `p:${item.product_id}`;
-    const label = byFragrance ? product.fragrance.trim() : (product?.name || 'Unknown product');
+    const groupKey = anyLine ? `c:${item.category_id}` : (byFragrance ? `f:${normFragrance(product.fragrance)}:${type}` : `p:${item.product_id}`);
+    const label = anyLine ? anyLineLabel(category) : (byFragrance ? product.fragrance.trim() : (product?.name || 'Unknown product'));
     const staff = info.session.seller_id;
     const key = `${staff}|${info.day}|${groupKey}`;
 

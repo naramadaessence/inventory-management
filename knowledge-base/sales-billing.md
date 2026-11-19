@@ -21,6 +21,7 @@ Sales is the bill/invoice workflow for Narmada Essence. Sellers/admins can recor
 - Edited bills replace the full line-item set. The RPC restores old item stock, deletes old `sale_items`, inserts the edited items, deducts new stock, and updates the sale header in one transaction.
 - Deleting a bill via `delete_sale` restores stock and logs `sale_delete` audit rows.
 - The one-off sales cleanup scripts intentionally do not call `delete_sale`, because that client request is sales-data-only cleanup with stock left unchanged.
+- **Bills from field stock** (migration 018, `category-issue.md`): `record_sale(..., p_checkout_session_id)` links the bill to the staff member's open (`checked_out`) session via `sales.checkout_session_id`, records it under that staff member, and moves **no** stock and writes **no** inventory transaction; the session's return books it as Sold. Edit: items change only while the session is still open (capacity re-checked); locked once the return is submitted or approved (prices / payment / party / notes stay editable). Delete: blocked while the return is waiting for approval; otherwise no stock moves.
 
 ## Known Gotchas
 - Production must have migration 010 applied before relying on Edit Bill, Delete Bill, Collections, or the remaining stock-hardening changes. If migration 009 was already run, still run 010.

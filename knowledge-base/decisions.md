@@ -118,3 +118,19 @@
 - puppeteer-core as a devDependency: the harness is run rarely; documented as `npm i --no-save` instead.
 **Consequences**: Every UI change should update the matching guide and re-shoot its screenshots (no test can detect a guide that no longer matches the screen). `public/help` adds ~4.8 MB to the deploy, loaded lazily per image. Content integrity (links, images, anchors, roles) is test-enforced.
 **Superseded By**:
+
+## Decision: "Any <Category>" Issue Lines Held Against The Category, Named On Return
+**Date**: 2026-11-19
+**Status**: Accepted
+**Context**: Staff want to take stock out by category ("any 10 refills") without naming products. Stock is tracked per product, so at some point every piece has to be tied to a product, or per-product stock drifts. Owner's rule: the staff member names the type of every piece on the return (returned / used / sold / lost) — never "unknown". Same request: bills made in the field from issued stock must not take stock off twice (ISSUE-023).
+**Decision** (details in `category-issue.md`, migration 018):
+- An Any line is a `checkout_items` row with `product_id` NULL and `category_id` set. Issuing it does not change product stock; its quantity is **held** against the category (free = Σ category stock − held) and issue checks use the free amount.
+- On the return the Any line must be accounted for exactly, by product; `submit_return` writes one **child** `checkout_items` row per product (`parent_item_id`), which then behaves like a normal product line (mismatch = lost, classified by the admin). `approve_return` takes stock off each product once (`checkout` −taken, `checkin` +returned).
+- Field bills: `sales.checkout_session_id` links a bill to the staff member's open session; such bills move no stock; `submit_return` books them as `sold` usage (own product lines first, then the Any line of the category).
+**Alternatives Considered**:
+- Deduct at issue by a rule (FIFO / largest stock first) and correct on return: arbitrary numbers on the Products page and extra correction noise. Rejected.
+- Allow "unknown" shortages booked to the category and resolved at the next stock count (with a shelf-count helper): designed, then rejected by the owner — staff can always say which piece it was.
+- Separate breakdown table instead of child `checkout_items` rows: every report and the ledger would need a second code path; child rows let existing per-product logic work once Any lines are skipped (`reportableItems`).
+- Field bills deducting stock and the return ignoring them: keeps ISSUE-023's double deduction.
+**Consequences**: While an Any line is out, per-product `current_stock` still includes pieces that are physically with staff (only the category total is protected). Every reader of `checkout_items` must skip Any lines that have children. `record_sale` gained an 11th parameter (old overload dropped). Field bills write no inventory transaction; their movement shows when the return is approved. Production needs migration 018 before the new screens are deployed.
+**Superseded By**:

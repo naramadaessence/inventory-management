@@ -27,7 +27,7 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 ├── supabase/
 │   ├── config.toml             # Edge Function deploy config only (create-user: verify_jwt = false)
 │   └── functions/create-user/  # Edge Function: index.ts (Deno entry) + handler.js (logic, unit-tested)
-├── migrations/                 # Numbered Supabase SQL migrations 002–016 (no 001)
+├── migrations/                 # Numbered Supabase SQL migrations 002–018 (no 001)
 ├── supabase-scripts/           # Manual one-off operational SQL scripts (destructive sales cleanups)
 ├── public/                     # Static assets served at / by Vite (logo.png, favicon.svg, icons.svg)
 ├── tests/
@@ -44,7 +44,8 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 │   ├── error-tracking.js       # Env-gated Sentry shim (no-op without VITE_SENTRY_DSN)
 │   ├── keyboard-shortcuts.js   # Global shortcuts (?, n, /, g + letter navigation)
 │   ├── utils/
-│   │   └── helpers.js          # Formatters, toasts, modals, dbOp, CONFIG, withSaving
+│   │   ├── helpers.js          # Formatters, toasts, modals, dbOp, CONFIG, withSaving
+│   │   └── field-stock.js      # Any-category lines + field-bill rules shared by screens (category-issue.md)
 │   └── pages/
 │       ├── login.js
 │       ├── dashboard.js        # Stats, low-stock/expiry alerts, refill + payment reminders
@@ -70,7 +71,7 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 
 ## Setup / Migration Order
 - `supabase-schema.sql` is the base schema, but it has been **edited in place** over time, so it already contains many columns and constraints that later migrations also add (e.g. `sales.sale_type`, `products.sell_qty`/`installed_qty`, `amc_day` 1–31). It does **not** contain the RPC functions; those come from migrations 006, 009, 010, 011 and 012.
-- There is no `001` migration. Migrations `002`–`016` are applied **manually, in numeric order**, through the Supabase SQL editor. There is no migration runner or applied-migrations table. Production state 2026-10-22: 002–017 applied (015, 016 and 017 run and verified by the owner).
+- There is no `001` migration. Migrations `002`–`018` are applied **manually, in numeric order**, through the Supabase SQL editor. There is no migration runner or applied-migrations table. Production state 2026-10-22: 002–017 applied (015, 016 and 017 run and verified by the owner). **018 (Any-category issue + field bills) was run by the owner on 2026-11-19** (final version of the file, confirmed from the pasted SQL; the footer verification queries were still to be run). The old deployed UI keeps working on 018 (all changed functions are backward compatible); the new UI needs 018.
 - `002_grams_to_kg.sql` divides liquid quantities by 1000 and is **not re-runnable**: running it twice corrupts liquid stock and prices.
 - `002` and `003` are data migrations from older shapes (they reference the legacy `sales.product_id` / `quantity` / `unit_price` columns, which the current base schema no longer has). > ⚠️ Needs verification: the exact fresh-database path (which of 002/003 to skip) has not been tested end to end.
 - `012` drops the constraint named `payment_followups_nonnegative_amount`, but the base schema still declares an inline `CHECK (amount_collected >= 0)` on `payment_followups` (auto-named differently), so a database built from the current base schema may still reject negative correction rows. > ⚠️ Needs verification against the live DB.
@@ -91,11 +92,13 @@ Web-based inventory management system for **Narmada Essence**, a fragrance compa
 | 11 | deployment.md | Hosting, Edge Function deploy, env vars, Supabase GitHub integration risk |
 | 12 | stock-reconciliation.md | Purchases, usage entry, Issued/Returned/Used cross-check, discrepancy + adjustment approvals, fragrance |
 | 13 | help-centre.md | In-app Help page: guide format, search, screenshot harness, keeping guides in sync with the UI |
+| 14 | category-issue.md | "Any <category>" issue lines (held stock, types named on return) and bills from field stock |
 
 ## Critical Rules
 - **Demo mode**: App works fully without Supabase via localStorage. Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` env vars for production. Production builds hard-fail if env vars are missing (no silent fallback).
 - **XSS prevention**: All user data rendered via `escapeHtml()` / `esc()` — never raw innerHTML with user strings. Toasts and modal titles use `textContent`; modal `content`/`footer` are HTML by design (escape inside).
 - **Stock consistency**: Every stock change (checkout, checkin, sale, rental, damage, purchase, approved adjustment, installation) creates a corresponding `inventory_transactions` entry for full audit trail.
+- **Any-category lines and field bills**: `checkout_items` can hold "Any <category>" lines (no product) and their per-product child rows; never count both — use `reportableItems()` from `js/utils/field-stock.js`. Bills with `sales.checkout_session_id` move no stock. See `category-issue.md`.
 - **Atomic stock writes**: All stock-mutating flows go through intent-specific Postgres RPCs (`record_sale`, `update_sale`, `delete_sale`, `approve_issue`, `approve_return`, `admin_issue_stock`, `record_stock_intake`, `record_damage_loss`, `create_rental`, `return_rental`, `set_product_stock`). Never update `products.current_stock` directly from browser code.
 - **Pagination**: Aggregations over high-volume tables use `db.fetchAllPaged()` to avoid silent 1000-row truncation. Display lists use `limit:N` or true server-side pagination.
 - **Role-based access**: Admin sees all pages. Seller nav is Dashboard, Daily Operations, Record Sale, Collections, Parties, Help (Help is in both navs); sellers see only their own sessions, sales and followups (RLS-enforced).

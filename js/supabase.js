@@ -275,18 +275,127 @@ function normalizePaymentAmount(paymentStatus, amountReceived, total) {
   return amount;
 }
 
+// Issue lines: { product_id, quantity } or an "Any <category>" line
+// { category_id, quantity } (migration 018).
 function normalizeCheckoutItems(items) {
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error('At least one checkout item is required');
   }
   return items.map(item => {
-    const productId = Number(item.product_id);
+    const productId = item.product_id ? Number(item.product_id) : null;
+    const categoryId = item.category_id ? Number(item.category_id) : null;
     const quantity = Number(item.quantity);
-    if (!productId || !Number.isFinite(quantity) || quantity <= 0) {
+    if (!Number.isFinite(quantity) || quantity <= 0 || (!productId && !categoryId) || (productId && categoryId)) {
       throw new Error('Invalid checkout item');
     }
-    return { product_id: productId, quantity };
+    return { product_id: productId, category_id: categoryId, quantity };
   });
+}
+
+// --- "Any <category>" lines and field-stock bills (mirror of migration 018) ---
+const EPS = 1e-9;
+const isAnyLine = item => item.product_id == null && item.parent_item_id == null;
+
+function heldQty(store, categoryId, excludeSessionId = null) {
+  const open = new Set(store.checkout_sessions
+    .filter(s => ['checked_out', 'pending_approval'].includes(s.status) && s.id !== excludeSessionId)
+    .map(s => s.id));
+  return round3(store.checkout_items
+    .filter(i => isAnyLine(i) && i.category_id === categoryId && open.has(i.session_id))
+    .reduce((sum, i) => sum + Number(i.checkout_quantity || 0), 0));
+}
+
+// A product line counts against its product's category, even if the row also
+// carries a category_id.
+function lineCategoryId(store, item) {
+  if (item.product_id != null) return store.products.find(p => p.id === item.product_id)?.category_id ?? item.category_id ?? null;
+  return item.category_id ?? null;
+}
+
+// check_issue_availability: validate a session's issue lines before any deduction.
+function checkIssueAvailability(store, sessionId) {
+  const lines = store.checkout_items.filter(i => i.session_id === sessionId && i.parent_item_id == null);
+  const anyCats = new Set();
+  for (const line of lines.filter(isAnyLine)) {
+    const cat = (store.categories || []).find(c => c.id === line.category_id);
+    if (!cat) throw new Error('Invalid issue line: choose a product or a category');
+    const qty = Number(line.checkout_quantity);
+    if (!Number.isFinite(qty) || qty <= 0) throw new Error(`Quantity for Any ${cat.name} must be greater than zero`);
+    if (cat.type === 'unit' && !Number.isInteger(qty)) throw new Error(`Any ${cat.name} must be whole pieces`);
+    if (anyCats.has(cat.id)) throw new Error(`Any ${cat.name} is listed twice; combine it into one line`);
+    anyCats.add(cat.id);
+  }
+
+  const byProduct = {};
+  for (const line of lines.filter(l => l.product_id != null)) {
+    byProduct[line.product_id] = (byProduct[line.product_id] || 0) + Number(line.checkout_quantity || 0);
+  }
+  for (const [pid, qty] of Object.entries(byProduct)) {
+    const product = store.products.find(p => p.id === Number(pid));
+    if (!product) throw new Error(`Product ${pid} does not exist`);
+    if (qty > Number(product.current_stock || 0) + EPS) throw new Error(`Insufficient stock for ${product.name}`);
+  }
+
+  const cats = new Set(lines.map(l => lineCategoryId(store, l)).filter(id => id != null));
+  for (const catId of cats) {
+    const cat = (store.categories || []).find(c => c.id === catId);
+    const stock = store.products.filter(p => p.category_id === catId)
+      .reduce((sum, p) => sum + Math.max(Number(p.current_stock || 0), 0), 0);
+    const held = heldQty(store, catId, sessionId);
+    const wanted = lines.filter(l => lineCategoryId(store, l) === catId)
+      .reduce((sum, l) => sum + Number(l.checkout_quantity || 0), 0);
+    if (wanted > stock - held + EPS) {
+      throw new Error(`Not enough ${cat?.name || 'stock'} in the warehouse: ${round3(Math.max(stock - held, 0))} free (${held} out with staff as Any), ${round3(wanted)} asked`);
+    }
+  }
+}
+
+// check_field_sale_capacity: bills linked to a session sell only what it issued.
+function checkFieldSaleCapacity(store, sessionId) {
+  const saleIds = new Set(store.sales.filter(s => s.checkout_session_id === sessionId).map(s => s.id));
+  const sold = {};
+  store.sale_items.filter(si => saleIds.has(si.sale_id)).forEach(si => {
+    sold[si.product_id] = (sold[si.product_id] || 0) + Number(si.quantity || 0);
+  });
+  const lines = store.checkout_items.filter(i => i.session_id === sessionId && i.parent_item_id == null);
+  const overflowByCat = {};
+  for (const [pid, qty] of Object.entries(sold)) {
+    const product = store.products.find(p => p.id === Number(pid));
+    const specific = lines.filter(l => l.product_id === Number(pid)).reduce((s, l) => s + Number(l.checkout_quantity || 0), 0);
+    const overflow = Math.max(qty - specific, 0);
+    if (overflow > EPS) {
+      if (!lines.some(l => isAnyLine(l) && l.category_id === product?.category_id)) {
+        throw new Error(`${product?.name || 'Product'} was not issued to this staff member (or more is billed than was issued)`);
+      }
+      overflowByCat[product.category_id] = (overflowByCat[product.category_id] || 0) + overflow;
+    }
+  }
+  for (const [catId, overflow] of Object.entries(overflowByCat)) {
+    const anyLine = lines.find(l => isAnyLine(l) && l.category_id === Number(catId));
+    const cat = (store.categories || []).find(c => c.id === Number(catId));
+    if (overflow > Number(anyLine.checkout_quantity) + EPS) {
+      throw new Error(`Bills sell ${round3(overflow)} from Any ${cat?.name || 'category'}, but only ${anyLine.checkout_quantity} were issued`);
+    }
+  }
+}
+
+function assertOpenFieldSession(store, sessionId, actorId) {
+  const session = store.checkout_sessions.find(s => s.id === Number(sessionId));
+  if (!session) throw new Error(`Session ${sessionId} not found`);
+  const actor = (store.profiles || []).find(p => p.id === actorId);
+  if (actor?.role !== 'admin' && session.seller_id !== actorId) {
+    throw new Error('You can only bill from your own field stock');
+  }
+  if (session.status !== 'checked_out') {
+    throw new Error(`Field stock of session ${session.id} is not open (its return was already submitted)`);
+  }
+  return session;
+}
+
+function nextId(store, table) {
+  const id = store._nextId[table] || 1;
+  store._nextId[table] = id + 1;
+  return id;
 }
 
 function addInventoryTransaction(store, { product_id, type, quantity, reference_type, reference_id, performed_by, notes, created_at }) {
@@ -352,11 +461,15 @@ const demoRpc = {
 
   // record_sale(...) — insert sale + line items + deduct stock + log transactions.
   // p_items: [{ product_id, quantity, unit_price }, ...]
-  record_sale({ p_party_id, p_items, p_payment_status, p_payment_method, p_amount_received, p_expected_payment_date, p_sale_date, p_notes, p_recorded_by, p_sale_type }) {
+  // p_checkout_session_id (migration 018): bill from the staff member's open
+  // field stock — no warehouse stock change; the session's return books it.
+  record_sale({ p_party_id, p_items, p_payment_status, p_payment_method, p_amount_received, p_expected_payment_date, p_sale_date, p_notes, p_recorded_by, p_sale_type, p_checkout_session_id = null }) {
     const store = getStore();
     const now = new Date().toISOString();
     const items = normalizeSaleItems(p_items);
-    assertStockAvailableForSale(store, items);
+    const fieldSession = p_checkout_session_id ? assertOpenFieldSession(store, p_checkout_session_id, p_recorded_by) : null;
+    if (!fieldSession) assertStockAvailableForSale(store, items);
+    const recordedBy = fieldSession ? fieldSession.seller_id : p_recorded_by;
     if (!['paid', 'partial', 'pending'].includes(p_payment_status)) {
       throw new Error('Invalid payment status');
     }
@@ -380,8 +493,9 @@ const demoRpc = {
       expected_payment_date: p_payment_status === 'paid' ? null : p_expected_payment_date,
       sale_date: p_sale_date,
       notes: p_notes,
-      recorded_by: p_recorded_by,
+      recorded_by: recordedBy,
       sale_type: saleType,
+      checkout_session_id: fieldSession ? fieldSession.id : null,
       created_at: now,
     });
     store._nextId.sales = saleId + 1;
@@ -399,7 +513,7 @@ const demoRpc = {
       });
       store._nextId.sale_items = siId + 1;
 
-      const pIdx = store.products.findIndex(p => p.id === item.product_id);
+      if (fieldSession) continue;
       applyStockDelta(store, item.product_id, -item.quantity);
 
       addInventoryTransaction(store, {
@@ -408,11 +522,13 @@ const demoRpc = {
         quantity: -item.quantity,
         reference_type: 'sale',
         reference_id: saleId,
-        performed_by: p_recorded_by,
+        performed_by: recordedBy,
         notes: p_party_id ? 'Sale to party' : 'Sale to walk-in',
         created_at: now,
       });
     }
+
+    if (fieldSession) checkFieldSaleCapacity(store, fieldSession.id);
 
     saveStore(store);
     return saleId;
@@ -438,11 +554,26 @@ const demoRpc = {
     for (const item of oldItems) {
       restoreByProduct[item.product_id] = (restoreByProduct[item.product_id] || 0) + item.quantity;
     }
-    assertStockAvailableForSale(store, newItems, restoreByProduct);
+    const fieldSessionId = store.sales[saleIdx].checkout_session_id || null;
+    const fieldStatus = fieldSessionId ? store.checkout_sessions.find(s => s.id === fieldSessionId)?.status : null;
+    if (fieldSessionId) {
+      const net = { ...restoreByProduct };
+      newItems.forEach(i => { net[i.product_id] = (net[i.product_id] || 0) - i.quantity; });
+      const itemsChanged = Object.values(net).some(q => Math.abs(q) > EPS);
+      if (itemsChanged && fieldStatus === 'pending_approval') {
+        throw new Error(`Bill #${p_sale_id} is part of a submitted field return. Send the return back first, then change its items`);
+      }
+      if (itemsChanged && fieldStatus !== 'checked_out') {
+        throw new Error(`Bill #${p_sale_id} was settled in an approved field return; its products and quantities can no longer change`);
+      }
+    } else {
+      assertStockAvailableForSale(store, newItems, restoreByProduct);
+    }
     const total = roundMoney(newItems.reduce((s, i) => s + i.line_total, 0));
     const amountReceived = normalizePaymentAmount(p_payment_status, p_amount_received, total);
 
     for (const item of oldItems) {
+      if (fieldSessionId) break;
       applyStockDelta(store, item.product_id, item.quantity);
       addInventoryTransaction(store, {
         product_id: item.product_id,
@@ -484,6 +615,7 @@ const demoRpc = {
       });
       store._nextId.sale_items = siId + 1;
 
+      if (fieldSessionId) continue;
       applyStockDelta(store, item.product_id, -item.quantity);
       addInventoryTransaction(store, {
         product_id: item.product_id,
@@ -496,6 +628,8 @@ const demoRpc = {
         created_at: now,
       });
     }
+
+    if (fieldSessionId && fieldStatus === 'checked_out') checkFieldSaleCapacity(store, fieldSessionId);
 
     // Handle syncing with payment_followups
     const oldCollected = store.payment_followups
@@ -746,18 +880,27 @@ const demoRpc = {
     store._nextId.checkout_sessions = sessionId + 1;
 
     for (const item of items) {
-      const itemId = store._nextId.checkout_items || 1;
+      if (item.product_id && !store.products.some(p => p.id === item.product_id)) {
+        throw new Error(`Product ${item.product_id} does not exist`);
+      }
       store.checkout_items.push({
-        id: itemId,
+        id: nextId(store, 'checkout_items'),
         session_id: sessionId,
         product_id: item.product_id,
+        category_id: item.category_id,
+        parent_item_id: null,
         checkout_quantity: item.quantity,
         checkin_quantity: null,
         is_flagged: false,
         flag_reason: null,
         created_at: now,
       });
-      store._nextId.checkout_items = itemId + 1;
+    }
+    checkIssueAvailability(store, sessionId);
+
+    // Product lines leave stock now; Any lines are held until the return.
+    for (const item of items) {
+      if (!item.product_id) continue;
       applyStockDelta(store, item.product_id, -item.quantity);
       addInventoryTransaction(store, {
         product_id: item.product_id,
@@ -783,7 +926,8 @@ const demoRpc = {
     const session = store.checkout_sessions[sIdx];
     if (session.status !== 'pending_issue') throw new Error(`Session ${p_session_id} is not pending_issue`);
 
-    const items = store.checkout_items.filter(i => i.session_id === p_session_id);
+    checkIssueAvailability(store, p_session_id);
+    const items = store.checkout_items.filter(i => i.session_id === p_session_id && i.product_id != null && i.parent_item_id == null);
     const now = new Date().toISOString();
 
     for (const item of items) {
@@ -813,9 +957,12 @@ const demoRpc = {
   },
 
   // submit_return(session_id, items, notes, submitted_by) — staff (or admin)
-  // records Returned + Used per item. Computes Difference = Issued − Returned −
-  // Used and marks mismatches beyond the tolerance. No stock change until
-  // approve_return.
+  // records the return. Product lines: Returned + Used (Difference = Issued −
+  // Returned − Used, mismatch beyond the tolerance). Any lines (migration
+  // 018): a breakdown naming the type of every piece (returned / used / lost),
+  // written as child rows; the total must equal the issued quantity. "Sold"
+  // usage comes from bills linked to the session, allocated to the product's
+  // own lines first. No stock change until approve_return.
   submit_return({ p_session_id, p_items, p_notes, p_submitted_by }) {
     const store = getStore();
     const sIdx = store.checkout_sessions.findIndex(s => s.id === p_session_id);
@@ -827,6 +974,10 @@ const demoRpc = {
       throw new Error('Only the assigned staff member or an admin can submit this return');
     }
 
+    // Re-submission after "Send back": rebuild usage and child rows.
+    store.checkout_items = store.checkout_items.filter(i => !(i.session_id === p_session_id && i.parent_item_id != null));
+    store.checkout_usage = store.checkout_usage.filter(u => u.session_id !== p_session_id);
+
     const sessionItems = store.checkout_items.filter(i => i.session_id === p_session_id);
     if (!Array.isArray(p_items) || p_items.length !== sessionItems.length) {
       throw new Error('Every issued item must be included in the return');
@@ -834,35 +985,77 @@ const demoRpc = {
 
     const now = new Date().toISOString();
     const seen = new Set();
-    const plans = p_items.map(input => {
+    const entries = p_items.map(input => {
       const item = sessionItems.find(i => i.id === Number(input.item_id));
       if (!item) throw new Error('Return item does not belong to this session');
       if (seen.has(item.id)) throw new Error('Return item listed twice');
       seen.add(item.id);
+      return { input, item };
+    });
+
+    // Sold on bills linked to this session, per product and bill.
+    const linkedSales = store.sales.filter(s => s.checkout_session_id === p_session_id).sort((a, b) => a.id - b.id);
+    const soldLeft = [];
+    for (const sale of linkedSales) {
+      const byProduct = {};
+      store.sale_items.filter(si => si.sale_id === sale.id).forEach(si => {
+        byProduct[si.product_id] = (byProduct[si.product_id] || 0) + Number(si.quantity || 0);
+      });
+      Object.entries(byProduct).forEach(([pid, qty]) => soldLeft.push({ product_id: Number(pid), sale_id: sale.id, party_id: sale.party_id ?? null, qty }));
+    }
+
+    const usageRows = [];
+    const parseUsage = (product, list) => {
+      const isMachine = isMachineProduct(store, product);
+      return (list || []).map(u => {
+        if (!USAGE_REASON_KEYS.includes(u.reason)) throw new Error('Invalid usage reason');
+        const quantity = round3(u.quantity);
+        if (!Number.isFinite(Number(u.quantity)) || quantity <= 0) throw new Error('Usage quantity must be greater than zero');
+        const partyId = u.party_id ? Number(u.party_id) : null;
+        if (partyId && !(store.parties || []).some(p => p.id === partyId)) throw new Error(`Customer ${partyId} does not exist`);
+        if (u.reason === 'installation' && isMachine) {
+          if (!partyId) throw new Error(`Choose the customer where ${product.name} was installed`);
+          if (!Number.isInteger(quantity)) throw new Error('Installed machines must be whole numbers');
+        }
+        return { reason: u.reason, quantity, party_id: partyId, notes: String(u.notes || '').trim() || null, sale_id: null };
+      });
+    };
+    const takeSold = (productId, limit) => {
+      const lines = [];
+      let taken = 0;
+      for (const row of soldLeft) {
+        if (row.product_id !== productId || row.qty <= EPS) continue;
+        const take = round3(Math.min(row.qty, limit - taken));
+        if (take <= 0) break;
+        lines.push({ reason: 'sold', quantity: take, party_id: row.party_id, notes: `Bill #${row.sale_id}`, sale_id: row.sale_id });
+        row.qty = round3(row.qty - take);
+        taken = round3(taken + take);
+      }
+      return lines;
+    };
+    const pushUsage = (item, productId, lines) => lines.forEach(u => usageRows.push({
+      id: nextId(store, 'checkout_usage'), item_id: item.id, session_id: p_session_id, product_id: productId, ...u, created_at: now,
+    }));
+    const setItem = (id, updates) => {
+      const idx = store.checkout_items.findIndex(i => i.id === id);
+      store.checkout_items[idx] = { ...store.checkout_items[idx], ...updates, updated_at: now };
+    };
+
+    let hasDiscrepancy = false;
+
+    // Pass 1: product lines, in item id order (same as allocateSold()).
+    for (const { input, item } of entries.filter(e => e.item.product_id != null).sort((a, b) => a.item.id - b.item.id)) {
       const product = store.products.find(p => p.id === item.product_id);
       const rawReturned = input.returned_quantity;
       const returned = round3(rawReturned);
       if (rawReturned === null || rawReturned === undefined || rawReturned === '' || !Number.isFinite(Number(rawReturned)) || returned < 0) {
         throw new Error(`Invalid returned quantity for ${product?.name}`);
       }
-
-      const usage = (input.usage || []).map(u => {
-        if (!USAGE_REASON_KEYS.includes(u.reason)) throw new Error('Invalid usage reason');
-        const quantity = round3(u.quantity);
-        if (!Number.isFinite(Number(u.quantity)) || quantity <= 0) throw new Error('Usage quantity must be greater than zero');
-        const partyId = u.party_id ? Number(u.party_id) : null;
-        if (partyId && !(store.parties || []).some(p => p.id === partyId)) throw new Error(`Customer ${partyId} does not exist`);
-        if (u.reason === 'installation' && isMachineProduct(store, product)) {
-          if (!partyId) throw new Error(`Choose the customer where ${product.name} was installed`);
-          if (!Number.isInteger(quantity)) throw new Error('Installed machines must be whole numbers');
-        }
-        return { reason: u.reason, quantity, party_id: partyId, notes: String(u.notes || '').trim() || null };
-      });
-
       const issued = Number(item.checkout_quantity || 0);
+      const usage = [...parseUsage(product, input.usage), ...takeSold(item.product_id, issued)];
       const used = round3(usage.reduce((s, u) => s + u.quantity, 0));
       const difference = round3(issued - returned - used);
-      const hasMismatch = Math.abs(difference) > toleranceFor(store, product?.type) + 1e-9;
+      const hasMismatch = Math.abs(difference) > toleranceFor(store, product?.type) + EPS;
       const consumed = round3(issued - returned);
       const limit = Number(product?.max_daily_consumption || DEFAULT_DAILY_CONSUMPTION);
       const reasons = [];
@@ -870,40 +1063,107 @@ const demoRpc = {
         reasons.push(`${difference > 0 ? 'Shortage' : 'Excess'} of ${formatQtyText(Math.abs(difference), product?.type)}`);
       }
       if (consumed > limit) reasons.push(`Consumed ${consumed} exceeds daily limit ${limit}`);
-      return { item, usage, returned, used, difference, hasMismatch, flagReason: reasons.join('; ') || null };
-    });
-
-    const itemIds = new Set(sessionItems.map(i => i.id));
-    store.checkout_usage = store.checkout_usage.filter(u => !itemIds.has(u.item_id));
-    for (const plan of plans) {
-      for (const u of plan.usage) {
-        const usageId = store._nextId.checkout_usage || 1;
-        store.checkout_usage.push({
-          id: usageId,
-          item_id: plan.item.id,
-          session_id: p_session_id,
-          product_id: plan.item.product_id,
-          ...u,
-          created_at: now,
-        });
-        store._nextId.checkout_usage = usageId + 1;
-      }
-      const idx = store.checkout_items.findIndex(i => i.id === plan.item.id);
-      store.checkout_items[idx] = {
-        ...plan.item,
-        checkin_quantity: plan.returned,
-        used_quantity: plan.used,
-        difference: plan.difference,
-        has_mismatch: plan.hasMismatch,
-        is_flagged: Boolean(plan.flagReason),
-        flag_reason: plan.flagReason,
+      const flagReason = reasons.join('; ') || null;
+      pushUsage(item, item.product_id, usage);
+      setItem(item.id, {
+        checkin_quantity: returned,
+        used_quantity: used,
+        difference,
+        has_mismatch: hasMismatch,
+        is_flagged: Boolean(flagReason),
+        flag_reason: flagReason,
         discrepancy_type: null,
         discrepancy_note: null,
-        updated_at: now,
-      };
+      });
+      hasDiscrepancy = hasDiscrepancy || hasMismatch;
     }
 
-    const hasDiscrepancy = plans.some(p => p.hasMismatch);
+    // Pass 2: Any lines — every piece named by type.
+    for (const { input, item } of entries.filter(e => e.item.product_id == null)) {
+      const category = (store.categories || []).find(c => c.id === item.category_id);
+      const catName = category?.name || 'category';
+      if (!Array.isArray(input.breakdown)) throw new Error(`Say which ${catName} came back, were used or lost`);
+
+      const breakdown = [...input.breakdown];
+      const listed = new Set(breakdown.map(b => Number(b.product_id)));
+      [...new Set(soldLeft.filter(r => r.qty > EPS).map(r => r.product_id))]
+        .filter(pid => !listed.has(pid) && store.products.find(p => p.id === pid)?.category_id === item.category_id)
+        .forEach(pid => breakdown.push({ product_id: pid, returned_quantity: 0, lost_quantity: 0, usage: [] }));
+
+      const seenProducts = new Set();
+      let sumReturned = 0, sumUsed = 0, sumLost = 0;
+      for (const entry of breakdown) {
+        const product = store.products.find(p => p.id === Number(entry.product_id));
+        if (!product || product.category_id !== item.category_id) throw new Error(`Choose a ${catName} product for every line`);
+        if (seenProducts.has(product.id)) throw new Error(`${product.name} is listed twice`);
+        seenProducts.add(product.id);
+
+        const num = v => (v === null || v === undefined || v === '' ? 0 : Number(v));
+        const returned = round3(num(entry.returned_quantity));
+        const lost = round3(num(entry.lost_quantity));
+        if (!Number.isFinite(returned) || returned < 0 || !Number.isFinite(lost) || lost < 0) {
+          throw new Error(`Invalid quantity for ${product.name}`);
+        }
+        if (category?.type === 'unit' && (!Number.isInteger(returned) || !Number.isInteger(lost))) {
+          throw new Error(`${product.name} must be whole pieces`);
+        }
+        const manual = parseUsage(product, entry.usage);
+        const manualQty = round3(manual.reduce((s, u) => s + u.quantity, 0));
+        if (category?.type === 'unit' && !Number.isInteger(manualQty)) throw new Error(`${product.name} must be whole pieces`);
+        const usage = [...manual, ...takeSold(product.id, Infinity)];
+        const used = round3(usage.reduce((s, u) => s + u.quantity, 0));
+        if (returned + used + lost <= 0) continue;
+
+        const hasMismatch = lost > toleranceFor(store, product.type) + EPS;
+        const child = {
+          id: nextId(store, 'checkout_items'),
+          session_id: p_session_id,
+          product_id: product.id,
+          category_id: item.category_id,
+          parent_item_id: item.id,
+          checkout_quantity: round3(returned + used + lost),
+          checkin_quantity: returned,
+          used_quantity: used,
+          difference: lost,
+          has_mismatch: hasMismatch,
+          is_flagged: hasMismatch,
+          flag_reason: hasMismatch ? `Lost ${formatQtyText(lost, product.type)}` : null,
+          discrepancy_type: null,
+          discrepancy_note: null,
+          created_at: now,
+        };
+        store.checkout_items.push(child);
+        pushUsage(child, product.id, usage);
+        sumReturned = round3(sumReturned + returned);
+        sumUsed = round3(sumUsed + used);
+        sumLost = round3(sumLost + lost);
+        hasDiscrepancy = hasDiscrepancy || hasMismatch;
+      }
+
+      const accounted = round3(sumReturned + sumUsed + sumLost);
+      const issued = Number(item.checkout_quantity || 0);
+      if (Math.abs(accounted - issued) > EPS) {
+        throw new Error(`Any ${catName}: ${issued} issued but ${accounted} accounted for. Name every piece (returned, used, sold or lost)`);
+      }
+      setItem(item.id, {
+        checkin_quantity: sumReturned,
+        used_quantity: sumUsed,
+        difference: sumLost,
+        has_mismatch: false,
+        is_flagged: false,
+        flag_reason: null,
+        discrepancy_type: null,
+        discrepancy_note: null,
+      });
+    }
+
+    const leftover = soldLeft.find(r => r.qty > EPS);
+    if (leftover) {
+      const product = store.products.find(p => p.id === leftover.product_id);
+      throw new Error(`Bills from this field stock sell more ${product?.name || 'product'} than was issued`);
+    }
+
+    store.checkout_usage.push(...usageRows);
     store.checkout_sessions[sIdx] = {
       ...session,
       status: 'pending_approval',
@@ -919,8 +1179,10 @@ const demoRpc = {
 
   // approve_return(session_id, approver_id, resolutions) — admin approves a
   // return. Every mismatched item needs { item_id, discrepancy_type, note }.
-  // Restores the returned quantity; machines used for an installation are
-  // counted back into Total Stock and added to Installed Qty + Installations.
+  // Product lines restore the returned quantity; Any children take stock off
+  // each named product once (checkout −taken, checkin +returned). Machines
+  // used for an installation are counted back into Total Stock and added to
+  // Installed Qty + Installations.
   approve_return({ p_session_id, p_approver_id, p_resolutions }) {
     const store = getStore();
     assertDemoAdmin(store, p_approver_id, 'Only admins can approve returns');
@@ -940,19 +1202,15 @@ const demoRpc = {
     }
 
     const now = new Date().toISOString();
+    const txn = (productId, type, quantity, notes) => addInventoryTransaction(store, {
+      product_id: productId, type, quantity, reference_type: 'checkout_session', reference_id: p_session_id,
+      performed_by: p_approver_id, notes, created_at: now,
+    });
+
     for (const item of sessionItems) {
-      if ((item.checkin_quantity || 0) > 0) {
+      if (item.parent_item_id == null && item.product_id != null && (item.checkin_quantity || 0) > 0) {
         applyStockDelta(store, item.product_id, item.checkin_quantity);
-        addInventoryTransaction(store, {
-          product_id: item.product_id,
-          type: 'checkin',
-          quantity: item.checkin_quantity,
-          reference_type: 'checkout_session',
-          reference_id: p_session_id,
-          performed_by: p_approver_id,
-          notes: 'Approved return — stock restored',
-          created_at: now,
-        });
+        txn(item.product_id, 'checkin', item.checkin_quantity, 'Approved return — stock restored');
       }
       if (item.has_mismatch) {
         const r = resolutions.get(item.id);
@@ -974,19 +1232,9 @@ const demoRpc = {
       const party = (store.parties || []).find(p => p.id === u.party_id);
       applyStockDelta(store, u.product_id, u.quantity);
       product.installed_qty = Number(product.installed_qty || 0) + u.quantity;
-      addInventoryTransaction(store, {
-        product_id: u.product_id,
-        type: 'installed',
-        quantity: u.quantity,
-        reference_type: 'checkout_session',
-        reference_id: p_session_id,
-        performed_by: p_approver_id,
-        notes: `Installed at ${party?.name || 'customer'} — moved to Installed Qty`,
-        created_at: now,
-      });
-      const installId = store._nextId.installations || 1;
+      txn(u.product_id, 'installed', u.quantity, `Installed at ${party?.name || 'customer'} — moved to Installed Qty`);
       store.installations.push({
-        id: installId,
+        id: nextId(store, 'installations'),
         party_id: u.party_id,
         product_id: u.product_id,
         quantity: u.quantity,
@@ -996,8 +1244,23 @@ const demoRpc = {
         notes: `Installed by ${staff?.full_name || 'staff'} (Daily Operations session #${p_session_id})`,
         created_at: now,
       });
-      store._nextId.installations = installId + 1;
     }
+
+    // Any children run after the installations above, which count installed
+    // machines back into Total Stock, so an installed machine is never refused here.
+    for (const child of sessionItems.filter(i => i.parent_item_id != null)) {
+      const product = store.products.find(p => p.id === child.product_id);
+      const category = (store.categories || []).find(c => c.id === child.category_id);
+      const returned = Number(child.checkin_quantity || 0);
+      const taken = Number(child.checkout_quantity || 0);
+      if (Number(product?.current_stock || 0) + returned - taken < -EPS) {
+        throw new Error(`Stock of ${product?.name} is lower than this return takes (${product?.current_stock} in stock). Correct the stock first`);
+      }
+      applyStockDelta(store, child.product_id, round3(returned - taken));
+      txn(child.product_id, 'checkout', -taken, `Issued as Any ${category?.name || 'category'} — type named on return`);
+      if (returned > 0) txn(child.product_id, 'checkin', returned, 'Approved return — stock restored');
+    }
+
 
     store.checkout_sessions[sIdx] = {
       ...session,
@@ -1025,18 +1288,20 @@ const demoRpc = {
 
     const now = new Date().toISOString();
     store.checkout_usage = store.checkout_usage.filter(u => u.session_id !== p_session_id);
-    store.checkout_items = store.checkout_items.map(i => (i.session_id !== p_session_id ? i : {
-      ...i,
-      checkin_quantity: null,
-      used_quantity: null,
-      difference: null,
-      has_mismatch: false,
-      is_flagged: false,
-      flag_reason: null,
-      discrepancy_type: null,
-      discrepancy_note: null,
-      updated_at: now,
-    }));
+    store.checkout_items = store.checkout_items
+      .filter(i => !(i.session_id === p_session_id && i.parent_item_id != null))
+      .map(i => (i.session_id !== p_session_id ? i : {
+        ...i,
+        checkin_quantity: null,
+        used_quantity: null,
+        difference: null,
+        has_mismatch: false,
+        is_flagged: false,
+        flag_reason: null,
+        discrepancy_type: null,
+        discrepancy_note: null,
+        updated_at: now,
+      }));
     store.checkout_sessions[sIdx] = {
       ...session,
       status: 'checked_out',
@@ -1047,6 +1312,17 @@ const demoRpc = {
     };
     saveStore(store);
     return null;
+  },
+
+  // get_category_holds() — quantity per category held by open Any lines.
+  get_category_holds() {
+    const store = getStore();
+    const held = {};
+    const open = new Set(store.checkout_sessions.filter(s => ['checked_out', 'pending_approval'].includes(s.status)).map(s => s.id));
+    store.checkout_items.filter(i => isAnyLine(i) && open.has(i.session_id)).forEach(i => {
+      held[i.category_id] = round3((held[i.category_id] || 0) + Number(i.checkout_quantity || 0));
+    });
+    return Object.entries(held).map(([category_id, qty]) => ({ category_id: Number(category_id), held: qty }));
   },
 
   // record_purchase(...) — purchase entry: supplier, rate and bill on a
@@ -1179,7 +1455,16 @@ const demoRpc = {
     const items = store.sale_items.filter(si => si.sale_id === p_sale_id);
     const now = new Date().toISOString();
 
+    // Field-stock bill: no stock moves (still with staff, or settled by the approved return).
+    const fieldStatus = sale.checkout_session_id
+      ? store.checkout_sessions.find(s => s.id === sale.checkout_session_id)?.status
+      : null;
+    if (fieldStatus === 'pending_approval') {
+      throw new Error(`Bill #${p_sale_id} is part of a submitted field return. Send the return back first, then delete the bill`);
+    }
+
     for (const item of items) {
+      if (sale.checkout_session_id) break;
       applyStockDelta(store, item.product_id, item.quantity);
 
       addInventoryTransaction(store, {
@@ -1199,6 +1484,7 @@ const demoRpc = {
     store.payment_followups = (store.payment_followups || []).map(f => (
       f.sale_id === p_sale_id ? { ...f, sale_id: null, updated_at: now } : f
     ));
+    store.checkout_usage = (store.checkout_usage || []).map(u => (u.sale_id === p_sale_id ? { ...u, sale_id: null } : u));
     store.sales = store.sales.filter(s => s.id !== p_sale_id);
 
     saveStore(store);

@@ -1,7 +1,7 @@
 # Help Centre (in-app Help page)
 
 ## What it does
-A searchable **Help** page inside the app (last item in the menu, for admins and sellers) with step-by-step guides and screenshots for every action in the system, plus "common questions" articles for when something looks wrong. Added 2026-11-01: 7 topics, 161 guides, 166 screenshots. Sellers only see guides whose `roles` include `seller`; admins see all of them.
+A searchable **Help** page inside the app (last item in the menu, for admins and sellers) with step-by-step guides and screenshots for every action in the system, plus "common questions" articles for when something looks wrong. Added 2026-11-01: 7 topics, 161 guides, 166 screenshots. 2026-11-19 (Any-category issue + field bills): 167 guides, 181 screenshots. Sellers only see guides whose `roles` include `seller`; admins see all of them.
 
 ## How it is structured
 | Path | Role |

@@ -1,5 +1,6 @@
 import { db, auth, supabase } from '../supabase.js';
 import { formatCurrency, formatStock, availableStock, formatDate, formatDateTime, formatPricePerUnit, showToast, createModal, debounce, escapeHtml, dbOp, withSaving } from '../utils/helpers.js';
+import { holdsMap, categoryFreeStock } from '../utils/field-stock.js';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || '';
 
@@ -19,7 +20,7 @@ function productImageHtml(product, size = 'card') {
   return `<div class="product-card-img" style="display:flex;align-items:center;justify-content:center;font-size:2.5rem;color:var(--text-muted);"><i class="fas ${product.type === 'liquid' ? 'fa-flask' : 'fa-box'}"></i></div>`;
 }
 
-function stockSummaryHtml(filtered) {
+function stockSummaryHtml(filtered, extraChip = '') {
   const unitProducts = filtered.filter(p => p.type !== 'liquid');
   const liquidProducts = filtered.filter(p => p.type === 'liquid');
   const unitTotal = unitProducts.reduce((sum, p) => sum + Number(p.current_stock || 0), 0);
@@ -34,7 +35,27 @@ function stockSummaryHtml(filtered) {
     chips.push(`<span class="stock-summary-chip"><i class="fas fa-flask"></i> ${formatStock(liquidTotal, 'liquid')} <small>(${liquidProducts.length} items)</small></span>`);
   }
 
+  if (extraChip) chips.push(extraChip);
   return `<div class="stock-summary-bar">${chips.join('')}</div>`;
+}
+
+// Stock out with staff on open "Any <category>" lines (knowledge-base/category-issue.md).
+// Product stock still includes these pieces until the return names them.
+function heldText(catId, cat, holds, products) {
+  const type = cat?.type === 'liquid' ? 'liquid' : 'unit';
+  return `${formatStock(holds[catId], type)} out, ${formatStock(categoryFreeStock(catId, products, holds), type)} free on shelf`;
+}
+
+function categoryHoldsHtml(holds, catMap, products) {
+  const held = Object.keys(holds).map(Number).filter(id => holds[id] > 0);
+  if (held.length === 0) return '';
+  return `<div class="card" id="category-holds-notice" style="margin-bottom:16px;border-left:4px solid var(--blue);">
+    <div class="card-body" style="padding:12px 16px;font-size:0.85rem;">
+      <i class="fas fa-person-walking-luggage" style="color:var(--blue);margin-right:6px;"></i>
+      <strong>Out with staff as Any (types named on return):</strong>
+      ${held.map(id => `<span class="category-hold" data-category-id="${id}" style="margin-left:8px;white-space:nowrap;">${escapeHtml(catMap[id]?.name || 'Category')} — ${heldText(id, catMap[id], holds, products)}</span>`).join(' ·')}
+    </div>
+  </div>`;
 }
 
 // Signed stock change, e.g. "+5 pcs" / "−0.250 kg".
@@ -155,13 +176,15 @@ export async function renderProducts(body, header) {
   `;
   document.getElementById('mobile-toggle')?.addEventListener('click', () => document.getElementById('sidebar').classList.toggle('open'));
 
-  const [{ data: products }, { data: categories }, { data: parties }, { data: adjustmentRows }, { data: profiles }] = await Promise.all([
+  const [{ data: products }, { data: categories }, { data: parties }, { data: adjustmentRows }, { data: profiles }, { data: holdRows }] = await Promise.all([
     db.getAll('products'),
     db.getAll('categories'),
     db.getAll('parties'),
     db.getAll('stock_adjustments', { orderBy: ['created_at', 'desc'] }),
     db.getAll('profiles'),
+    db.rpc('get_category_holds', {}),
   ]);
+  const holds = holdsMap(holdRows);
   const catMap = Object.fromEntries(categories.map(c => [c.id, c]));
   const productMap = Object.fromEntries(products.map(p => [p.id, p]));
   const profileMap = Object.fromEntries((profiles || []).map(p => [p.id, p]));
@@ -190,6 +213,7 @@ export async function renderProducts(body, header) {
 
   body.innerHTML = `
     ${pendingAdjustmentsHtml(pendingAdjustments, productMap, profileName)}
+    ${categoryHoldsHtml(holds, catMap, products)}
     <div class="toolbar">
       <div class="toolbar-left">
         <div class="search-input">
@@ -227,13 +251,16 @@ export async function renderProducts(body, header) {
     if (filterFragrance) filtered = filtered.filter(p => p.fragrance === filterFragrance);
 
     const container = document.getElementById('products-container');
+    const heldChip = filterCat && holds[Number(filterCat)] > 0
+      ? `<span class="stock-summary-chip" id="category-hold-chip"><i class="fas fa-person-walking-luggage"></i> Any ${escapeHtml(catMap[Number(filterCat)]?.name || '')}: ${heldText(Number(filterCat), catMap[Number(filterCat)], holds, products)}</span>`
+      : '';
     if (filtered.length === 0) {
       container.innerHTML = '<div class="empty-state"><i class="fas fa-box-open"></i><h3>No products found</h3></div>';
       return;
     }
 
     if (view === 'grid') {
-      container.innerHTML = stockSummaryHtml(filtered) + `<div class="product-grid">${filtered.map(p => {
+      container.innerHTML = stockSummaryHtml(filtered, heldChip) + `<div class="product-grid">${filtered.map(p => {
         const cat = catMap[p.category_id];
         const available = availableStock(p);
         const isLow = available <= p.min_stock_threshold;
@@ -254,7 +281,7 @@ export async function renderProducts(body, header) {
         </div>`;
       }).join('')}</div>`;
     } else {
-      container.innerHTML = stockSummaryHtml(filtered) + `<div class="table-wrapper"><table class="data-table">
+      container.innerHTML = stockSummaryHtml(filtered, heldChip) + `<div class="table-wrapper"><table class="data-table">
         <thead><tr><th></th><th>Product</th><th>Fragrance</th><th>Category</th><th>Type</th><th>Price</th><th>Total Stock</th><th>Sell Qty</th><th>Installed Qty</th><th>Current Stock</th><th>Deployed</th><th>Threshold</th><th>Expiry</th><th>Actions</th></tr></thead>
         <tbody>${filtered.map(p => {
           const cat = catMap[p.category_id];

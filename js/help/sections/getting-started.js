@@ -181,7 +181,7 @@ export default {
         { type: 'h', text: 'Cards from top to bottom' },
         { type: 'table', head: ['Card', 'What it shows', 'Button and where it takes you'], rows: [
           ['**Overdue Refills**', 'AMC parties whose refill day this month has passed and were not marked done', '**Done** marks the refill done (stays on Dashboard)'],
-          ['**Stock Reconciliation**', 'Returns with a difference, stock still out from previous days, stock corrections waiting', '**Review** / **View** opens Daily Operations; adjustment **Review** opens Products'],
+          ['**Stock Reconciliation**', 'Returns with a difference, stock still out from previous days, stock corrections waiting, and pieces out with staff as Any', '**Review** / **View** opens Daily Operations; adjustment **Review** and the Any line\'s **View** open Products'],
           ['**Pending Approvals**', 'Stock requests and returns waiting for an admin', '**Review** opens Daily Operations'],
           ['**Today\'s AMC Refill Worklist**', 'AMC parties due for a refill today', '**Done** marks the refill done'],
           ['**Upcoming Refills (7 Days)**', 'AMC refills due in the next 7 days', 'No button; for planning'],
@@ -254,15 +254,16 @@ export default {
       summary: 'The Stock Reconciliation card warns you about stock that does not add up: returns with a difference, stock still out from earlier days, and stock corrections waiting for you.',
       keywords: ['discrepancy', 'mismatch', 'difference', 'not returned', 'stock out', 'adjustment', 'hisaab nahi mil raha', 'reconcile'],
       blocks: [
-        { type: 'img', src: 'dashboard-reconciliation-card.webp', alt: 'Stock Reconciliation card with three lines: a discrepancy return, an issue still out, and a stock adjustment', caption: 'The Stock Reconciliation card. The badge shows how many items to review.' },
+        { type: 'img', src: 'dashboard-reconciliation-card.webp', alt: 'Stock Reconciliation card with four lines: a discrepancy return, an issue still out, a stock adjustment, and 6 pcs Dispenser Refill out with staff as Any', caption: 'The Stock Reconciliation card. The badge shows how many items to review.' },
         { type: 'table', head: ['Line', 'What it means', 'What to do'], rows: [
           ['**return awaiting discrepancy approval**', 'A seller\'s return does not add up: what was issued is not equal to what was returned plus what was used.', 'Click **Review**. On Daily Operations, choose a reason for the difference, then approve. See [[daily-ops-approve-return]].'],
           ['**issue still out from previous days**', 'A seller took stock on an earlier day and has not returned it yet. The line names up to three sellers.', 'Click **View** to open Daily Operations. Ask the seller to return the stock ([[daily-ops-submit-return]]).'],
           ['**stock adjustment awaiting approval**', 'Someone asked to correct a product\'s stock number.', 'Click **Review** to open **Products** and approve or reject it. See [[products-request-adjustment]].'],
+          ['**… out with staff as Any** (blue)', 'Information only: pieces sellers carry as an Any line, for example "6 pcs Dispenser Refill". Their types are named on the return.', 'Nothing. **View** opens Products. See [[products-faq-out-with-staff-any]].'],
         ] },
-        { type: 'note', text: 'Each of these is also counted in the **Alerts** number. Stock does not change until an admin approves the return or the adjustment.' },
+        { type: 'note', text: 'Each of these, except the blue Any line, is also counted in the **Alerts** number. Stock does not change until an admin approves the return or the adjustment.' },
       ],
-      related: ['daily-ops-approve-return', 'products-request-adjustment', 'dashboard-pending-approvals', 'reports-staff-ledger'],
+      related: ['daily-ops-approve-return', 'products-request-adjustment', 'products-faq-out-with-staff-any', 'dashboard-pending-approvals', 'reports-staff-ledger'],
     },
     {
       id: 'dashboard-low-stock',

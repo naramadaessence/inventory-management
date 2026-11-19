@@ -266,14 +266,15 @@
 ---
 
 ## ISSUE-023: Possible Double Stock Deduction When A Seller Bills Stock Issued To Them
-**Status**: Open — business process question for the owner
-**Severity**: Medium (unverified)
+**Status**: Resolved (for bills recorded as "From field stock")
+**Severity**: Medium
 **Discovered**: 2026-11-01
-**Symptom**: Not observed yet. `record_sale` always deducts warehouse stock. If a seller takes stock out (the issue already deducted it), sells it, and records the bill on Record Sale, the same pieces may leave stock twice — unless the process expects sellers to report such sales only as "Customer service" usage on the return.
-**Root Cause**: The issue/return flow and the sale flow both move stock and are not linked.
-**Workaround**: Ask the owner how sellers are meant to record field sales. The Help guides describe each screen as it behaves and do not explain how the two flows combine.
-**Fix**:
-**Regression Test**:
+**Resolved**: 2026-11-19
+**Symptom**: `record_sale` always deducted warehouse stock. If a seller took stock out (the issue already deducted it), sold it, and recorded the bill on Record Sale, the same pieces left stock twice.
+**Root Cause**: The issue/return flow and the sale flow both moved stock and were not linked.
+**Workaround**: —
+**Fix**: Owner decided (2026-11-19) that field sales are billed on Record Sale with **From field stock**: the bill is linked to the staff member's open session (`sales.checkout_session_id`), moves no warehouse stock, and the return books it as Sold (migration 018, `category-issue.md`). A bill recorded with the default **Warehouse** source still deducts stock — staff must pick the field source for goods they carry.
+**Regression Test**: `tests/category-issue.test.js` (field bill moves no stock and appears as Sold)
 ---
 
 ## ISSUE-024: Several Pages Overflow Sideways On Phones
@@ -281,7 +282,7 @@
 **Severity**: Medium
 **Discovered**: 2026-11-01
 **Symptom**: At 390 px width, Daily Operations (~579 px wide), Parties (~918 px), Sales, Collections, Products and Reports are wider than the screen; header buttons such as **Request Stock**, **Record Sale**, **Log Visit**, **Add Party** sit off-screen to the right and windows open off-centre. The phone menu also can't be closed without choosing a page (no backdrop; the open menu covers the menu button).
-**Root Cause**: Wide tables without a scroll container that limits page width; page headers don't wrap.
+**Root Cause**: Wide tables without a scroll container that limits page width; page headers don't wrap. Found 2026-11-19: `.main-content` is a flex item with the default `min-width: auto`, so a wide table (or the 5-tab row on Daily Operations) widens the whole page to ~478–629 px and every fixed window (e.g. Issue Stock) becomes wider than the screen. The new Issue window itself fits in 350 px once the page doesn't overflow. Likely fix: `.main-content { min-width: 0 }` plus wrapping/scrolling the tab rows — needs a check of every page.
 **Workaround**: Help guides tell sellers to scroll right, and to tap the current page to close the menu.
 **Fix**:
 **Regression Test**:
@@ -310,3 +311,14 @@
 **Workaround**: Documented in the relevant Help guides where users would hit them.
 **Fix**:
 **Regression Test**:
+
+## ISSUE-026: Sellers Can Still Update Their Own Checkout Rows Directly
+**Status**: Open — needs owner decision
+**Severity**: Medium
+**Discovered**: 2026-11-19 (designing migration 018)
+**Symptom**: Not observed. Through the API (not the app UI) a seller could change their own `checkout_sessions.status` (e.g. mark a pending request as issued without approval) or edit `checkout_items` quantities after submitting a return, before an admin approves it.
+**Root Cause**: Base-schema RLS policies "Sellers update own sessions" and "Sellers update own items" (`supabase-schema.sql` ~line 314 / 322) are still in place; the UI stopped using them when returns moved to `submit_return`. Migration 018 only tightened the seller INSERT policy (own `pending_issue` session, no child rows).
+**Workaround**: Admins review returns before approving (the approval screen shows Issued / Returned / Used).
+**Fix**: Drop both UPDATE policies after confirming no seller flow writes those tables directly (`grep` shows none in `js/` as of 2026-11-19).
+**Regression Test**:
+---

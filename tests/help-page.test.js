@@ -109,6 +109,12 @@ describe('help search', () => {
     ['return stock', 'daily-ops-submit-return'],
     ['add user', 'settings-add-user'],
     ['damaged', 'damage-loss-report'],
+    ['any 10 refills', 'daily-ops-any-issue'],
+    ['name every piece', 'daily-ops-any-return'],
+    ['why can\'t I submit my return', 'daily-ops-faq-cannot-submit-return'],
+    ['bill from bag', 'sales-field-stock-bill'],
+    ['field sale', 'sales-field-stock-bill'],
+    ['out with staff as any', 'products-faq-out-with-staff-any'],
   ])('finds "%s"', (q, id) => {
     expect(top(q, 'admin', 5)).toContain(id);
   });
