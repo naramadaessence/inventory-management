@@ -14,11 +14,28 @@ export const isAnyLine = item => item?.product_id == null && item?.parent_item_i
 // A per-product row written by submit_return under an Any line.
 export const isChildLine = item => item?.parent_item_id != null;
 
-// Rows to show or count per product: once an Any line has been split into
-// child rows (return submitted), the children replace it.
+// Rows to show or count: once an Any line has child rows (return submitted),
+// the children carry the named pieces and the Any line is kept only for the
+// pieces that came back without a type (migration 019) — as a row with
+// Issued = Returned = that number. Nothing is counted twice.
 export function reportableItems(items) {
-  const split = new Set((items || []).filter(isChildLine).map(i => i.parent_item_id));
-  return (items || []).filter(i => !split.has(i.id));
+  const list = items || [];
+  const kids = {};
+  list.filter(isChildLine).forEach(c => { (kids[c.parent_item_id] = kids[c.parent_item_id] || []).push(c); });
+  return list.flatMap(i => {
+    if (!kids[i.id]) return [i];
+    const unnamed = unnamedReturned(i, kids[i.id]);
+    return unnamed > EPS
+      ? [{ ...i, checkout_quantity: unnamed, checkin_quantity: unnamed, used_quantity: 0, difference: 0, has_mismatch: false, is_flagged: false, discrepancy_type: null }]
+      : [];
+  });
+}
+
+// Pieces of a submitted Any line that came back without a type: all returned
+// pieces (stored on the Any line) minus those returned on named child rows.
+export function unnamedReturned(anyLine, children = []) {
+  if (anyLine?.checkin_quantity == null) return 0;
+  return round3(Number(anyLine.checkin_quantity) - children.reduce((s, c) => s + Number(c.checkin_quantity || 0), 0));
 }
 
 // Label for an Any line, e.g. "Any Dispenser Refill".

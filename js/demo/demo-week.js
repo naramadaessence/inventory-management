@@ -24,7 +24,7 @@ const P = {
 };
 const GRAND_BHAGWATI = 1, SAHARA_DARBAR = 2, CITY_PULSE = 3;
 const REFILLS = 3; // "Dispenser Refill" category
-// An "Any <category>" issue line: [ANY(REFILLS), 8] = any 8 refills, types named on return.
+// An "Any <category>" issue line: [ANY(REFILLS), 8] = any 8 refills; on the return only pieces that don't come back are named.
 const ANY = categoryId => ({ category_id: categoryId });
 const ADMIN = 'admin-1', RAJ = 'seller-1';
 
@@ -134,6 +134,7 @@ export async function simulateDemoWeek({ db, auth, today = new Date() }) {
     });
   }
   // spec: { [productId]: [returned, [[reason, qty, partyId?, note?], ...]],
+  //         ['back:<categoryId>']: pieces of the Any line that came back (no type needed),
   //         ['any:<categoryId>']: [[productId, returned, lost, [[reason, qty, partyId?, note?], ...]], ...] }
   // Sold pieces (bills from field stock) are added by submit_return itself.
   async function submitReturn(staff, sessionId, spec, notes = '') {
@@ -146,7 +147,8 @@ export async function simulateDemoWeek({ db, auth, today = new Date() }) {
         if (item.product_id == null) {
           return {
             item_id: item.id,
-            breakdown: spec[`any:${item.category_id}`].map(([product_id, returned, lost, usage = []]) => ({
+            returned_quantity: spec[`back:${item.category_id}`] ?? 0,
+            breakdown: (spec[`any:${item.category_id}`] || []).map(([product_id, returned, lost, usage = []]) => ({
               product_id, returned_quantity: returned, lost_quantity: lost, usage: usageOf(usage),
             })),
           };
@@ -446,7 +448,7 @@ export async function simulateDemoWeek({ db, auth, today = new Date() }) {
     const d4Kunal = await issue(ADMIN, KUNAL, [[P.LAVENDER, 4]]);
     const d4Neha = await issue(ADMIN, NEHA, [[P.COOL_WATER_OIL, 0.6]]);
     await issue(ADMIN, SONAL, [[P.SANDAL, 5], [P.DECOR, 3]]); // not returned: still out on day 5
-    // Imran asks for any 8 refills (types named on return).
+    // Imran asks for any 8 refills.
     const d4Imran = await request(IMRAN, [[ANY(REFILLS), 8]]);
     await approveIssue(PRIYA, d4Imran);
 
@@ -482,11 +484,11 @@ export async function simulateDemoWeek({ db, auth, today = new Date() }) {
     await submitReturn(NEHA, d4Neha, {
       [P.COOL_WATER_OIL]: [0.1, [['customer_service', 0.5, CITY_PULSE]]],
     });
-    // 8 refills: 2 Rose sold (bill), 3 Pleasure used, 2 Mischief back, 1 Green Apple lost.
+    // 8 refills: 2 came back (types not needed), 2 Rose sold (bill), 3 Pleasure used, 1 Green Apple lost.
     await submitReturn(IMRAN, d4Imran, {
+      [`back:${REFILLS}`]: 2,
       [`any:${REFILLS}`]: [
         [P.PLEASURE, 0, 0, [['customer_service', 3, CITY_PULSE]]],
-        [P.MISCHIEF, 2, 0],
         [P.GREEN_APPLE, 0, 1],
       ],
     }, 'One Green Apple fell out of the bag at City Pulse');

@@ -57,7 +57,7 @@ export function createStockPicker(root, { products, allProducts, categories, hol
     const title = disabled ? 'Out of stock — cannot be issued'
       : out ? 'Out of stock — admin must add stock before approving' : '';
     return `<button type="button" class="sp-row${any ? ' is-any' : ''}${out ? ' is-out' : ''}" data-kind="${kind}" data-id="${id}"${disabled ? ' disabled aria-disabled="true"' : ''}${title ? ` title="${esc(title)}"` : ''}>
-        <span class="sp-row-name">${any ? '<i class="fas fa-layer-group" aria-hidden="true"></i> ' : ''}${esc(name)}${any ? '<small>types named on return</small>' : ''}${out && allowOut ? '<small class="sp-warn"><i class="fas fa-triangle-exclamation"></i> Out of stock — admin will review</small>' : ''}</span>
+        <span class="sp-row-name">${any ? '<i class="fas fa-layer-group" aria-hidden="true"></i> ' : ''}${esc(name)}${any ? '<small>any type — only pieces not returned are named</small>' : ''}${out && allowOut ? '<small class="sp-warn"><i class="fas fa-triangle-exclamation"></i> Out of stock — admin will review</small>' : ''}</span>
         <span class="sp-row-side">${added > 0 ? `<span class="sp-added"><i class="fas fa-check"></i> ${formatStock(added, type)}</span>` : ''}${badge}</span>
       </button>`;
   }

@@ -578,15 +578,28 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 .ci-any-count { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 10px; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 0.85rem; font-weight: 700; background: var(--red-soft); color: var(--red); }
 .ci-any-count[data-state="match"] { background: var(--green-soft); color: var(--green); }
 .ci-any-left { font-weight: 600; }
-.ci-any-entry { border: 1px dashed var(--border-light); border-radius: var(--radius-sm); padding: 10px; margin-top: 10px; background: var(--bg-primary); }
-.ci-any-entry-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.ci-any-entry-head .ci-a-product { flex: 1 1 200px; width: auto; min-width: 0; }
-.ci-a-taken { font-size: 0.78rem; color: var(--text-muted); margin-left: auto; }
-.ci-any-entry-head .btn-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; }
-.ci-any-fields { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
-.ci-any-fields label { font-size: 0.8rem; color: var(--text-secondary); }
-.ci-any-fields .form-input { width: 110px; }
-.ci-any-add { margin-top: 10px; }
+/* Any line on the return (migration 019): step 1 = how many came back (no type),
+   step 2 = name only the pieces that did not come back. */
+.ci-any-step { display: flex; gap: 12px; align-items: flex-start; margin-top: 12px; }
+.ci-any-step[hidden] { display: none; }
+.ci-any-step-num { flex: 0 0 26px; height: 26px; border-radius: 50%; background: var(--purple); color: #fff; font-size: 0.8rem; font-weight: 700; display: flex; align-items: center; justify-content: center; margin-top: 2px; }
+.ci-any-step-body { flex: 1 1 auto; min-width: 0; }
+.ci-any-step-title { display: block; font-size: 0.9rem; font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
+.ci-any-step-help { display: block; font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; }
+.ci-any-back-wrap { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-secondary); }
+.ci-any-back-wrap .form-input { width: 110px; font-size: 1rem; font-weight: 700; }
+.ci-named-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; padding: 8px; border: 1px dashed var(--border-light); border-radius: var(--radius-sm); background: var(--bg-primary); }
+.ci-named-row .ci-n-product { flex: 2 1 200px; width: auto; min-width: 0; }
+.ci-named-row .ci-n-what { flex: 1 1 170px; width: auto; min-width: 0; }
+.ci-named-row .ci-n-qty { width: 100px; }
+.ci-named-row .ci-n-party { flex: 1 1 160px; width: auto; min-width: 0; }
+.ci-named-row .ci-n-notes { flex: 1 1 140px; min-width: 0; }
+.ci-named-row .btn-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; margin-left: auto; }
+.ci-named-row .btn-remove:hover { color: var(--red); }
+.ci-named-row .is-missing { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
+.ci-named-sold { margin-top: 8px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--blue-soft); color: var(--blue); font-size: 0.82rem; }
+.ci-named-auto { margin-left: 6px; font-size: 0.72rem; color: var(--text-muted); }
+.ci-n-add { margin-top: 8px; }
 .ci-usage-line .btn-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; }
 .ci-usage-line .btn-remove:hover { color: var(--red); }
 .ci-sold-line { margin-top: 8px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--blue-soft); color: var(--blue); font-size: 0.8rem; }

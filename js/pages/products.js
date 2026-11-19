@@ -52,7 +52,7 @@ function categoryHoldsHtml(holds, catMap, products) {
   return `<div class="card" id="category-holds-notice" style="margin-bottom:16px;border-left:4px solid var(--blue);">
     <div class="card-body" style="padding:12px 16px;font-size:0.85rem;">
       <i class="fas fa-person-walking-luggage" style="color:var(--blue);margin-right:6px;"></i>
-      <strong>Out with staff as Any (types named on return):</strong>
+      <strong>Out with staff as Any (pieces not returned are named on the return):</strong>
       ${held.map(id => `<span class="category-hold" data-category-id="${id}" style="margin-left:8px;white-space:nowrap;">${escapeHtml(catMap[id]?.name || 'Category')} — ${heldText(id, catMap[id], holds, products)}</span>`).join(' ·')}
     </div>
   </div>`;

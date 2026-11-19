@@ -133,7 +133,7 @@ describe('daily operations issue stock window', () => {
     row(modal, 'any', REFILLS).click();
     const line = lineEls(modal)[0];
     expect(line.querySelector('.co-line-name').textContent).toContain('Any Dispenser Refill');
-    expect(line.querySelector('.co-any-badge').textContent).toContain('types named on return');
+    expect(line.querySelector('.co-any-badge').textContent).toContain('Any type');
     expect(line.querySelector('.co-line-stock').textContent).toBe('Free 209 pcs → 208 pcs');
   });
 

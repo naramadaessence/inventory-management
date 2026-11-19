@@ -233,7 +233,7 @@ export async function renderDashboard(body, header) {
   const heldHtml = heldText.length ? `<div class="alert-item" id="alert-category-holds" data-count="${heldText.length}" style="background:var(--blue-soft);">
             <i class="fas fa-person-walking-luggage" style="color:var(--blue);"></i>
             <div style="flex:1;"><strong>${heldText.join(', ')} out with staff as Any</strong>
-            <div style="font-size:0.75rem;color:var(--text-muted);">Types named on return — product stock changes when the return is approved</div></div>
+            <div style="font-size:0.75rem;color:var(--text-muted);">Pieces that don't come back are named on the return — product stock changes when it is approved</div></div>
             <button class="btn btn-sm btn-primary" onclick="window.navigateTo('products')">View</button>
           </div>` : '';
   const reconHtml = reconTotal > 0 || heldHtml ? `

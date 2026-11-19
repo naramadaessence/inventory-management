@@ -104,7 +104,7 @@ export default {
         { type: 'list', items: [
           'No warehouse stock moves when you save the bill.',
           'The bill shows a purple **Field stock** tag in the Sales list. When an admin records it, the bill is saved under the seller.',
-          'On the seller\'s return, each billed product shows as a blue **Sold · Bill #… · party · qty** line. It counts as used and is filled in for you. See [[daily-ops-any-return]].',
+          'On the seller\'s return, each billed product shows as a blue **Sold · Bill #… · party · qty** line (for an Any line, among the pieces that did not come back, marked "from the bill"). It counts as used and is filled in for you. See [[daily-ops-any-return]].',
           'The stock movement is written when the admin approves the return.',
         ] },
         { type: 'img', src: 'sales-field-stock-badge.webp', alt: 'Sales list with the purple Field stock tag highlighted on a Sahara Darbar Restaurant bill', caption: 'Field stock bills have a purple tag.' },

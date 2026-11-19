@@ -259,7 +259,7 @@ export default {
           ['**return awaiting discrepancy approval**', 'A seller\'s return does not add up: what was issued is not equal to what was returned plus what was used.', 'Click **Review**. On Daily Operations, choose a reason for the difference, then approve. See [[daily-ops-approve-return]].'],
           ['**issue still out from previous days**', 'A seller took stock on an earlier day and has not returned it yet. The line names up to three sellers.', 'Click **View** to open Daily Operations. Ask the seller to return the stock ([[daily-ops-submit-return]]).'],
           ['**stock adjustment awaiting approval**', 'Someone asked to correct a product\'s stock number.', 'Click **Review** to open **Products** and approve or reject it. See [[products-request-adjustment]].'],
-          ['**… out with staff as Any** (blue)', 'Information only: pieces sellers carry as an Any line, for example "6 pcs Dispenser Refill". Their types are named on the return.', 'Nothing. **View** opens Products. See [[products-faq-out-with-staff-any]].'],
+          ['**… out with staff as Any** (blue)', 'Information only: pieces sellers carry as an Any line, for example "6 pcs Dispenser Refill". Pieces that don\'t come back are named on the return.', 'Nothing. **View** opens Products. See [[products-faq-out-with-staff-any]].'],
         ] },
         { type: 'note', text: 'Each of these, except the blue Any line, is also counted in the **Alerts** number. Stock does not change until an admin approves the return or the adjustment.' },
       ],

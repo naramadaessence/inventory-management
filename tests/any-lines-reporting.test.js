@@ -137,6 +137,21 @@ describe('reports with Any lines', () => {
     expect(document.getElementById('ledger-mismatch-count').textContent).toBe('1');
   });
 
+  it('ledger keeps pieces that came back without a type as one "Any" row (migration 019)', async () => {
+    const { sessionId, anyLine } = await issueAny(10);
+    await submit(sessionId, [{ item_id: anyLine.id, returned_quantity: 8, breakdown: [{ product_id: 15, lost_quantity: 2, usage: [] }] }]);
+
+    await openLedger();
+    const anyRow = ledgerRow('c:3');
+    expect(anyRow.textContent).toContain('Any Dispenser Refill');
+    expect([cell(anyRow, 'issued').dataset.value, cell(anyRow, 'returned').dataset.value, cell(anyRow, 'difference').dataset.value]).toEqual(['8', '8', '0']);
+    const rose = ledgerRow('p:15');
+    expect([cell(rose, 'issued').dataset.value, cell(rose, 'returned').dataset.value, cell(rose, 'difference').dataset.value]).toEqual(['2', '0', '2']);
+    // Still adds up to the 10 issued, nothing counted twice.
+    expect(cell(dayTotal(), 'issued').textContent).toBe('10 pcs');
+    expect(cell(dayTotal(), 'returned').textContent).toBe('8 pcs');
+  });
+
   it('ledger shows the resolution of a lost Any piece after approval', async () => {
     const { sessionId, anyLine } = await issueAny(10);
     await submit(sessionId, MIXED_RETURN(anyLine));
@@ -213,7 +228,7 @@ describe('stock held by open Any lines', () => {
     await renderProducts(document.getElementById('body'), document.getElementById('header'));
 
     const notice = document.getElementById('category-holds-notice');
-    expect(notice.textContent).toContain('Out with staff as Any (types named on return)');
+    expect(notice.textContent).toContain('Out with staff as Any (pieces not returned are named on the return)');
     const hold = notice.querySelector('.category-hold[data-category-id="3"]');
     expect(hold.textContent).toContain('Dispenser Refill — 10 pcs out');
     expect(hold.textContent).toContain(`${total - 10} pcs free on shelf`);
@@ -237,7 +252,7 @@ describe('stock held by open Any lines', () => {
     await renderDashboard(document.getElementById('body'), document.getElementById('header'));
     const row = document.getElementById('alert-category-holds');
     expect(row.textContent).toContain('10 pcs Dispenser Refill out with staff as Any');
-    expect(row.textContent).toContain('Types named on return');
+    expect(row.textContent).toContain('named on the return');
     expect(document.getElementById('reconciliation-alerts').textContent).not.toContain('to review');
     expect(Number(alertsCard().querySelector('.stat-value').textContent)).toBe(baseline);
   });

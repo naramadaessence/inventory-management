@@ -4,7 +4,7 @@ import {
   USAGE_REASONS, DISCREPANCY_TYPES, isMachineCategory,
 } from '../utils/helpers.js';
 import {
-  isAnyLine, isChildLine, anyLineLabel, holdsMap, categoryFreeStock, issueProblem, allocateSold,
+  isAnyLine, isChildLine, anyLineLabel, holdsMap, categoryFreeStock, issueProblem, allocateSold, unnamedReturned,
 } from '../utils/field-stock.js';
 import { createStockPicker } from '../utils/stock-picker.js';
 
@@ -124,10 +124,17 @@ function sessionRowsHTML({ items, usage, prodMap, catMap, partyMap }, { bold = f
     const cat = catMap[i.category_id];
     const children = items.filter(c => c.parent_item_id === i.id);
     const issued = formatStock(Number(i.checkout_quantity || 0), cat?.type);
+    // Returned pieces need no type (migration 019): one number on the Any line.
+    const submitted = i.checkin_quantity != null;
+    const cameBack = submitted ? formatStock(unnamedReturned(i, children), cat?.type) : '—';
+    const note = !submitted
+      ? 'Not returned yet. Only pieces that don’t come back are named on the return.'
+      : children.length ? 'Did not come back — named below:' : 'All came back';
     return `<tr class="ds-any-row">
         <td><strong>${esc(anyLineLabel(cat))}</strong> <span class="co-any-badge">Any</span></td>
         <td>${issued}</td>
-        <td colspan="4" class="ds-any-note">${children.length ? 'Types named on return:' : `${issued} issued, types named on return`}</td>
+        <td>${cameBack}${submitted ? '<div class="ds-any-note">any type</div>' : ''}</td>
+        <td colspan="3" class="ds-any-note">${note}</td>
       </tr>${children.map(c => productRow(c, true)).join('')}`;
   }).join('');
 }
@@ -279,7 +286,7 @@ async function viewSession(sessionId) {
 // ============================================
 // SELLER/ADMIN: Request stock (pending_issue)
 // ============================================
-// Issue lines: a product, or "Any <category>" (types named on return).
+// Issue lines: a product, or "Any <category>" (any type; on the return only pieces that don't come back are named).
 // Quantities are kept as the raw input strings.
 const EPS = 1e-9;
 const qtyOf = raw => (String(raw ?? '').trim() === '' ? NaN : Number(raw));
@@ -345,7 +352,7 @@ async function openCheckoutModal(body, isAdmin) {
     <div id="co-problem" class="co-problem" hidden></div>
     <div style="margin-top:12px;padding:12px;background:var(--bg-input);border-radius:var(--radius-sm);font-size:0.8rem;color:var(--text-muted);">
       <i class="fas fa-info-circle"></i> ${isSeller ? 'Admin approves your request before stock is deducted.' : 'Liquids in KG (0.200 = 200 g), units in pieces.'}
-      <strong>Any &lt;category&gt;</strong> takes pieces without naming them; the types are named on the return.
+      <strong>Any &lt;category&gt;</strong> takes pieces of any type. On the return: say how many came back, and name only the ones that did not.
     </div>`;
   const footer = `<div id="co-summary" class="co-summary"></div>
     <button class="btn btn-secondary" id="co-cancel">Cancel</button>
@@ -411,7 +418,7 @@ async function openCheckoutModal(body, isAdmin) {
     const qtyInput = `<input class="form-input co-qty" type="number" data-idx="${idx}" value="${esc(line.quantity)}" min="${unit ? 1 : 0.001}" step="${unit ? 1 : 0.001}" inputmode="${unit ? 'numeric' : 'decimal'}" aria-label="Quantity for ${esc(lineName(line))}" />`;
     return `<div class="co-line${isAny ? ' is-any' : ''}" data-idx="${idx}">
         <div class="co-line-main">
-          <div class="co-line-name">${esc(lineName(line))}${isAny ? ' <span class="co-any-badge" title="Any pieces of this category; the staff member names each type on the return">Any · types named on return</span>' : ''}</div>
+          <div class="co-line-name">${esc(lineName(line))}${isAny ? ' <span class="co-any-badge" title="Any pieces of this category. On the return, only the pieces that do not come back are named.">Any type</span>' : ''}</div>
           <div class="co-line-meta">${isAny ? '' : `${esc(catMap[lineCategory(line)]?.name || '')} · `}<span class="co-line-stock"></span></div>
           <div class="co-line-msg"></div>
         </div>
@@ -561,7 +568,7 @@ async function approveIssue(sessionId, body, allItems, prodMap) {
         .reduce((s, o) => s + Number(o.checkout_quantity || 0), 0));
       const ok = asked <= free + EPS;
       return `<tr style="${!ok ? 'background:var(--red-soft);' : ''}">
-        <td><strong>${esc(anyLineLabel(cat))}</strong> <span class="co-any-badge">types named on return</span></td>
+        <td><strong>${esc(anyLineLabel(cat))}</strong> <span class="co-any-badge">any type</span></td>
         <td>${formatStock(qty, cat?.type)}</td>
         <td style="${!ok ? 'color:var(--red);font-weight:700;' : ''}">${formatStock(Math.max(free, 0), cat?.type)} free</td>
         <td>${!ok ? `<span style="color:var(--red);font-weight:700;">-${formatStock(round3(asked - free), cat?.type)}</span>` : '—'}</td>
@@ -587,7 +594,7 @@ async function approveIssue(sessionId, body, allItems, prodMap) {
     ${!canApprove ? `<div class="ai-problem" style="margin-top:14px;padding:12px;background:var(--red-soft);border:1px solid var(--red);border-radius:var(--radius);font-size:0.85rem;">
       <i class="fas fa-exclamation-triangle" style="color:var(--red);"></i> <strong>Cannot approve:</strong> ${esc(problem)}. Add stock first or reject this request.
     </div>` : `<div style="margin-top:14px;padding:12px;background:var(--green-soft);border:1px solid var(--green);border-radius:var(--radius);font-size:0.85rem;">
-      <i class="fas fa-info-circle" style="color:var(--green);"></i> All items have sufficient stock. On approval, product lines are deducted from stock${lines.some(l => l.category_id) ? '; <strong>Any</strong> lines are held against their category until the return names each type' : ''}.
+      <i class="fas fa-info-circle" style="color:var(--green);"></i> All items have sufficient stock. On approval, product lines are deducted from stock${lines.some(l => l.category_id) ? '; <strong>Any</strong> lines are held against their category until the return (only pieces that do not come back are named)' : ''}.
     </div>`}`;
   const footer = `<button class="btn btn-secondary" id="ai-cancel">Cancel</button>
     <button class="btn btn-danger" id="ai-reject"><i class="fas fa-times"></i> Reject</button>
@@ -664,19 +671,19 @@ async function openCheckinModal(sessionId, body, isAdmin) {
   const sumQty = list => round3(list.reduce((s, l) => s + Number(l.quantity || 0), 0));
 
   // Form state; quantities are kept as the raw input strings.
-  const blankEntry = () => ({ product_id: '', fixed: false, sold: [], returned: '', lost: '', usage: [] });
+  // Any line (migration 019): "came back" is ONE number — no types needed.
+  // Only the pieces that did not come back are named: one row per refill
+  // and what happened (used for… / lost). Sold pieces come from the bills.
+  const blankNamed = () => ({ product_id: '', what: '', quantity: '', party_id: '', notes: '' });
   const rows = topItems.map(item => {
     const issued = Number(item.checkout_quantity || 0);
     const sold = soldByItem[item.id] || [];
     if (isAnyLine(item)) {
       const category = catMap[item.category_id];
-      // Products sold on bills are fixed rows; staff can still add returned/used/lost for them.
-      const soldProducts = [...new Set(sold.map(s => s.product_id))];
-      const entries = soldProducts.map(pid => ({ ...blankEntry(), product_id: String(pid), fixed: true, sold: sold.filter(s => s.product_id === pid) }));
-      if (!entries.length) entries.push(blankEntry());
       return {
         kind: 'any', item, category, type: category?.type,
-        isMachine: isMachineCategory(category), issued, entries,
+        isMachine: isMachineCategory(category), issued, sold,
+        cameBack: String(round3(Math.max(issued - sumQty(sold), 0))), named: [],
       };
     }
     const product = prodMap[item.product_id];
@@ -691,9 +698,43 @@ async function openCheckinModal(sessionId, body, isAdmin) {
   const usedOf = owner => round3(owner.usage.reduce((s, u) => s + num(u.quantity), 0) + sumQty(owner.sold));
   const stepOf = row => (row.type === 'liquid' ? '0.001' : '1');
   const unitLabel = row => (row.type === 'liquid' ? 'kg' : 'pcs');
-  const entryTaken = e => round3(num(e.returned) + num(e.lost) + usedOf(e));
-  const accountedOf = row => round3(row.entries.reduce((s, e) => s + entryTaken(e), 0));
-  const anyBalanced = row => Math.abs(accountedOf(row) - row.issued) <= EPS;
+  // What can happen to a piece that did not come back.
+  const ANY_OUTCOMES = {
+    customer_service: 'Used — customer service',
+    installation: 'Used — installation',
+    other: 'Used — other work',
+    lost: 'Lost / missing',
+  };
+  const filledNamed = n => Boolean(n.product_id) || String(n.quantity ?? '').trim() !== '';
+  // Counts for an Any line: back (came back, no type), sold (bills), named rows.
+  function anyCounts(row) {
+    const back = qtyOf(row.cameBack);
+    const sold = sumQty(row.sold);
+    const named = round3(row.named.reduce((s, n) => s + (n.product_id ? num(n.quantity) : 0), 0));
+    const toName = Number.isFinite(back) ? round3(row.issued - back - sold - named) : NaN;
+    return { back, sold, named, toName };
+  }
+  // 'match' | 'no-back' | 'back-over' | 'unpicked' | 'no-what' | 'short' | 'over'
+  function anyState(row) {
+    const c = anyCounts(row);
+    if (!Number.isFinite(c.back) || c.back < 0) return 'no-back';
+    if (c.back > row.issued + EPS) return 'back-over';
+    if (row.named.some(n => !n.product_id && num(n.quantity) > 0)) return 'unpicked';
+    if (row.named.some(n => n.product_id && !n.what)) return 'no-what';
+    if (c.toName > EPS) return 'short';
+    if (c.toName < -EPS) return 'over';
+    return 'match';
+  }
+  const anyBalanced = row => anyState(row) === 'match';
+  // Keep one empty row ready while pieces are still unnamed; drop empty rows when none are left.
+  function syncBlankRows(row) {
+    const { toName } = anyCounts(row);
+    if (Number.isFinite(toName) && toName > EPS) {
+      if (!row.named.some(n => !filledNamed(n))) row.named.push(blankNamed());
+    } else {
+      row.named = row.named.filter(filledNamed);
+    }
+  }
   const dataAttrs = (idx, entry) => `data-idx="${idx}"${entry != null ? ` data-entry="${entry}"` : ''}`;
 
   function usageLineHTML(row, owner, idx, entry, lineIdx) {
@@ -739,52 +780,88 @@ async function openCheckinModal(sessionId, body, isAdmin) {
     </div>`;
   }
 
-  // Products a piece of an Any line can be named as: the category's products,
-  // inactive ones only if they have stock or are already chosen.
-  function productOptions(row, entryIdx) {
-    const chosenElsewhere = new Set(row.entries.filter((_, k) => k !== entryIdx).map(e => String(e.product_id)).filter(Boolean));
-    const chosenAnywhere = new Set(row.entries.map(e => String(e.product_id)));
-    const current = String(row.entries[entryIdx].product_id);
+  // Products of the Any line's category: active ones, inactive ones only if
+  // they have stock or are already chosen.
+  function productOptions(row, current) {
     return products
-      .filter(p => p.category_id === row.item.category_id && (p.is_active || Number(p.current_stock || 0) > 0 || chosenAnywhere.has(String(p.id))))
+      .filter(p => p.category_id === row.item.category_id && (p.is_active || Number(p.current_stock || 0) > 0 || String(p.id) === String(current)))
       .sort((a, b) => String(a.name).localeCompare(String(b.name)))
-      .map(p => `<option value="${p.id}" ${current === String(p.id) ? 'selected' : ''} ${chosenElsewhere.has(String(p.id)) ? 'disabled' : ''}>${esc(p.name)}</option>`)
+      .map(p => `<option value="${p.id}" ${String(current) === String(p.id) ? 'selected' : ''}>${esc(p.name)}</option>`)
       .join('');
   }
 
-  function entryHTML(row, idx, entry, k) {
-    const catName = row.category?.name || 'category';
-    const attrs = dataAttrs(idx, k);
-    const name = prodMap[Number(entry.product_id)]?.name || 'Unknown';
-    return `<div class="ci-any-entry" ${attrs}>
-      <div class="ci-any-entry-head">
-        ${entry.fixed
-          ? `<strong>${esc(name)}</strong>`
-          : `<select class="form-select ci-a-product" ${attrs} aria-label="${esc(catName)} product"><option value="">Choose ${esc(catName)}…</option>${productOptions(row, k)}</select>`}
-        <span class="ci-a-taken"></span>
-        ${entry.fixed ? '' : `<button type="button" class="btn-remove ci-a-rm" ${attrs} aria-label="Remove product line"><i class="fas fa-times"></i></button>`}
-      </div>
-      ${soldLinesHTML(entry.sold, row.type)}
-      <div class="ci-any-fields">
-        <label>Returned<br><input class="form-input ci-a-returned" type="number" ${attrs} value="${esc(entry.returned)}" min="0" step="${stepOf(row)}" inputmode="decimal" placeholder="0" /></label>
-        <label>Lost<br><input class="form-input ci-a-lost" type="number" ${attrs} value="${esc(entry.lost)}" min="0" step="${stepOf(row)}" inputmode="decimal" placeholder="0" /></label>
-      </div>
-      <div class="ci-usage-lines">${entry.usage.map((_, lineIdx) => usageLineHTML(row, entry, idx, k, lineIdx)).join('')}</div>
-      <button type="button" class="btn btn-sm btn-ghost ci-add-usage" ${attrs}><i class="fas fa-plus"></i> Add usage</button>
+  // One piece-type that did not come back: which product, what happened, how many.
+  function namedRowHTML(row, idx, k) {
+    const n = row.named[k];
+    const catName = row.category?.name || 'item';
+    const attrs = `data-idx="${idx}" data-named="${k}"`;
+    const used = n.what && n.what !== 'lost';
+    const customerRequired = n.what === 'installation' && row.isMachine;
+    const missingProduct = !n.product_id && num(n.quantity) > 0;
+    const missingWhat = n.product_id && !n.what;
+    return `<div class="ci-named-row" ${attrs}>
+      <select class="form-select ci-n-product${missingProduct ? ' is-missing' : ''}" ${attrs} aria-label="Which ${esc(catName)}">
+        <option value="">Which ${esc(catName)}?</option>${productOptions(row, n.product_id)}</select>
+      <select class="form-select ci-n-what${missingWhat ? ' is-missing' : ''}" ${attrs} aria-label="What happened">
+        <option value="">What happened?</option>
+        ${Object.entries(ANY_OUTCOMES).map(([key, label]) => `<option value="${key}" ${n.what === key ? 'selected' : ''}>${esc(label)}</option>`).join('')}
+      </select>
+      <input class="form-input ci-n-qty" type="number" ${attrs} value="${esc(n.quantity)}" min="0" step="${stepOf(row)}" inputmode="decimal" placeholder="Qty" aria-label="How many (${unitLabel(row)})" />
+      ${used ? `<select class="form-select ci-n-party${customerRequired && !n.party_id ? ' is-missing' : ''}" ${attrs} aria-label="Customer">
+        <option value="">${customerRequired ? 'Customer (required)' : 'Customer (optional)'}</option>
+        ${parties.map(p => `<option value="${p.id}" ${String(n.party_id) === String(p.id) ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}
+      </select>
+      <input class="form-input ci-n-notes" type="text" ${attrs} value="${esc(n.notes)}" maxlength="200" placeholder="Note (optional)" aria-label="Note" />` : ''}
+      <button type="button" class="btn-remove ci-n-rm" ${attrs} aria-label="Remove this row"><i class="fas fa-times"></i></button>
     </div>`;
+  }
+
+  // Step 2 — only when something did not come back (or was sold on a bill).
+  function step2HTML(row, idx) {
+    const c = anyCounts(row);
+    const notBack = Number.isFinite(c.back) ? round3(row.issued - c.back) : 0;
+    if (notBack <= EPS && !row.named.length && !row.sold.length) return '';
+    const catName = row.category?.name || 'item';
+    const sold = row.sold.map(s => `<div class="ci-named-sold"><i class="fas fa-receipt" aria-hidden="true"></i>
+        <strong>${esc(prodMap[s.product_id]?.name || 'Unknown')}</strong> · Sold · Bill #${s.sale_id} · ${esc(partyMap[s.party_id]?.name || (s.party_id ? `Customer #${s.party_id}` : 'Walk-in'))} · <strong>${formatStock(s.quantity, row.type)}</strong>
+        <span class="ci-named-auto">from the bill</span></div>`).join('');
+    return `<div class="ci-any-step-num">2</div>
+      <div class="ci-any-step-body">
+        <div class="ci-any-step-title">${notBack > EPS ? `${formatStock(notBack, row.type)} did not come back` : 'Pieces that did not come back'}${c.toName > EPS ? ` — which ${esc(catName)}, and what happened?` : ''}</div>
+        ${c.toName > EPS || row.named.length ? `<small class="ci-any-step-help">One row per ${esc(catName)}. If 2 were lost and 1 was used, add a row for each.</small>` : ''}
+        ${sold}
+        ${row.named.map((_, k) => namedRowHTML(row, idx, k)).join('')}
+        <button type="button" class="btn btn-sm btn-ghost ci-n-add" data-idx="${idx}"><i class="fas fa-plus"></i> Add another ${esc(catName)}</button>
+      </div>`;
   }
 
   function anyHTML(row, idx) {
     return `<div class="ci-item ci-any" data-idx="${idx}">
       <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;">
-        <div><strong>${esc(anyLineLabel(row.category))}</strong> <span class="co-any-badge">name every piece</span><br>
+        <div><strong>${esc(anyLineLabel(row.category))}</strong> <span class="co-any-badge">any type</span><br>
           <small style="color:var(--text-muted);">${row.type === 'liquid' ? 'Liquid (kg)' : 'Unit (pieces) — whole numbers'}${row.isMachine ? ' · Machines' : ''}</small></div>
         <div style="font-size:0.85rem;">Issued <strong>${formatStock(row.issued, row.type)}</strong></div>
       </div>
+      <div class="ci-any-step">
+        <div class="ci-any-step-num">1</div>
+        <div class="ci-any-step-body">
+          <label class="ci-any-step-title" for="ci-any-back-${idx}">How many came back?</label>
+          <div class="ci-any-back-wrap"><input class="form-input ci-any-back" id="ci-any-back-${idx}" type="number" data-idx="${idx}" value="${esc(row.cameBack)}" min="0" max="${row.issued}" step="${stepOf(row)}" inputmode="decimal" /> <span>${unitLabel(row)}</span></div>
+          <small class="ci-any-step-help">Any type — you don't need to say which ones came back.</small>
+        </div>
+      </div>
+      <div class="ci-any-step ci-any-step2" data-idx="${idx}"></div>
       <div class="ci-any-count"><span class="ci-any-counter"></span><span class="ci-any-left"></span></div>
-      <div class="ci-any-entries">${row.entries.map((e, k) => entryHTML(row, idx, e, k)).join('')}</div>
-      <button type="button" class="btn btn-sm btn-ghost ci-any-add" data-idx="${idx}"><i class="fas fa-plus"></i> Add product</button>
     </div>`;
+  }
+
+  function renderStep2(idx) {
+    const row = rows[idx];
+    const box = list.querySelector(`.ci-any-step2[data-idx="${idx}"]`);
+    if (!box) return;
+    const html = step2HTML(row, idx);
+    box.innerHTML = html;
+    box.hidden = !html;
   }
 
   const hasAny = rows.some(r => r.kind === 'any');
@@ -792,7 +869,7 @@ async function openCheckinModal(sessionId, body, isAdmin) {
     <div style="padding:12px 16px;background:var(--blue-soft);border:1px solid var(--blue);border-radius:var(--radius);margin-bottom:16px;font-size:0.85rem;">
       <i class="fas fa-info-circle" style="color:var(--blue);"></i> Enter what you brought back and what you used (and why).
       <strong>Difference = Issued − Returned − Used</strong> should be zero. Any difference needs admin approval; stock is held until the admin approves.
-      ${hasAny ? '<br><strong>Any lines:</strong> name every piece — pick the product, then enter how many came back, were used or were lost. The count must match what was issued.' : ''}
+      ${hasAny ? '<br><strong>Any lines:</strong> enter how many came back — no need to say which. Only for the pieces that did <strong>not</strong> come back, pick which one and what happened (used or lost).' : ''}
       ${soldLines.length ? '<br><strong>Sold</strong> lines come from bills you made from this stock; they count as used.' : ''}
     </div>
     ${unallocated.length ? `<div style="padding:12px 16px;background:var(--red-soft);border:1px solid var(--red);border-radius:var(--radius);margin-bottom:16px;font-size:0.85rem;">
@@ -812,7 +889,7 @@ async function openCheckinModal(sessionId, body, isAdmin) {
     if (!submitBtn.isConnected || submitBtn.dataset.busy === '1') return;
     const pending = rows.find(r => r.kind === 'any' && !anyBalanced(r));
     submitBtn.disabled = Boolean(pending);
-    submitBtn.title = pending ? `Name every piece of ${anyLineLabel(pending.category)} first` : '';
+    submitBtn.title = pending ? `Finish ${anyLineLabel(pending.category)} first` : '';
   }
 
   function updateComputed(idx) {
@@ -820,18 +897,28 @@ async function openCheckinModal(sessionId, body, isAdmin) {
     const block = list.querySelector(`.ci-item[data-idx="${idx}"]`);
     if (!block) return;
     if (row.kind === 'any') {
-      const accounted = accountedOf(row);
-      const gap = round3(row.issued - accounted);
-      const state = Math.abs(gap) <= EPS ? 'match' : gap > 0 ? 'short' : 'over';
+      const c = anyCounts(row);
+      const state = anyState(row);
+      const fmt = q => formatStock(round3(q), row.type);
       const count = block.querySelector('.ci-any-count');
-      count.dataset.state = state;
+      count.dataset.state = state === 'match' ? 'match' : 'short';
       block.dataset.state = state;
-      block.querySelector('.ci-any-counter').textContent = `Accounted ${formatStock(accounted, row.type)} of ${formatStock(row.issued, row.type)}`;
-      block.querySelector('.ci-any-left').textContent = state === 'match' ? 'All named'
-        : state === 'short' ? `${formatStock(gap, row.type)} left to name` : `${formatStock(-gap, row.type)} too many`;
-      row.entries.forEach((e, k) => {
-        const el = block.querySelector(`.ci-any-entry[data-entry="${k}"] .ci-a-taken`);
-        if (el) el.textContent = entryTaken(e) > 0 ? `Taken ${formatStock(entryTaken(e), row.type)}` : '';
+      block.querySelector('.ci-any-counter').textContent = Number.isFinite(c.back)
+        ? `${fmt(c.back)} came back + ${fmt(c.sold + c.named)} named = ${fmt(c.back + c.sold + c.named)} of ${fmt(row.issued)}`
+        : `Issued ${fmt(row.issued)}`;
+      const catName = row.category?.name || 'item';
+      block.querySelector('.ci-any-left').textContent = {
+        match: '✓ All accounted for',
+        'no-back': 'Enter how many came back',
+        'back-over': `Came back can't be more than ${fmt(row.issued)}`,
+        unpicked: `Pick which ${catName} on every row`,
+        'no-what': 'Choose what happened on every row',
+        short: `${fmt(c.toName)} still to name`,
+        over: `${fmt(-c.toName)} too many named`,
+      }[state];
+      block.querySelectorAll('.ci-n-product').forEach(sel => {
+        const n = row.named[Number(sel.dataset.named)];
+        sel.classList.toggle('is-missing', Boolean(n && !n.product_id && num(n.quantity) > 0));
       });
       refreshSubmit();
       return;
@@ -855,44 +942,68 @@ async function openCheckinModal(sessionId, body, isAdmin) {
     list.innerHTML = rows.length
       ? rows.map((row, idx) => (row.kind === 'any' ? anyHTML(row, idx) : itemHTML(row, idx))).join('')
       : '<p style="color:var(--text-muted);text-align:center;padding:20px;">No items in this session.</p>';
-    rows.forEach((_, idx) => updateComputed(idx));
+    rows.forEach((row, idx) => { if (row.kind === 'any') renderStep2(idx); updateComputed(idx); });
     refreshSubmit();
   }
 
-  // The product row, or the Any entry an input belongs to (both carry .usage).
+  // Re-draw only an Any line's step 2 (keeps focus in "How many came back?").
+  function refreshAny(idx) {
+    renderStep2(idx);
+    updateComputed(idx);
+  }
+
+  // The product row an input belongs to (Any lines use namedOf below).
   const ownerOf = t => {
     const row = rows[Number(t.dataset.idx)];
-    if (!row) return null;
-    return t.dataset.entry != null ? row.entries[Number(t.dataset.entry)] : row;
+    return row?.kind === 'product' ? row : null;
   };
 
+  // Any line inputs: "came back" and the rows naming pieces that did not.
+  const namedOf = t => rows[Number(t.dataset.idx)]?.named?.[Number(t.dataset.named)];
   list.addEventListener('input', e => {
-    const t = e.target, idx = Number(t.dataset.idx), owner = ownerOf(t);
+    const t = e.target, idx = Number(t.dataset.idx);
+    if (t.classList.contains('ci-any-back')) {
+      // Step 2 is outside this input, so redrawing it keeps the cursor here.
+      rows[idx].cameBack = t.value;
+      syncBlankRows(rows[idx]);
+      refreshAny(idx);
+      return;
+    }
+    if (t.classList.contains('ci-n-qty')) { namedOf(t).quantity = t.value; updateComputed(idx); return; }
+    if (t.classList.contains('ci-n-notes')) { namedOf(t).notes = t.value; return; }
+
+    const owner = ownerOf(t);
     if (!owner) return;
     if (t.classList.contains('ci-returned')) owner.returned = t.value;
-    else if (t.classList.contains('ci-a-returned')) owner.returned = t.value;
-    else if (t.classList.contains('ci-a-lost')) owner.lost = t.value;
     else if (t.classList.contains('ci-u-qty')) owner.usage[Number(t.dataset.line)].quantity = t.value;
     else if (t.classList.contains('ci-u-notes')) { owner.usage[Number(t.dataset.line)].notes = t.value; return; }
     else return;
     updateComputed(idx);
   });
   list.addEventListener('change', e => {
-    const t = e.target, owner = ownerOf(t);
+    const t = e.target, idx = Number(t.dataset.idx);
+    if (t.matches('.ci-n-product, .ci-n-what, .ci-n-party')) {
+      const n = namedOf(t);
+      if (t.classList.contains('ci-n-product')) n.product_id = t.value;
+      else if (t.classList.contains('ci-n-what')) { n.what = t.value; if (n.what === 'lost') { n.party_id = ''; n.notes = ''; } }
+      else n.party_id = t.value;
+      refreshAny(idx);
+      return;
+    }
+    const owner = ownerOf(t);
     if (!owner) return;
     if (t.classList.contains('ci-u-reason')) { owner.usage[Number(t.dataset.line)].reason = t.value; renderAll(); }
     else if (t.classList.contains('ci-u-party')) { owner.usage[Number(t.dataset.line)].party_id = t.value; renderAll(); }
-    else if (t.classList.contains('ci-a-product')) { owner.product_id = t.value; renderAll(); }
   });
   list.addEventListener('click', e => {
-    const btn = e.target.closest('.ci-add-usage, .ci-u-rm, .ci-any-add, .ci-a-rm');
+    const btn = e.target.closest('.ci-add-usage, .ci-u-rm, .ci-n-add, .ci-n-rm');
     if (!btn) return;
-    const row = rows[Number(btn.dataset.idx)];
+    const idx = Number(btn.dataset.idx);
+    if (btn.classList.contains('ci-n-add')) { rows[idx].named.push(blankNamed()); refreshAny(idx); return; }
+    if (btn.classList.contains('ci-n-rm')) { rows[idx].named.splice(Number(btn.dataset.named), 1); refreshAny(idx); return; }
     const owner = ownerOf(btn);
     if (btn.classList.contains('ci-add-usage')) owner.usage.push({ reason: 'customer_service', quantity: '', party_id: '', notes: '' });
     else if (btn.classList.contains('ci-u-rm')) owner.usage.splice(Number(btn.dataset.line), 1);
-    else if (btn.classList.contains('ci-any-add')) row.entries.push(blankEntry());
-    else if (btn.classList.contains('ci-a-rm')) row.entries.splice(Number(btn.dataset.entry), 1);
     renderAll();
   });
   renderAll();
@@ -917,33 +1028,33 @@ async function openCheckinModal(sessionId, body, isAdmin) {
     const label = anyLineLabel(row.category);
     const catName = row.category?.name || 'category';
     const whole = row.type !== 'liquid';
-    const breakdown = [];
-    const seen = new Set();
-    for (const entry of row.entries) {
-      const returned = qtyOf(entry.returned), lost = qtyOf(entry.lost);
-      const r = Number.isFinite(returned) ? returned : 0;
-      const l = Number.isFinite(lost) ? lost : 0;
-      const name = prodMap[Number(entry.product_id)]?.name || label;
-      if (r < 0 || l < 0 || (String(entry.returned).trim() && !Number.isFinite(returned)) || (String(entry.lost).trim() && !Number.isFinite(lost))) {
-        showToast(`Returned and lost must be zero or more (${name})`, 'error'); return null;
-      }
-      if (whole && (!Number.isInteger(r) || !Number.isInteger(l))) { showToast(`${name} must be whole pieces`, 'error'); return null; }
-      const usage = usagePayload(row, entry, name, whole || row.isMachine);
-      if (!usage) return null;
-      const manual = round3(r + l + usage.reduce((s, u) => s + u.quantity, 0));
-      if (!entry.product_id) {
-        if (manual > 0) { showToast(`Choose which ${catName} product for every line of ${label}`, 'error'); return null; }
-        continue;
-      }
-      if (seen.has(String(entry.product_id))) { showToast(`${name} is listed twice in ${label}`, 'error'); return null; }
-      seen.add(String(entry.product_id));
-      if (manual > 0) breakdown.push({ product_id: Number(entry.product_id), returned_quantity: r, lost_quantity: l, usage });
+    const c = anyCounts(row);
+    const fail = msg => { showToast(msg, 'error'); return null; };
+    if (!Number.isFinite(c.back) || c.back < 0) return fail(`Enter how many ${label} came back`);
+    if (whole && !Number.isInteger(c.back)) return fail(`${label} must be whole pieces`);
+    if (c.back > row.issued + EPS) return fail(`${label}: came back can't be more than ${formatStock(row.issued, row.type)}`);
+
+    // Rows naming pieces that did not come back → one breakdown entry per product.
+    const byProduct = new Map();
+    for (const n of row.named) {
+      if (!filledNamed(n)) continue;
+      if (!n.product_id) return fail(`Pick which ${catName} on every row of ${label}`);
+      const name = prodMap[Number(n.product_id)]?.name || label;
+      const qty = qtyOf(n.quantity);
+      if (!Number.isFinite(qty) || qty <= 0) return fail(`Enter how many ${name} (more than zero)`);
+      if ((whole || row.isMachine) && !Number.isInteger(qty)) return fail(`${name} must be whole pieces`);
+      if (!n.what) return fail(`Choose what happened to ${name}`);
+      if (n.what === 'installation' && row.isMachine && !n.party_id) return fail(`Choose the customer where ${name} was installed`);
+      const entry = byProduct.get(n.product_id) || { product_id: Number(n.product_id), returned_quantity: 0, lost_quantity: 0, usage: [] };
+      if (n.what === 'lost') entry.lost_quantity = round3(entry.lost_quantity + qty);
+      else entry.usage.push({ reason: n.what, quantity: qty, party_id: n.party_id ? Number(n.party_id) : null, notes: String(n.notes || '').trim() || null });
+      byProduct.set(n.product_id, entry);
     }
     if (!anyBalanced(row)) {
-      showToast(`${label}: ${formatStock(row.issued, row.type)} issued but ${formatStock(accountedOf(row), row.type)} accounted for. Name every piece (returned, used, sold or lost)`, 'error');
-      return null;
+      const missing = c.toName > 0;
+      return fail(`${label}: ${formatStock(row.issued, row.type)} issued — ${formatStock(round3(Math.abs(c.toName)), row.type)} ${missing ? 'still to name (which one, and what happened?)' : 'too many named'}`);
     }
-    return { item_id: row.item.id, breakdown };
+    return { item_id: row.item.id, returned_quantity: c.back, breakdown: [...byProduct.values()] };
   }
 
   // Returns the submit_return p_items payload, or null after showing a toast.
@@ -1026,7 +1137,7 @@ async function openApproveReturnModal(sessionId, body) {
       <i class="fas fa-shield-check" style="color:var(--green);"></i> On approval, the <strong>returned</strong> quantity goes back into stock.
       Machines used for an <strong>installation</strong> move to the product's Installed Qty and get an Installations record for that customer.
       Other usage is recorded as consumed.${hasAny ? `
-      <br><strong>Any lines</strong> take stock off each named product on approval (taken − returned), and release the hold on the category.` : ''}</div>`;
+      <br><strong>Any lines:</strong> pieces that came back (any type) don't change stock. Each piece named as used, sold or lost is taken off that product on approval, and the hold on the category is released.` : ''}</div>`;
   const footer = `<button class="btn btn-secondary" id="ar-cancel">Cancel</button>
     <button class="btn btn-secondary" id="ar-send-back"><i class="fas fa-rotate-left"></i> Send back</button>
     <button class="btn btn-primary" id="ar-approve" style="background:var(--green);border-color:var(--green);"><i class="fas fa-check-double"></i> Approve & Restore</button>`;

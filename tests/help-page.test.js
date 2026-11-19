@@ -110,7 +110,7 @@ describe('help search', () => {
     ['add user', 'settings-add-user'],
     ['damaged', 'damage-loss-report'],
     ['any 10 refills', 'daily-ops-any-issue'],
-    ['name every piece', 'daily-ops-any-return'],
+    ['how many came back', 'daily-ops-any-return'],
     ['why can\'t I submit my return', 'daily-ops-faq-cannot-submit-return'],
     ['bill from bag', 'sales-field-stock-bill'],
     ['field sale', 'sales-field-stock-bill'],

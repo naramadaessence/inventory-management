@@ -1082,16 +1082,22 @@ const demoRpc = {
     for (const { input, item } of entries.filter(e => e.item.product_id == null)) {
       const category = (store.categories || []).find(c => c.id === item.category_id);
       const catName = category?.name || 'category';
-      if (!Array.isArray(input.breakdown)) throw new Error(`Say which ${catName} came back, were used or lost`);
+      // Migration 019: pieces that came back need no type (one number on the
+      // Any line); only pieces that did not come back are named (breakdown).
+      if (input.breakdown != null && !Array.isArray(input.breakdown)) throw new Error(`Invalid list of ${catName} pieces`);
+      const rawUnnamed = input.returned_quantity;
+      const unnamed = rawUnnamed === null || rawUnnamed === undefined || rawUnnamed === '' ? 0 : round3(rawUnnamed);
+      if (!Number.isFinite(Number(rawUnnamed ?? 0)) || unnamed < 0) throw new Error(`Enter how many ${catName} came back`);
+      if (category?.type === 'unit' && !Number.isInteger(unnamed)) throw new Error(`Any ${catName} must be whole pieces`);
 
-      const breakdown = [...input.breakdown];
+      const breakdown = [...(input.breakdown || [])];
       const listed = new Set(breakdown.map(b => Number(b.product_id)));
       [...new Set(soldLeft.filter(r => r.qty > EPS).map(r => r.product_id))]
         .filter(pid => !listed.has(pid) && store.products.find(p => p.id === pid)?.category_id === item.category_id)
         .forEach(pid => breakdown.push({ product_id: pid, returned_quantity: 0, lost_quantity: 0, usage: [] }));
 
       const seenProducts = new Set();
-      let sumReturned = 0, sumUsed = 0, sumLost = 0;
+      let sumReturned = unnamed, sumUsed = 0, sumLost = 0;
       for (const entry of breakdown) {
         const product = store.products.find(p => p.id === Number(entry.product_id));
         if (!product || product.category_id !== item.category_id) throw new Error(`Choose a ${catName} product for every line`);
@@ -1143,7 +1149,7 @@ const demoRpc = {
       const accounted = round3(sumReturned + sumUsed + sumLost);
       const issued = Number(item.checkout_quantity || 0);
       if (Math.abs(accounted - issued) > EPS) {
-        throw new Error(`Any ${catName}: ${issued} issued but ${accounted} accounted for. Name every piece (returned, used, sold or lost)`);
+        throw new Error(`Any ${catName}: ${issued} issued but ${accounted} accounted for. Say how many came back and name each piece that did not (used, sold or lost)`);
       }
       setItem(item.id, {
         checkin_quantity: sumReturned,

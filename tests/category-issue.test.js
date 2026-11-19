@@ -337,7 +337,10 @@ describe('submit_return / approve_return with Any lines and field bills', () => 
     expect((await submit(s.sessionId, variant(a => a.breakdown.push({ product_id: 7, returned_quantity: 0, lost_quantity: 0, usage: [] })))).error?.message)
       .toMatch(/Black Touch Refill is listed twice/);
     expect((await submit(s.sessionId, variant(a => { a.breakdown[0].returned_quantity = 1.5; }))).error?.message).toMatch(/Black Touch Refill must be whole pieces/);
-    expect((await submit(s.sessionId, variant(a => { delete a.breakdown; }))).error?.message).toMatch(/Say which Dispenser Refill came back/);
+    // Migration 019: the list of named pieces may be left out, but the count must still add up.
+    expect((await submit(s.sessionId, variant(a => { delete a.breakdown; }))).error?.message).toMatch(/Any Dispenser Refill: 10 issued but \d+ accounted for/);
+    expect((await submit(s.sessionId, variant(a => { a.returned_quantity = 1.5; }))).error?.message).toMatch(/Any Dispenser Refill must be whole pieces/);
+    expect((await submit(s.sessionId, variant(a => { a.returned_quantity = -1; }))).error?.message).toMatch(/Enter how many Dispenser Refill came back/);
     expect((await submit(s.sessionId, variant(a => { a.breakdown[0].usage = [{ reason: 'sold', quantity: 1 }]; }))).error?.message).toMatch(/Invalid usage reason/);
     expect((await submit(s.sessionId, s.items(), 'seller-2')).error?.message).toMatch(/Only the assigned staff member or an admin/);
     expect((await db.getById('checkout_sessions', s.sessionId)).data.status).toBe('checked_out');
@@ -485,5 +488,56 @@ describe('submit_return / approve_return with Any lines and field bills', () => 
       { product_id: 17, returned_quantity: 0.295, lost_quantity: 0.005, usage: [] },
     ] }], 'seller-2')).error).toBeNull();
     expect(await children(oil)).toEqual([[17, 0.3, 0.295, 0, 0.005, false]]);
+  });
+});
+
+// Migration 019: pieces that came back need no type; only the rest are named.
+describe('Any return: unnamed returned pieces (migration 019)', () => {
+  beforeEach(freshStore);
+
+  it('everything came back: one number, no products named, no stock change, hold released', async () => {
+    const before = await stockOf(7);
+    const { sessionId, lines: [anyLine] } = await issue([{ category_id: 3, quantity: 10 }]);
+    expect((await submit(sessionId, [{ item_id: anyLine.id, returned_quantity: 10 }])).error).toBeNull();
+    expect(await rows('checkout_items', i => i.parent_item_id === anyLine.id)).toEqual([]);
+    const parent = (await db.getById('checkout_items', anyLine.id)).data;
+    expect([parent.checkin_quantity, parent.used_quantity, parent.difference, parent.has_mismatch]).toEqual([10, 0, 0, false]);
+    expect((await approve(sessionId)).error).toBeNull();
+    expect(await stockOf(7)).toBe(before);
+    expect((await db.rpc('get_category_holds', {})).data).toEqual([]);
+  });
+
+  it('8 came back without types, 2 named as lost: only the lost product loses stock', async () => {
+    const before = { 7: await stockOf(7), 8: await stockOf(8) };
+    const txBefore = (await rows('inventory_transactions')).length;
+    const { sessionId, lines: [anyLine] } = await issue([{ category_id: 3, quantity: 10 }]);
+    const { error } = await submit(sessionId, [{
+      item_id: anyLine.id, returned_quantity: 8,
+      breakdown: [{ product_id: 8, lost_quantity: 2, usage: [] }],
+    }]);
+    expect(error).toBeNull();
+    const kids = await rows('checkout_items', i => i.parent_item_id === anyLine.id);
+    expect(kids.map(c => [c.product_id, c.checkout_quantity, c.checkin_quantity, c.difference, c.has_mismatch])).toEqual([[8, 2, 0, 2, true]]);
+    const parent = (await db.getById('checkout_items', anyLine.id)).data;
+    expect([parent.checkin_quantity, parent.difference]).toEqual([8, 2]);
+    expect((await approve(sessionId, [{ item_id: kids[0].id, discrepancy_type: 'loss', note: 'Not found' }])).error).toBeNull();
+    expect([await stockOf(7), await stockOf(8)]).toEqual([before[7], before[8] - 2]);
+    // One checkout row for the lost pair; the 8 unnamed returned pieces move nothing.
+    expect((await rows('inventory_transactions')).length).toBe(txBefore + 1);
+  });
+
+  it('a field bill and a used piece are named, the rest came back unnamed', async () => {
+    const before = { 7: await stockOf(7), 9: await stockOf(9) };
+    const { sessionId, lines: [anyLine] } = await issue([{ category_id: 3, quantity: 6 }]);
+    expect((await fieldSale(sessionId, [{ product_id: 7, quantity: 1, unit_price: 450 }])).error).toBeNull();
+    const { error } = await submit(sessionId, [{
+      item_id: anyLine.id, returned_quantity: 4,
+      breakdown: [{ product_id: 9, lost_quantity: 0, usage: [{ reason: 'customer_service', quantity: 1, party_id: 2 }] }],
+    }]);
+    expect(error).toBeNull();
+    const kids = await rows('checkout_items', i => i.parent_item_id === anyLine.id);
+    expect(kids.map(c => [c.product_id, c.checkout_quantity, c.used_quantity]).sort((a, b) => a[0] - b[0])).toEqual([[7, 1, 1], [9, 1, 1]]);
+    expect((await approve(sessionId)).error).toBeNull();
+    expect([await stockOf(7), await stockOf(9)]).toEqual([before[7] - 1, before[9] - 1]);
   });
 });

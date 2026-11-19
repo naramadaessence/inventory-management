@@ -105,9 +105,8 @@ const submitNehaReturn = (h) => h.eval(async () => {
   await db.rpc('submit_return', {
     p_session_id: session.id,
     p_items: [
-      { item_id: anyLine.id, breakdown: [
-        { product_id: 7, returned_quantity: 1, lost_quantity: 0, usage: [] },
-        { product_id: 15, returned_quantity: 2, lost_quantity: 0, usage: [] },
+      // 3 came back (any type); only the pieces that did not come back are named.
+      { item_id: anyLine.id, returned_quantity: 3, breakdown: [
         { product_id: 8, returned_quantity: 0, lost_quantity: 0, usage: [{ reason: 'customer_service', quantity: 1, party_id: 2 }] },
         { product_id: 10, returned_quantity: 0, lost_quantity: 1, usage: [] },
       ] },

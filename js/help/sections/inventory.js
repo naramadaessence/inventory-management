@@ -642,13 +642,13 @@ export default {
       title: 'What does "out with staff as Any" mean on Products and the Dashboard?',
       roles: ['admin'],
       page: 'products',
-      summary: 'Sellers carry pieces of a category without naming them yet (for example any 6 refills). Those pieces are held, and each product\'s stock changes only when the return is approved.',
+      summary: 'Sellers carry pieces of a category without naming them (for example any 6 refills). Those pieces are held, and product stock changes only when the return is approved.',
       keywords: ['out with staff', 'as any', 'any', 'held', 'hold', 'free on shelf', 'mixed', 'any refill', 'category', 'stock not reduced', 'blue notice'],
       blocks: [
-        { type: 'p', text: 'A seller took stock as an **Any** line, for example **Any Dispenser Refill × 6**. Nobody knows yet which fragrances those 6 pieces are. The seller names them on the return ([[daily-ops-any-return]]).' },
+        { type: 'p', text: 'A seller took stock as an **Any** line, for example **Any Dispenser Refill × 6**. Nobody knows yet which fragrances those 6 pieces are. On the return the seller only says how many came back, and names the pieces that did not come back ([[daily-ops-any-return]]).' },
         { type: 'h', text: 'Where you see it' },
         { type: 'list', items: [
-          '**Products**: a blue notice at the top: "Out with staff as Any (types named on return): Dispenser Refill — 6 pcs out, 265 pcs free on shelf". When you filter one category, a chip shows the same.',
+          '**Products**: a blue notice at the top: "Out with staff as Any (pieces not returned are named on the return): Dispenser Refill — 6 pcs out, 265 pcs free on shelf". When you filter one category, a chip shows the same.',
           '**Dashboard**: a blue line in **Stock Reconciliation**: "6 pcs Dispenser Refill out with staff as Any". It is information only and is not counted in **Alerts**.',
         ] },
         { type: 'img', src: 'products-any-held-notice.webp', alt: 'Products page filtered to Dispenser Refill with the notice Out with staff as Any: Dispenser Refill — 6 pcs out, 265 pcs free on shelf highlighted, and a matching chip above the cards', caption: 'Neha carries any 6 refills. 265 refills are free on the shelf.' },
@@ -657,7 +657,7 @@ export default {
         { type: 'table', head: ['Number', 'Meaning'], rows: [
           ['**… out**', 'Pieces of the category that sellers carry as Any right now (sent out, or returned but not yet approved).'],
           ['**… free on shelf**', 'All stock of the category minus the pieces out. Only these can be issued or requested now.'],
-          ['Each product\'s stock', 'Still includes the pieces that are out. It goes down when the return is approved and the seller has named each piece.'],
+          ['Each product\'s stock', 'Still includes the pieces that are out. When the return is approved, pieces that came back change nothing; only the pieces named as used, sold or lost are taken off their products.'],
         ] },
         { type: 'tip', text: 'Counting the shelf while pieces are out as Any? Expect the shelf to have fewer pieces than the product cards show. The difference is the "out" number. Do not correct the stock for it.' },
       ],

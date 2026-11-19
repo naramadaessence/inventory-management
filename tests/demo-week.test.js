@@ -87,7 +87,9 @@ describe('demo week simulation', () => {
     const imranAny = anyLines.find(i => i.checkout_quantity === 8);
     const children = items.filter(i => i.parent_item_id === imranAny.id);
     expect(children.map(c => [c.product_id, c.checkout_quantity, c.checkin_quantity, c.difference]).sort((a, b) => a[0] - b[0]))
-      .toEqual([[8, 3, 0, 0], [10, 1, 0, 1], [12, 2, 2, 0], [15, 2, 0, 0]]);
+      .toEqual([[8, 3, 0, 0], [10, 1, 0, 1], [15, 2, 0, 0]]);
+    // The 2 pieces that came back were not named (migration 019).
+    expect(imranAny.checkin_quantity).toBe(2);
     expect(children.find(c => c.product_id === 10).discrepancy_type).toBe('loss');
     const sold = (await all('checkout_usage')).filter(u => u.reason === 'sold');
     expect(sold.map(u => [u.product_id, u.quantity])).toEqual([[15, 2]]);

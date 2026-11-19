@@ -182,7 +182,7 @@ export default {
         { type: 'h', text: 'Any lines (for example any 6 refills)' },
         { type: 'list', items: [
           'While the seller is out, the ledger shows one row such as **Any Dispenser Refill** with status **In field**.',
-          'Once the return is submitted, that row is replaced by one row per product the seller named. Pieces sold on a bill count as **Used**; a lost piece shows as short.',
+          'Once the return is submitted, the **Any Dispenser Refill** row keeps only the pieces that came back (Issued = Returned). Each piece that did not come back gets a row for its product. Pieces sold on a bill count as **Used**; a lost piece shows as short.',
           'An Any row that is still in the field has no fragrance. It keeps its own row in **Fragrance-wise** view, and choosing a fragrance in **All fragrances** hides it.',
         ] },
         { type: 'img', src: 'reports-staff-ledger-any.webp', alt: 'Ledger card for Neha Joshi: today Any Dispenser Refill 6 pcs and Western Lavender Diffuser Oil 0.300 kg, both In field', caption: 'Neha is out today with any 6 refills.' },
@@ -208,7 +208,7 @@ export default {
           ['**Returned (no usage entry)** (grey)', 'An older return made before sellers reported usage. Used and Difference show **—**.', 'Nothing.'],
         ] },
         { type: 'img', src: 'reports-staff-ledger-in-field.webp', alt: 'Ledger card for Sonal Trivedi with two In field rows and several Matching rows', caption: 'In field rows have no Returned, Used or Difference yet.' },
-        { type: 'img', src: 'reports-staff-ledger-card.webp', alt: 'Ledger card for Imran Shaikh with a purple Resolved: Excess returned row and green Matching rows', caption: 'A purple row is a mismatch an admin has already classified.' },
+        { type: 'img', src: 'reports-staff-ledger-card.webp', alt: 'Ledger card for Imran Shaikh with purple Resolved: Lost and Resolved: Excess returned rows, an Any Dispenser Refill row for 2 pieces that came back, and green Matching rows', caption: 'A purple row is a mismatch an admin has already classified.' },
         { type: 'p', text: 'The reasons an admin can choose are: **Wastage / spillage**, **Lost**, **Staff shortage (staff responsible)**, **Counting / weighing error**, **Excess returned** and **Other**.' },
         { type: 'note', text: 'In **Fragrance-wise** view one row can combine several products. It then shows the most urgent status among them.' },
       ],

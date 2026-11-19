@@ -121,7 +121,7 @@
 
 ## Decision: "Any <Category>" Issue Lines Held Against The Category, Named On Return
 **Date**: 2026-11-19
-**Status**: Accepted
+**Status**: Accepted (refined the same day: pieces that came back need no type — see "Any Returns: Only Pieces That Did Not Come Back Are Named")
 **Context**: Staff want to take stock out by category ("any 10 refills") without naming products. Stock is tracked per product, so at some point every piece has to be tied to a product, or per-product stock drifts. Owner's rule: the staff member names the type of every piece on the return (returned / used / sold / lost) — never "unknown". Same request: bills made in the field from issued stock must not take stock off twice (ISSUE-023).
 **Decision** (details in `category-issue.md`, migration 018):
 - An Any line is a `checkout_items` row with `product_id` NULL and `category_id` set. Issuing it does not change product stock; its quantity is **held** against the category (free = Σ category stock − held) and issue checks use the free amount.
@@ -133,4 +133,15 @@
 - Separate breakdown table instead of child `checkout_items` rows: every report and the ledger would need a second code path; child rows let existing per-product logic work once Any lines are skipped (`reportableItems`).
 - Field bills deducting stock and the return ignoring them: keeps ISSUE-023's double deduction.
 **Consequences**: While an Any line is out, per-product `current_stock` still includes pieces that are physically with staff (only the category total is protected). Every reader of `checkout_items` must skip Any lines that have children. `record_sale` gained an 11th parameter (old overload dropped). Field bills write no inventory transaction; their movement shows when the return is approved. Production needs migration 018 before the new screens are deployed.
+**Superseded By**:
+
+## Decision: Any Returns: Only Pieces That Did Not Come Back Are Named
+**Date**: 2026-11-19
+**Status**: Accepted
+**Context**: First version of the Any return asked staff to name the type of every piece, including the ones that came back. Testing it on production, the owner found it confusing ("where do I choose which 2 were those?") and pointed out that returned pieces never need a type.
+**Decision**: "How many came back?" is one number on the Any line (`submit_return` line-level `returned_quantity`, migration 019); staff name only the pieces that did not come back, one row per product and outcome (used for… / lost). Any lines move no stock at issue, so returned pieces move no stock either and their type doesn't affect inventory; every piece that does leave stock is still tied to a product. Reports keep the unnamed returned pieces as one "Any <Category>" row (`reportableItems`).
+**Alternatives Considered**:
+- Keep naming every piece: correct but slower and confusing for staff; rejected by the owner.
+- Per-product rows with Returned / Lost / usage inside one row (first UI): mixed "came back" with "what happened" and let a single row read "8 returned, 2 lost" without saying which pieces were lost; replaced by the two-step form.
+**Consequences**: The Any line's `checkin_quantity` includes unnamed returned pieces; anything that reads child rows must use `unnamedReturned()` / `reportableItems()` to show them. Production must run 019 before the new form is deployed.
 **Superseded By**:

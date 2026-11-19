@@ -239,46 +239,86 @@ describe('daily operations returns', () => {
     const children = async sessionId => (await itemsOf(sessionId)).filter(i => i.parent_item_id != null)
       .map(c => [c.product_id, c.checkout_quantity, c.checkin_quantity, c.difference]);
 
-    it('blocks Submit until every piece of an Any line is named, then writes child rows', async () => {
+    // Migration 019: "How many came back?" is one number (no types); only the
+    // pieces that did not come back are named, one row per product + outcome.
+    const anyText = modal => ({
+      counter: modal.querySelector('.ci-any-counter').textContent,
+      left: modal.querySelector('.ci-any-left').textContent,
+    });
+
+    it('asks how many came back (no types), then names only the rest before Submit', async () => {
       const sessionId = await issueRaw([{ category_id: REFILLS, quantity: 4 }]);
-      let modal = await openSubmitReturn(sessionId);
+      const modal = await openSubmitReturn(sessionId);
       const submit = modal.querySelector('#ci-submit');
-      expect(modal.querySelector('.ci-any-counter').textContent).toBe('Accounted 0 pcs of 4 pcs');
-      expect(modal.querySelector('.ci-any-left').textContent).toBe('4 pcs left to name');
-      expect(submit.disabled).toBe(true);
-
-      // Only this category's products can be chosen.
-      const options = [...modal.querySelectorAll('.ci-a-product option')].map(o => o.value).filter(Boolean);
-      expect(options).toHaveLength(10);
-      setValue(modal.querySelector('.ci-a-product'), String(BLACK_TOUCH), 'change');
-      setValue(modal.querySelector('.ci-a-returned'), '3');
-      expect(modal.querySelector('.ci-any-counter').textContent).toBe('Accounted 3 pcs of 4 pcs');
-      expect(modal.querySelector('.ci-any-count').dataset.state).toBe('short');
-      expect(submit.disabled).toBe(true);
-
-      modal.querySelector('.ci-any-add').click();
-      setValue(modal.querySelectorAll('.ci-a-product')[1], String(ROSE), 'change');
-      // Black Touch is taken by the first row, so it can't be chosen twice.
-      expect(modal.querySelectorAll('.ci-a-product')[1].querySelector(`option[value="${BLACK_TOUCH}"]`).disabled).toBe(true);
-      setValue(modal.querySelectorAll('.ci-a-lost')[1], '2');
-      expect(modal.querySelector('.ci-any-left').textContent).toBe('1 pcs too many');
-      expect(submit.disabled).toBe(true);
-      setValue(modal.querySelectorAll('.ci-a-lost')[1], '1');
-      expect(modal.querySelector('.ci-any-count').dataset.state).toBe('match');
-      expect(modal.querySelector('.ci-any-left').textContent).toBe('All named');
+      // Everything came back by default: nothing to name, Submit ready.
+      expect(modal.querySelector('.ci-any-back').value).toBe('4');
+      expect(anyText(modal)).toEqual({ counter: '4 pcs came back + 0 pcs named = 4 pcs of 4 pcs', left: '✓ All accounted for' });
+      expect(modal.querySelector('.ci-any-step2').hidden).toBe(true);
       expect(submit.disabled).toBe(false);
 
-      // Usage reasons never offer "sold" (it only comes from bills).
-      modal.querySelector('.ci-any-entry .ci-add-usage').click();
-      expect([...modal.querySelectorAll('.ci-u-reason option')].map(o => o.value)).not.toContain('sold');
-      modal.querySelector('.ci-u-rm').click();
+      // Only 1 came back: step 2 appears with an empty row ready.
+      setValue(modal.querySelector('.ci-any-back'), '1');
+      expect(modal.querySelector('.ci-any-step2').hidden).toBe(false);
+      expect(modal.querySelector('.ci-any-step2 .ci-any-step-title').textContent).toContain('3 pcs did not come back');
+      expect(modal.querySelectorAll('.ci-named-row')).toHaveLength(1);
+      expect(anyText(modal).left).toBe('3 pcs still to name');
+      expect(submit.disabled).toBe(true);
 
-      modal.querySelector('#ci-submit').click();
+      // Only this category's products; "what happened" never offers "sold".
+      expect([...modal.querySelectorAll('.ci-n-product option')].map(o => o.value).filter(Boolean)).toHaveLength(10);
+      expect([...modal.querySelectorAll('.ci-n-what option')].map(o => o.value).filter(Boolean))
+        .toEqual(['customer_service', 'installation', 'other', 'lost']);
+
+      // A quantity without a product is flagged.
+      setValue(modal.querySelector('.ci-n-qty'), '2');
+      expect(anyText(modal).left).toBe('Pick which Dispenser Refill on every row');
+      expect(modal.querySelector('.ci-n-product').classList.contains('is-missing')).toBe(true);
+      setValue(modal.querySelector('.ci-n-product'), String(ROSE), 'change');
+      expect(anyText(modal).left).toBe('Choose what happened on every row');
+      setValue(modal.querySelector('.ci-n-what'), 'lost', 'change');
+      expect(modal.querySelector('.ci-n-party')).toBeNull(); // no customer for a lost piece
+      expect(anyText(modal)).toEqual({ counter: '1 pcs came back + 2 pcs named = 3 pcs of 4 pcs', left: '1 pcs still to name' });
+      expect(submit.disabled).toBe(true);
+
+      // The last piece was used for a customer.
+      modal.querySelector('.ci-n-add').click();
+      const second = () => modal.querySelectorAll('.ci-named-row')[1];
+      setValue(second().querySelector('.ci-n-product'), String(LAVENDER), 'change');
+      setValue(second().querySelector('.ci-n-what'), 'customer_service', 'change');
+      expect(second().querySelector('.ci-n-party')).not.toBeNull();
+      setValue(second().querySelector('.ci-n-qty'), '1');
+      expect(anyText(modal).left).toBe('✓ All accounted for');
+      expect(submit.disabled).toBe(false);
+
+      const rpc = vi.spyOn(db, 'rpc');
+      submit.click();
       await settle();
+      const call = rpc.mock.calls.find(([name]) => name === 'submit_return');
+      rpc.mockRestore();
+      expect(call[1].p_items[0]).toEqual({
+        item_id: expect.any(Number), returned_quantity: 1,
+        breakdown: [
+          { product_id: ROSE, returned_quantity: 0, lost_quantity: 2, usage: [] },
+          { product_id: LAVENDER, returned_quantity: 0, lost_quantity: 0, usage: [{ reason: 'customer_service', quantity: 1, party_id: null, notes: null }] },
+        ],
+      });
       const { data: session } = await db.getById('checkout_sessions', sessionId);
       expect(session.status).toBe('pending_approval');
-      expect(session.has_discrepancy).toBe(true); // the lost Rose Refill
-      expect(await children(sessionId)).toEqual([[BLACK_TOUCH, 3, 3, 0], [ROSE, 1, 0, 1]]);
+      expect(session.has_discrepancy).toBe(true); // the 2 lost Rose Refill
+      expect(await children(sessionId)).toEqual([[ROSE, 2, 0, 2], [LAVENDER, 1, 0, 0]]);
+    });
+
+    it('typing back to the full count removes the empty row again', async () => {
+      const sessionId = await issueRaw([{ category_id: REFILLS, quantity: 4 }]);
+      const modal = await openSubmitReturn(sessionId);
+      setValue(modal.querySelector('.ci-any-back'), '2');
+      expect(modal.querySelectorAll('.ci-named-row')).toHaveLength(1);
+      setValue(modal.querySelector('.ci-any-back'), '4');
+      expect(modal.querySelectorAll('.ci-named-row')).toHaveLength(0);
+      expect(modal.querySelector('.ci-any-step2').hidden).toBe(true);
+      setValue(modal.querySelector('.ci-any-back'), '5');
+      expect(anyText(modal).left).toBe("Came back can't be more than 4 pcs");
+      expect(modal.querySelector('#ci-submit').disabled).toBe(true);
     });
 
     it('shows Sold lines from bills linked to the session and does not send them as usage', async () => {
@@ -297,14 +337,14 @@ describe('daily operations returns', () => {
       expect(productBlock.querySelector('.ci-returned').value).toBe('0');
       expect(productBlock.querySelector('.ci-used').textContent).toBe('2 pcs');
       expect(productBlock.dataset.state).toBe('match');
-      const fixed = [...anyBlock.querySelectorAll('.ci-any-entry-head > strong')].map(el => el.textContent);
-      expect(fixed).toEqual(['Black Touch Refill', 'Pleasure Refill']);
-      expect(anyBlock.querySelector('.ci-any-counter').textContent).toBe('Accounted 2 pcs of 5 pcs');
-
-      anyBlock.querySelector('.ci-any-add').click();
-      setValue(modal.querySelectorAll('.ci-a-product')[0], String(LAVENDER), 'change');
-      setValue(modal.querySelectorAll('.ci-any-entry')[2].querySelector('.ci-a-returned'), '3');
-      expect(modal.querySelectorAll('.ci-item')[1].dataset.state).toBe('match');
+      const sold = [...anyBlock.querySelectorAll('.ci-named-sold')].map(el => el.textContent.replace(/\s+/g, ' '));
+      expect(sold).toHaveLength(2);
+      expect(sold[0]).toContain('Black Touch Refill · Sold · Bill #1');
+      expect(sold[1]).toContain('Pleasure Refill · Sold · Bill #1');
+      // The other 3 came back: no types needed.
+      expect(anyBlock.querySelector('.ci-any-back').value).toBe('3');
+      expect(anyBlock.querySelector('.ci-any-counter').textContent).toBe('3 pcs came back + 2 pcs named = 5 pcs of 5 pcs');
+      expect(anyBlock.dataset.state).toBe('match');
 
       const rpc = vi.spyOn(db, 'rpc');
       modal.querySelector('#ci-submit').click();
@@ -313,7 +353,7 @@ describe('daily operations returns', () => {
       rpc.mockRestore();
       const [productEntry, anyEntry] = call[1].p_items;
       expect(productEntry).toMatchObject({ returned_quantity: 0, usage: [] });
-      expect(anyEntry.breakdown).toEqual([{ product_id: LAVENDER, returned_quantity: 3, lost_quantity: 0, usage: [] }]);
+      expect(anyEntry).toMatchObject({ returned_quantity: 3, breakdown: [] });
 
       expect((await db.getById('checkout_sessions', sessionId)).data.status).toBe('pending_approval');
       const { data: usage } = await db.getAll('checkout_usage', { eq: { session_id: sessionId } });
@@ -322,16 +362,13 @@ describe('daily operations returns', () => {
       ]);
     });
 
-    it('Approve Return lists Any child rows and asks to classify a lost piece', async () => {
+    it('Approve Return shows what came back (any type) and asks to classify a lost piece', async () => {
       const before = { 7: await stockOf(BLACK_TOUCH), 15: await stockOf(ROSE) };
       const sessionId = await issueRaw([{ category_id: REFILLS, quantity: 4 }]);
       const [anyLine] = await itemsOf(sessionId);
       const { error } = await db.rpc('submit_return', {
         p_session_id: sessionId,
-        p_items: [{ item_id: anyLine.id, breakdown: [
-          { product_id: BLACK_TOUCH, returned_quantity: 3, lost_quantity: 0, usage: [] },
-          { product_id: ROSE, returned_quantity: 0, lost_quantity: 1, usage: [] },
-        ] }],
+        p_items: [{ item_id: anyLine.id, returned_quantity: 3, breakdown: [{ product_id: ROSE, lost_quantity: 1, usage: [] }] }],
         p_notes: '', p_submitted_by: 'seller-1',
       });
       expect(error).toBeNull();
@@ -342,14 +379,17 @@ describe('daily operations returns', () => {
       sessionRow(sessionId).querySelector('.approve-return-btn').click();
       await settle();
       const modal = currentModal();
-      expect(modal.querySelector('.ds-any-row').textContent).toContain('Any Dispenser Refill');
+      const anyRow = modal.querySelector('.ds-any-row').textContent.replace(/\s+/g, ' ');
+      expect(anyRow).toContain('Any Dispenser Refill');
+      expect(anyRow).toMatch(/3 pcs\s*any type/);
+      expect(anyRow).toContain('Did not come back — named below');
       const childRows = [...modal.querySelectorAll('.ds-child-row')];
-      expect(childRows.map(r => r.cells[0].textContent.trim())).toEqual(['↳ Black Touch Refill', '↳ Rose Refill']);
-      expect(childRows[1].textContent).toContain('Lost');
+      expect(childRows.map(r => r.cells[0].textContent.trim())).toEqual(['↳ Rose Refill']);
+      expect(childRows[0].textContent).toContain('Lost');
       const resolutions = modal.querySelectorAll('.ar-resolution');
       expect(resolutions).toHaveLength(1);
       expect(resolutions[0].textContent.replace(/\s+/g, ' ')).toContain('Rose Refill — lost 1 pc (from Any Dispenser Refill)');
-      expect(modal.textContent).toContain('Any lines take stock off each named product');
+      expect(modal.textContent).toContain("pieces that came back (any type) don't change stock");
 
       const approve = modal.querySelector('#ar-approve');
       expect(approve.disabled).toBe(true);
@@ -364,14 +404,15 @@ describe('daily operations returns', () => {
       expect(await stockOf(ROSE)).toBe(before[15] - 1);
     });
 
-    it('View Session shows an Any line still in the field as types named on return', async () => {
+    it('View Session shows an Any line still in the field', async () => {
       const sessionId = await issueRaw([{ category_id: REFILLS, quantity: 6 }]);
       await renderPage();
       sessionRow(sessionId).querySelector('.view-btn').click();
       await settle();
-      const anyRow = currentModal().querySelector('.ds-any-row');
-      expect(anyRow.textContent.replace(/\s+/g, ' ')).toContain('Any Dispenser Refill');
-      expect(anyRow.textContent).toContain('6 pcs issued, types named on return');
+      const anyRow = currentModal().querySelector('.ds-any-row').textContent.replace(/\s+/g, ' ');
+      expect(anyRow).toContain('Any Dispenser Refill');
+      expect(anyRow).toContain('6 pcs');
+      expect(anyRow).toContain('Not returned yet');
     });
   });
 

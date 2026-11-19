@@ -140,49 +140,43 @@ async function setReturned(h, idx, value) {
 
 // ---------- "Any <category>" return block ----------
 // Neha (demo week, today): item 0 = Any Dispenser Refill × 6 with a field bill
-// for 1 Black Touch Refill (fixed entry 0, Sold), item 1 = Western Lavender Oil 0.3 kg.
-const anyEntry = (cls, idx, entry) => `.${cls}[data-idx="${idx}"][data-entry="${entry}"]`;
+// for 1 Black Touch Refill (read-only Sold row), item 1 = Western Lavender Oil 0.3 kg.
+// Step 1 "How many came back?" is one number (.ci-any-back); step 2 names only the
+// pieces that did not come back: rows of .ci-n-product / .ci-n-what / .ci-n-qty
+// (+ .ci-n-party / .ci-n-notes for the "Used" outcomes), "+ Add another …" = .ci-n-add.
+const named = (cls, idx, k) => `.${cls}[data-idx="${idx}"][data-named="${k}"]`;
 
-async function addAnyProduct(h, idx, productName) {
-  await clickNth(h, `.ci-any-add[data-idx="${idx}"]`);
-  const entry = await h.eval(i => document.querySelectorAll(`.ci-item[data-idx="${i}"] .ci-any-entry`).length - 1, idx);
-  const value = await h.eval((sel, name) => {
-    const el = document.querySelector(sel);
-    return [...el.options].find(o => o.textContent.includes(name))?.value;
-  }, anyEntry('ci-a-product', idx, entry), productName);
-  if (!value) throw new Error(`addAnyProduct: no option ${productName}`);
-  await setVal(h, anyEntry('ci-a-product', idx, entry), value);
-  return entry;
+async function optionValue(h, selector, text) {
+  const value = await h.eval((sel, t) => [...document.querySelector(sel).options].find(o => o.textContent.includes(t))?.value, selector, text);
+  if (!value) throw new Error(`optionValue: no "${text}" in ${selector}`);
+  return value;
 }
 
-async function addAnyUsage(h, idx, entry, { reason, qty, party }) {
-  await clickNth(h, anyEntry('ci-add-usage', idx, entry));
-  const base = `[data-idx="${idx}"][data-entry="${entry}"]`;
-  const line = await h.eval(b => document.querySelectorAll(`.ci-u-reason${b}`).length - 1, base);
-  const at = cls => `.${cls}${base}[data-line="${line}"]`;
-  if (reason) await setVal(h, at('ci-u-reason'), reason);
-  if (party) {
-    const value = await h.eval((sel, p) => [...document.querySelector(sel).options].find(o => o.textContent.includes(p))?.value, at('ci-u-party'), party);
-    await setVal(h, at('ci-u-party'), value);
+// Fill the first empty "did not come back" row (adds one if none is empty).
+async function nameAny(h, idx, { product, what, qty, party }) {
+  let k = await h.eval(i => [...document.querySelectorAll(`.ci-n-product[data-idx="${i}"]`)].findIndex(el => !el.value), idx);
+  if (k === -1) {
+    await clickNth(h, `.ci-n-add[data-idx="${idx}"]`);
+    k = await h.eval(i => document.querySelectorAll(`.ci-n-product[data-idx="${i}"]`).length - 1, idx);
   }
-  if (qty != null) await setVal(h, at('ci-u-qty'), qty);
+  await setVal(h, named('ci-n-product', idx, k), await optionValue(h, named('ci-n-product', idx, k), product));
+  await setVal(h, named('ci-n-what', idx, k), what);
+  await setVal(h, named('ci-n-qty', idx, k), qty);
+  if (party) await setVal(h, named('ci-n-party', idx, k), await optionValue(h, named('ci-n-party', idx, k), party));
 }
 
-// Black Touch: 1 sold + 1 back; Rose: 2 back.  → Accounted 3 of 6.
+// 3 came back (any type); 1 Black Touch sold on a bill; Pleasure: 1 used at
+// Sahara Darbar. → "3 came back + 2 named = 5 of 6", 1 still to name.
 async function fillNehaPartial(h) {
   await openFirstReturn(h);
-  await setVal(h, anyEntry('ci-a-returned', 0, 0), 1);
-  const rose = await addAnyProduct(h, 0, 'Rose Refill');
-  await setVal(h, anyEntry('ci-a-returned', 0, rose), 2);
+  await setVal(h, '.ci-any-back[data-idx="0"]', 3);
+  await nameAny(h, 0, { product: 'Pleasure Refill', what: 'customer_service', qty: 1, party: 'Sahara Darbar' });
 }
 
-// …then Pleasure: 1 used at Sahara Darbar; Green Apple: 1 lost → 6 of 6. Oil matches.
+// …then Green Apple: 1 lost → 6 of 6, all accounted for. Oil matches.
 async function fillNehaComplete(h) {
   await fillNehaPartial(h);
-  const pleasure = await addAnyProduct(h, 0, 'Pleasure Refill');
-  await addAnyUsage(h, 0, pleasure, { reason: 'customer_service', qty: 1, party: 'Sahara Darbar' });
-  const apple = await addAnyProduct(h, 0, 'Green Apple Refill');
-  await setVal(h, anyEntry('ci-a-lost', 0, apple), 1);
+  await nameAny(h, 0, { product: 'Green Apple Refill', what: 'lost', qty: 1 });
   await setReturned(h, 1, 0.1);
   await addUsage(h, 1, { reason: 'customer_service', qty: 0.2, party: 'Sahara Darbar' });
   await setVal(h, '#ci-notes', 'One Green Apple refill missing from the bag');
